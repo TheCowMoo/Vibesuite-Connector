@@ -19,6 +19,15 @@ interface CreateConnectionBody {
   webhookUrls?: WebhookUrls;
 }
 
+interface UpdateConnectionBody {
+  name?: string;
+  googleCalendarId?: string;
+  ghlLocationId?: string;
+  ghlAuthType?: 'api_token' | 'oauth';
+  ghlApiToken?: string;
+  webhookUrls?: WebhookUrls;
+}
+
 export async function connectionRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/connections', async () => {
     const conns = await listConnections();
@@ -58,6 +67,34 @@ export async function connectionRoutes(app: FastifyInstance): Promise<void> {
     };
     await saveConnection(conn);
     reply.code(201).send({ connection: publicConnection(conn) });
+  });
+
+  app.patch('/api/connections/:id', async (req, reply) => {
+    const id = (req.params as { id: string }).id;
+    const conn = await getConnection(id);
+    if (!conn) {
+      reply.code(404).send({ error: 'not found' });
+      return;
+    }
+
+    const body = req.body as UpdateConnectionBody;
+
+    if (body.name !== undefined) conn.name = body.name;
+    if (body.googleCalendarId !== undefined) conn.googleCalendarId = body.googleCalendarId;
+    if (body.ghlLocationId !== undefined) conn.ghlLocationId = body.ghlLocationId;
+    if (body.ghlAuthType !== undefined) conn.ghlAuthType = body.ghlAuthType;
+    if (body.ghlApiToken) conn.ghlApiToken = body.ghlApiToken; // blank keeps existing
+    if (body.webhookUrls !== undefined) {
+      conn.webhookUrls = {
+        yes: body.webhookUrls.yes || undefined,
+        maybe: body.webhookUrls.maybe || undefined,
+        no: body.webhookUrls.no || undefined,
+      };
+    }
+
+    conn.updatedAt = Date.now();
+    await saveConnection(conn);
+    return { connection: publicConnection(conn) };
   });
 
   app.post('/api/connections/:id/bootstrap', async (req, reply) => {

@@ -91,6 +91,7 @@
       if (c.ghlAuthType === 'oauth') {
         actions += '<a class="btn btn--outline btn--sm" href="/oauth/ghl/start?connectionId=' + encodeURIComponent(c.id) + '">Connect GHL</a>';
       }
+      actions += '<button class="btn btn--outline btn--sm" data-action="edit" data-id="' + esc(c.id) + '">Edit</button>';
       actions += '<button class="btn btn--ghost btn--sm" data-action="bootstrap" data-id="' + esc(c.id) + '">Bootstrap</button>';
       actions += '<button class="btn btn--ghost btn--sm" data-action="detail" data-id="' + esc(c.id) + '">Details</button>';
       actions += '<button class="btn btn--danger btn--sm" data-action="delete" data-id="' + esc(c.id) + '">Delete</button>';
@@ -208,6 +209,58 @@
     openModal('detail');
   }
 
+  /* ---- Edit ---- */
+  var editId = null;
+
+  function openEdit(id) {
+    var c = state.connections.filter(function (x) { return x.id === id; })[0];
+    if (!c) return;
+    editId = id;
+    var f = $('#editForm');
+    f.reset();
+    $('[name="name"]', f).value = c.name || '';
+    $('[name="googleCalendarId"]', f).value = c.googleCalendarId || '';
+    $('[name="ghlLocationId"]', f).value = c.ghlLocationId || '';
+    var authType = c.ghlAuthType === 'oauth' ? 'oauth' : 'api_token';
+    $$('input[name="ghlAuthType"]', f).forEach(function (r) { r.checked = r.value === authType; });
+    $('[name="ghlApiToken"]', f).value = '';
+    var w = c.webhookUrls || {};
+    $('[name="webhookYes"]', f).value = w.yes || '';
+    $('[name="webhookMaybe"]', f).value = w.maybe || '';
+    $('[name="webhookNo"]', f).value = w.no || '';
+    toggleEditToken();
+    openModal('edit');
+  }
+
+  function toggleEditToken() {
+    var checked = $('#editForm input[name="ghlAuthType"]:checked');
+    $('#editTokenField').hidden = !checked || checked.value === 'oauth';
+  }
+
+  $$('#editForm input[name="ghlAuthType"]').forEach(function (r) {
+    r.addEventListener('change', toggleEditToken);
+  });
+
+  $('#editSave').addEventListener('click', function () {
+    var fd = new FormData($('#editForm'));
+    var ghlAuthType = fd.get('ghlAuthType') || 'api_token';
+    var body = {
+      name: fd.get('name') || undefined,
+      googleCalendarId: fd.get('googleCalendarId') || undefined,
+      ghlLocationId: fd.get('ghlLocationId') || undefined,
+      ghlAuthType: ghlAuthType,
+      ghlApiToken: ghlAuthType === 'api_token' ? (fd.get('ghlApiToken') || undefined) : undefined,
+      webhookUrls: {
+        yes: fd.get('webhookYes') || undefined,
+        maybe: fd.get('webhookMaybe') || undefined,
+        no: fd.get('webhookNo') || undefined
+      }
+    };
+    api('/api/connections/' + editId, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+      .then(function () { closeModal('edit'); toast('Connection updated', 'success'); return load(); })
+      .catch(function (err) { toast(err.message, 'error'); });
+  });
+
   /* ---- List actions (event delegation) ---- */
   $('#list').addEventListener('click', function (e) {
     var btn = e.target.closest('[data-action]');
@@ -220,6 +273,8 @@
         .catch(function (err) { toast(err.message, 'error'); });
     } else if (action === 'detail') {
       openDetail(id);
+    } else if (action === 'edit') {
+      openEdit(id);
     } else if (action === 'delete') {
       if (!confirm('Delete this connection? Its watch channel will expire on its own.')) return;
       api('/api/connections/' + id, { method: 'DELETE' })

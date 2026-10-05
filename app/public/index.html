@@ -117,6 +117,36 @@
   </div>
 </div>
 
+<!-- Edit connection -->
+<div class="backdrop" id="edit" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="editTitle">
+    <div class="modal__head">
+      <h2 class="modal__title" id="editTitle">Edit connection</h2>
+      <button class="icon-btn" data-close="edit" aria-label="Close">&times;</button>
+    </div>
+    <form id="editForm" novalidate>
+      <label class="field"><span class="field__label">Name</span><input name="name" /></label>
+      <label class="field"><span class="field__label">Google Calendar ID</span><input name="googleCalendarId" /></label>
+      <label class="field"><span class="field__label">GHL Location ID</span><input name="ghlLocationId" /></label>
+      <fieldset class="field">
+        <legend class="field__label">GHL authentication</legend>
+        <label class="radio"><input type="radio" name="ghlAuthType" value="api_token" /> Private integration token</label>
+        <label class="radio"><input type="radio" name="ghlAuthType" value="oauth" /> OAuth (Marketplace)</label>
+      </fieldset>
+      <label class="field" id="editTokenField"><span class="field__label">GHL API token</span><input name="ghlApiToken" type="password" placeholder="Leave blank to keep current" /></label>
+      <p class="hint">Webhook URLs — leave blank to remove.</p>
+      <label class="field"><span class="field__label">Webhook — Yes (accepted)</span><input name="webhookYes" /></label>
+      <label class="field"><span class="field__label">Webhook — Maybe (tentative)</span><input name="webhookMaybe" /></label>
+      <label class="field"><span class="field__label">Webhook — No (declined)</span><input name="webhookNo" /></label>
+    </form>
+    <div class="modal__foot">
+      <span class="spacer"></span>
+      <button class="btn btn--ghost" data-close="edit">Cancel</button>
+      <button class="btn btn--primary" id="editSave">Save</button>
+    </div>
+  </div>
+</div>
+
 <div class="toasts" id="toasts" aria-live="polite"></div>
 
 <script src="/static/app.js"></script>

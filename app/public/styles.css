@@ -1,6 +1,8 @@
 /* ============================================================
    Vibesuite — Control Panel design system
    ============================================================ */
+[hidden] { display: none !important; }
+
 :root {
   --navy: #0D163D;
   --navy-800: #0A1030;
