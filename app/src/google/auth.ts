@@ -1,4 +1,4 @@
-import { google } from 'googleapis';
+import { calendar } from '@googleapis/calendar';
 import { JWT } from 'google-auth-library';
 import { googleOAuthClient, GOOGLE_SCOPES } from '../oauth/googleOAuth';
 import type { StoredConnection } from '../domain/connection';
@@ -14,7 +14,7 @@ export function createCalendarClient(conn: StoredConnection) {
       scopes: GOOGLE_SCOPES,
       subject: conn.googleSubject || undefined,
     });
-    return google.calendar({ version: 'v3', auth });
+    return calendar({ version: 'v3', auth });
   }
 
   if (!conn.googleRefreshToken) {
@@ -22,6 +22,7 @@ export function createCalendarClient(conn: StoredConnection) {
   }
   const oauth = googleOAuthClient();
   oauth.setCredentials({ refresh_token: conn.googleRefreshToken });
-  return google.calendar({ version: 'v3', auth: oauth });
+  return calendar({ version: 'v3', auth: oauth });
 }
+
 

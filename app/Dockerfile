@@ -1,5 +1,6 @@
 FROM node:20-alpine AS build
 WORKDIR /app
+ENV NODE_OPTIONS="--max-old-space-size=3072"
 COPY package.json package-lock.json* ./
 RUN npm install
 COPY tsconfig.json ./
