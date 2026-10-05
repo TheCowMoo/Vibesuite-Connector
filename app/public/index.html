@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Vibesuite — Control Panel</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+<header class="topnav">
+  <div class="topnav__inner">
+    <a class="brand" href="/" aria-label="Vibesuite home">
+      <img src="/static/logo.png" alt="Vibesuite" class="brand__logo" />
+    </a>
+    <nav class="topnav__nav">
+      <button class="topnav__link is-active" data-view="connections">Connections</button>
+      <button class="topnav__link" data-view="settings">Settings</button>
+    </nav>
+    <div class="topnav__right">
+      <span class="avatar" title="Signed in">VS</span>
+    </div>
+  </div>
+</header>
+
+<main class="container">
+  <!-- Connections -->
+  <section id="view-connections" class="view">
+    <div class="page-head">
+      <div>
+        <h1 class="page-head__title">Connections</h1>
+        <p class="page-head__sub">Bridge Google Calendar RSVPs to GoHighLevel automations.</p>
+      </div>
+      <button class="btn btn--primary" id="newConnectionBtn">+ New connection</button>
+    </div>
+
+    <div class="stats" id="stats"></div>
+
+    <div id="list"></div>
+
+    <div class="empty" id="empty" hidden>
+      <div class="empty__icon">📅</div>
+      <h2 class="empty__title">Connect your first calendar</h2>
+      <p class="empty__text">Create a connection to start syncing RSVP changes to GoHighLevel.</p>
+      <button class="btn btn--accent" id="emptyCta">+ New connection</button>
+    </div>
+  </section>
+
+  <!-- Settings -->
+  <section id="view-settings" class="view" hidden>
+    <div class="page-head">
+      <div>
+        <h1 class="page-head__title">Settings</h1>
+        <p class="page-head__sub">Branding and security.</p>
+      </div>
+    </div>
+    <div class="cards-2col" id="settingsCards"></div>
+  </section>
+</main>
+
+<!-- New connection wizard -->
+<div class="backdrop" id="wizard" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="wizardTitle">
+    <div class="modal__head">
+      <h2 class="modal__title" id="wizardTitle">New connection</h2>
+      <button class="icon-btn" data-close="wizard" aria-label="Close">&times;</button>
+    </div>
+    <ol class="steps" id="steps">
+      <li class="step is-active" data-step="1"><span class="step__num">1</span> Calendar</li>
+      <li class="step" data-step="2"><span class="step__num">2</span> GoHighLevel</li>
+      <li class="step" data-step="3"><span class="step__num">3</span> Automations</li>
+    </ol>
+    <form id="wizardForm" novalidate>
+      <div class="step-panel" data-panel="1">
+        <label class="field"><span class="field__label">Name</span><input name="name" placeholder="e.g. Main webinar calendar" /></label>
+        <label class="field"><span class="field__label">Google Calendar ID <em class="req">*</em></span><input name="googleCalendarId" placeholder="owner@domain.com or primary" required /></label>
+      </div>
+      <div class="step-panel" data-panel="2" hidden>
+        <label class="field"><span class="field__label">GHL Location ID</span><input name="ghlLocationId" placeholder="locationId" /></label>
+        <fieldset class="field">
+          <legend class="field__label">GHL authentication</legend>
+          <label class="radio"><input type="radio" name="ghlAuthType" value="api_token" checked /> Private integration token</label>
+          <label class="radio"><input type="radio" name="ghlAuthType" value="oauth" /> OAuth (Marketplace)</label>
+        </fieldset>
+        <label class="field" id="ghlTokenField"><span class="field__label">GHL API token</span><input name="ghlApiToken" type="password" placeholder="Paste private integration token" /></label>
+      </div>
+      <div class="step-panel" data-panel="3" hidden>
+        <p class="hint">Optional GHL workflow webhook URLs per RSVP branch. Leave blank to skip.</p>
+        <label class="field"><span class="field__label">Webhook — Yes (accepted)</span><input name="webhookYes" placeholder="https://services.leadconnectorhq.com/hooks/…" /></label>
+        <label class="field"><span class="field__label">Webhook — Maybe (tentative)</span><input name="webhookMaybe" placeholder="https://…/hooks/maybe" /></label>
+        <label class="field"><span class="field__label">Webhook — No (declined)</span><input name="webhookNo" placeholder="https://…/hooks/no" /></label>
+      </div>
+    </form>
+    <div class="modal__foot">
+      <button class="btn btn--ghost" id="wizardBack" hidden>Back</button>
+      <span class="spacer"></span>
+      <button class="btn btn--ghost" data-close="wizard">Cancel</button>
+      <button class="btn btn--primary" id="wizardNext">Next</button>
+    </div>
+  </div>
+</div>
+
+<!-- Connection detail -->
+<div class="backdrop" id="detail" hidden>
+  <div class="modal modal--wide" role="dialog" aria-modal="true" aria-labelledby="detailTitle">
+    <div class="modal__head">
+      <h2 class="modal__title" id="detailTitle">Connection</h2>
+      <button class="icon-btn" data-close="detail" aria-label="Close">&times;</button>
+    </div>
+    <div id="detailBody"></div>
+    <div class="modal__foot">
+      <span class="spacer"></span>
+      <button class="btn btn--ghost" data-close="detail">Close</button>
+    </div>
+  </div>
+</div>
+
+<div class="toasts" id="toasts" aria-live="polite"></div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

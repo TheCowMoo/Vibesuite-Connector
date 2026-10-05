@@ -1,0 +1,41 @@
+{
+  "name": "gcal-ghl-sync",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Google Calendar RSVP -> GoHighLevel sync middleware",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev:api": "tsx watch src/api/server.ts",
+    "dev:worker": "tsx watch src/workers/syncWorker.ts",
+    "start:api": "node dist/api/server.js",
+    "start:worker": "node dist/workers/syncWorker.js",
+    "bootstrap": "tsx src/scripts/bootstrap-watch.ts",
+    "bootstrap:prod": "node dist/scripts/bootstrap-watch.js",
+    "seed": "tsx src/scripts/seed-connection.ts",
+    "seed:prod": "node dist/scripts/seed-connection.js",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@fastify/static": "^7.0.4",
+    "axios": "^1.7.9",
+    "bullmq": "^5.34.2",
+    "dotenv": "^16.4.7",
+    "fastify": "^4.28.1",
+    "google-auth-library": "^9.14.0",
+    "googleapis": "^140.0.0",
+    "ioredis": "^5.4.2",
+    "pino": "^9.5.0",
+    "pino-pretty": "^11.3.0",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.17.10",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}
