@@ -133,18 +133,13 @@
       var googleAuth = c.googleAuthType === 'service_account' ? 'Service account' : 'OAuth';
       var ghlAuth = c.ghlAuthType === 'api_token' ? 'API token' : 'OAuth';
 
-      var primary;
+      var primary = '';
       if (c.status === 'pending_google') {
         primary = '<a class="btn btn--accent btn--sm" href="/oauth/google/start?connectionId=' + encodeURIComponent(c.id) + '">Connect Google</a>';
-      } else {
-        primary = '<button class="btn btn--outline btn--sm" data-action="detail" data-id="' + esc(c.id) + '">Details</button>';
       }
 
       var items = '';
-      items += menuBtn('detail', 'Details', 'info', c.id);
-      items += menuBtn('edit', 'Edit', 'edit', c.id);
-      items += menuBtn('automations', 'Automations', 'sliders', c.id);
-      items += menuBtn('bootstrap', 'Bootstrap', 'play', c.id);
+      items += '<a class="menu__item" href="/oauth/google/start?connectionId=' + encodeURIComponent(c.id) + '">' + icon('calendar') + '<span>Reconnect Google</span></a>';
       if (c.ghlAuthType === 'oauth') {
         items += '<a class="menu__item" href="/oauth/ghl/start?connectionId=' + encodeURIComponent(c.id) + '">' + icon('link') + '<span>Connect GHL</span></a>';
       }
@@ -162,9 +157,13 @@
         '</div>' +
         '<div class="conn__actions">' +
           primary +
+          '<button class="btn btn--outline btn--sm" data-action="detail" data-id="' + esc(c.id) + '">Details</button>' +
+          '<button class="btn btn--outline btn--sm" data-action="edit" data-id="' + esc(c.id) + '">Edit</button>' +
+          '<button class="btn btn--ghost btn--sm" data-action="automations" data-id="' + esc(c.id) + '">Automations</button>' +
+          '<button class="btn btn--ghost btn--sm" data-action="bootstrap" data-id="' + esc(c.id) + '">Bootstrap</button>' +
           '<div class="menu-wrap">' +
-            '<button class="btn btn--ghost btn--sm" data-menu-btn aria-label="More actions">' + icon('more') + '</button>' +
-            '<div class="menu" data-menu>' + items + '</div>' +
+            '<button class="btn btn--menu btn--sm" data-menu-btn aria-label="More actions" aria-haspopup="menu" title="More actions">' + icon('more') + '</button>' +
+            '<div class="menu" data-menu role="menu">' + items + '</div>' +
           '</div>' +
         '</div>';
       list.appendChild(card);
@@ -278,6 +277,8 @@
     var c = state.connections.filter(function (x) { return x.id === id; })[0];
     if (!c) return;
     editId = id;
+    var rg = $('#editReconnectGoogle');
+    if (rg) rg.href = '/oauth/google/start?connectionId=' + encodeURIComponent(id);
     var f = $('#editForm');
     f.reset();
     $('[name="name"]', f).value = c.name || '';

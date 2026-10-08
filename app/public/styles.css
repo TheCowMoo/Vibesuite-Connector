@@ -154,6 +154,10 @@ p { margin: 0 0 1rem; }
 .btn--danger { background: transparent; color: var(--danger); }
 .btn--danger:hover { background: #FBEDEB; }
 .btn--sm { padding: 0.3rem 0.7rem; font-size: 0.82rem; }
+.btn svg { width: 16px; height: 16px; display: block; flex: none; }
+.btn--sm svg { width: 15px; height: 15px; }
+.btn--menu { background: #fff; border-color: var(--line); color: var(--ink); padding: 0.3rem 0.55rem; }
+.btn--menu:hover { background: var(--navy-50); color: var(--ink); }
 .icon-btn {
   background: none; border: none; color: var(--ink-muted);
   font-size: 1.5rem; line-height: 1; cursor: pointer; padding: 0.2rem 0.4rem;
