@@ -14,6 +14,8 @@ services:
   app-api:
     build: ./app
     env_file: .env
+    environment:
+      - REDIS_URL=redis://redis:6379
     command: ["node", "dist/api/server.js"]
     depends_on:
       redis:
@@ -25,6 +27,8 @@ services:
   app-worker:
     build: ./app
     env_file: .env
+    environment:
+      - REDIS_URL=redis://redis:6379
     command: ["node", "dist/workers/syncWorker.js"]
     depends_on:
       redis:
