@@ -1,5 +1,7 @@
 # Runbook
 
+> Full deploy / SSL / update / troubleshooting: see [DEPLOYMENT.md](DEPLOYMENT.md).
+
 ## First deploy
 
 1. `cp .env.example .env` and populate `OAUTH_BASE_URL`, `GOOGLE_WEBHOOK_URL`, and

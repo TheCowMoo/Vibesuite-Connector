@@ -127,6 +127,8 @@ docker compose up -d --build
 - `redis` (persistent volume), `app-api`, `app-worker`, and `nginx` (SSL).
 - Replace the placeholder cert paths in `nginx/conf.d/default.conf` and run certbot to obtain
   certificates, or mount existing ones.
+- See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) for the full first-deploy, SSL, update, and
+  troubleshooting playbook.
 
 ## RSVP → GHL mapping
 
