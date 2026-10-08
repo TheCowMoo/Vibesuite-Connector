@@ -22,15 +22,20 @@
   }
 
   function toast(message, type) {
+    type = type || 'info';
+    var glyph = type === 'success' ? 'check' : (type === 'error' ? 'alert' : 'info');
     var t = document.createElement('div');
-    t.className = 'toast toast--' + (type || 'info');
-    t.textContent = message;
+    t.className = 'toast toast--' + type;
+    t.innerHTML = icon(glyph) + '<span class="toast__msg"></span>' + '<button class="toast__close" aria-label="Dismiss">' + icon('x') + '</button>';
+    t.querySelector('.toast__msg').textContent = message;
+    t.querySelector('.toast__close').addEventListener('click', function () { dismissToast(t); });
     $('#toasts').appendChild(t);
     requestAnimationFrame(function () { t.classList.add('is-visible'); });
-    setTimeout(function () {
-      t.classList.remove('is-visible');
-      setTimeout(function () { t.remove(); }, 300);
-    }, 3400);
+    setTimeout(function () { dismissToast(t); }, 3400);
+  }
+  function dismissToast(t) {
+    t.classList.remove('is-visible');
+    setTimeout(function () { t.remove(); }, 200);
   }
 
   /* ---- Navigation ---- */
@@ -62,6 +67,46 @@
     return '<span class="badge">' + esc(label) + '</span>';
   }
 
+  /* ---- Icons (monoline, no emoji) ---- */
+  var ICONS = {
+    calendar: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>',
+    link: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>',
+    list: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>',
+    book: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>',
+    upload: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>',
+    more: '<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg>',
+    chevron: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>',
+    edit: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg>',
+    trash: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>',
+    play: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><polygon points="6 4 20 12 6 20 6 4"/></svg>',
+    check: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>',
+    alert: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>',
+    info: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>',
+    sliders: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg>',
+    x: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>'
+  };
+  function icon(name) { return ICONS[name] || ''; }
+  function menuBtn(action, label, glyph, id, danger) {
+    return '<button class="menu__item' + (danger ? ' menu__item--danger' : '') + '" data-action="' + action + '" data-id="' + esc(id) + '">' + icon(glyph) + '<span>' + esc(label) + '</span></button>';
+  }
+  function skeletonCards(n) {
+    var out = '';
+    for (var i = 0; i < (n || 3); i++) out += '<div class="skeleton skel-card"></div>';
+    return out;
+  }
+  function withBusy(btn, promise) {
+    if (!btn) return promise;
+    var original = btn.innerHTML;
+    btn.disabled = true;
+    btn.classList.add('btn--busy');
+    btn.innerHTML = '<span class="spinner"></span>';
+    return promise.finally(function () {
+      btn.disabled = false;
+      btn.classList.remove('btn--busy');
+      btn.innerHTML = original;
+    });
+  }
+
   /* ---- Stats ---- */
   function renderStats() {
     var cs = state.connections;
@@ -88,18 +133,22 @@
       var googleAuth = c.googleAuthType === 'service_account' ? 'Service account' : 'OAuth';
       var ghlAuth = c.ghlAuthType === 'api_token' ? 'API token' : 'OAuth';
 
-      var actions = '';
+      var primary;
       if (c.status === 'pending_google') {
-        actions += '<a class="btn btn--accent btn--sm" href="/oauth/google/start?connectionId=' + encodeURIComponent(c.id) + '">Connect Google</a>';
+        primary = '<a class="btn btn--accent btn--sm" href="/oauth/google/start?connectionId=' + encodeURIComponent(c.id) + '">Connect Google</a>';
+      } else {
+        primary = '<button class="btn btn--outline btn--sm" data-action="detail" data-id="' + esc(c.id) + '">Details</button>';
       }
+
+      var items = '';
+      items += menuBtn('detail', 'Details', 'info', c.id);
+      items += menuBtn('edit', 'Edit', 'edit', c.id);
+      items += menuBtn('automations', 'Automations', 'sliders', c.id);
+      items += menuBtn('bootstrap', 'Bootstrap', 'play', c.id);
       if (c.ghlAuthType === 'oauth') {
-        actions += '<a class="btn btn--outline btn--sm" href="/oauth/ghl/start?connectionId=' + encodeURIComponent(c.id) + '">Connect GHL</a>';
+        items += '<a class="menu__item" href="/oauth/ghl/start?connectionId=' + encodeURIComponent(c.id) + '">' + icon('link') + '<span>Connect GHL</span></a>';
       }
-      actions += '<button class="btn btn--outline btn--sm" data-action="edit" data-id="' + esc(c.id) + '">Edit</button>';
-      actions += '<button class="btn btn--ghost btn--sm" data-action="automations" data-id="' + esc(c.id) + '">Automations</button>';
-      actions += '<button class="btn btn--ghost btn--sm" data-action="bootstrap" data-id="' + esc(c.id) + '">Bootstrap</button>';
-      actions += '<button class="btn btn--ghost btn--sm" data-action="detail" data-id="' + esc(c.id) + '">Details</button>';
-      actions += '<button class="btn btn--danger btn--sm" data-action="delete" data-id="' + esc(c.id) + '">Delete</button>';
+      items += menuBtn('delete', 'Delete', 'trash', c.id, true);
 
       var card = document.createElement('div');
       card.className = 'conn';
@@ -107,17 +156,25 @@
         '<div class="conn__main">' +
           '<div class="conn__head"><span class="conn__name">' + esc(c.name) + '</span>' + statusChip(c.status) + '</div>' +
           '<div class="conn__meta">' +
-            '<span class="conn__cal">&#128197; ' + esc(c.googleCalendarId) + '</span>' +
+            '<span class="conn__cal">' + icon('calendar') + esc(c.googleCalendarId) + '</span>' +
             badge('Google · ' + googleAuth) + badge('GHL · ' + ghlAuth) +
           '</div>' +
         '</div>' +
-        '<div class="conn__actions">' + actions + '</div>';
+        '<div class="conn__actions">' +
+          primary +
+          '<div class="menu-wrap">' +
+            '<button class="btn btn--ghost btn--sm" data-menu-btn aria-label="More actions">' + icon('more') + '</button>' +
+            '<div class="menu" data-menu>' + items + '</div>' +
+          '</div>' +
+        '</div>';
       list.appendChild(card);
     });
   }
 
   /* ---- Load ---- */
   function load() {
+    $('#stats').innerHTML = '<div class="skeleton skel-stat"></div><div class="skeleton skel-stat"></div><div class="skeleton skel-stat"></div><div class="skeleton skel-stat"></div>';
+    $('#list').innerHTML = skeletonCards(3);
     return api('/api/connections').then(function (data) {
       state.connections = data.connections || [];
       renderStats();
@@ -504,12 +561,15 @@
 
   /* ---- List actions (event delegation) ---- */
   $('#list').addEventListener('click', function (e) {
+    var menuBtn = e.target.closest('[data-menu-btn]');
+    if (menuBtn) { e.stopPropagation(); toggleMenu(menuBtn); return; }
     var btn = e.target.closest('[data-action]');
     if (!btn) return;
     var id = btn.dataset.id;
     var action = btn.dataset.action;
+    closeAllMenus();
     if (action === 'bootstrap') {
-      api('/api/connections/' + id + '/bootstrap', { method: 'POST' })
+      withBusy(btn, api('/api/connections/' + id + '/bootstrap', { method: 'POST' }))
         .then(function () { toast('Bootstrap started', 'success'); return load(); })
         .catch(function (err) { toast(err.message, 'error'); });
     } else if (action === 'detail') {
@@ -519,17 +579,20 @@
     } else if (action === 'automations') {
       openAutomations(id);
     } else if (action === 'delete') {
-      if (!confirm('Delete this connection? Its watch channel will expire on its own.')) return;
-      api('/api/connections/' + id, { method: 'DELETE' })
-        .then(function () { toast('Connection deleted', 'success'); return load(); })
-        .catch(function (err) { toast(err.message, 'error'); });
+      confirmDialog('Delete connection?', 'This connection and its watch channel will be removed. Its Google watch channel expires on its own.', 'Delete').then(function (ok) {
+        if (!ok) return;
+        api('/api/connections/' + id, { method: 'DELETE' })
+          .then(function () { toast('Connection deleted', 'success'); return load(); })
+          .catch(function (err) { toast(err.message, 'error'); });
+      });
     }
   });
 
   /* ---- Settings ---- */
   function loadInfo() {
+    $('#settingsCards').innerHTML = '<div class="skeleton skel-card" style="height:180px"></div><div class="skeleton skel-card" style="height:180px"></div>';
     return api('/api/info').then(function (info) {
-      $('#settingsCards').innerHTML = brandingCard() + securityCard(info) + aiCard();
+      $('#settingsCards').innerHTML = aiCard() + securityCard(info) + brandingCard();
       wireAi();
       loadAiSettings();
     }).catch(function (err) { $('#settingsCards').innerHTML = '<div class="card"><p class="muted">' + esc(err.message) + '</p></div>'; });
@@ -537,26 +600,36 @@
   function brandingCard() {
     return '<div class="card"><h3 class="card__title">Branding</h3>' +
       '<div class="brand-swatch"><img src="/static/logo.png" alt="Vibesuite logo" class="brand-swatch__logo" /></div>' +
-      '<p class="muted">White logo on Deep Navy. A navy/monochrome logo variant is recommended for light surfaces.</p></div>';
+      '<p class="muted">Vibesuite — Google Calendar RSVP to GoHighLevel sync.</p></div>';
   }
   function securityCard(info) {
-    var msg = info.encryptionAtRest
-      ? '✅ Stored credentials are encrypted at rest (AES-256-GCM).'
-      : '⚠️ CREDENTIALS_ENCRYPTION_KEY is not set — stored tokens are not encrypted.';
+    var ok = !!info.encryptionAtRest;
+    var msg = ok
+      ? 'Stored credentials are encrypted at rest (AES-256-GCM).'
+      : 'CREDENTIALS_ENCRYPTION_KEY is not set — stored tokens are not encrypted.';
     return '<div class="card"><h3 class="card__title">Security</h3>' +
-      '<p class="muted">' + esc(msg) + '</p>' +
+      '<p class="muted"><span class="dot ' + (ok ? 'dot--success' : 'dot--danger') + '"></span>' + esc(msg) + '</p>' +
       '<p class="muted">Google webhooks are validated via per-connection channel tokens.</p></div>';
   }
 
   /* ---- Lists & Knowledge ---- */
   function loadLists() {
+    $('#listsList').innerHTML = skeletonCards(3);
     return api('/api/lists').then(function (d) { renderLists(d.lists || []); }).catch(function (e) { toast(e.message, 'error'); });
   }
 
   function renderLists(lists) {
     var el = $('#listsList');
     el.innerHTML = '';
-    if (!lists.length) { el.innerHTML = '<div class="empty"><p class="muted">No lists yet — upload one to segment.</p></div>'; return; }
+    if (!lists.length) {
+      el.innerHTML = '<div class="empty"><div class="empty__icon">' + icon('list') + '</div><h2 class="empty__title">No lists yet</h2><p class="empty__text">Upload a list and let the AI segment it into groups.</p><button class="btn btn--accent" id="emptyListsCta">New list</button></div>';
+      $('#emptyListsCta').addEventListener('click', function () { $('#newListForm').reset(); openModal('newList'); });
+      return;
+    }
+    el.innerHTML = '<div class="summary">' +
+      '<div class="summary__item"><span class="summary__value">' + lists.length + '</span><span class="summary__label">lists</span></div>' +
+      '<div class="summary__item"><span class="summary__value">' + lists.filter(function (l) { return l.hasResult; }).length + '</span><span class="summary__label">segmented</span></div>' +
+      '</div>';
     lists.forEach(function (l) {
       var box = document.createElement('div');
       box.className = 'conn';
@@ -575,8 +648,8 @@
   }
 
   function segmentList(id) {
-    toast('Segmenting…', 'info');
-    api('/api/lists/' + id + '/segment', { method: 'POST' })
+    var btn = $('#listsList [data-action="segment"][data-id="' + id + '"]');
+    withBusy(btn, api('/api/lists/' + id + '/segment', { method: 'POST' }))
       .then(function () { toast('Segmentation complete', 'success'); loadLists(); viewListResult(id); })
       .catch(function (e) { toast(e.message, 'error'); });
   }
@@ -584,19 +657,53 @@
   function viewListResult(id) {
     api('/api/lists/' + id).then(function (d) {
       var r = d.list && d.list.result;
-      $('#listResultBody').textContent = r ? JSON.stringify(r, null, 2) : 'No result yet — click Segment.';
+      $('#listResultBody').innerHTML = renderSegments(r);
       openModal('listResult');
     }).catch(function (e) { toast(e.message, 'error'); });
   }
 
+  function renderSegments(result) {
+    if (!result) return '<p class="muted">No result yet — run Segment first.</p>';
+    var segs = result.segments;
+    if (!Array.isArray(segs) || !segs.length) {
+      return '<pre class="snapshot">' + esc(JSON.stringify(result, null, 2)) + '</pre>';
+    }
+    return segs.map(function (seg, i) {
+      var rows = Array.isArray(seg.rows) ? seg.rows : [];
+      var keys = (rows.length && typeof rows[0] === 'object') ? Object.keys(rows[0]) : [];
+      var table = '';
+      if (keys.length) {
+        table = '<table class="map"><thead><tr>' +
+          keys.map(function (k) { return '<th>' + esc(k) + '</th>'; }).join('') +
+          '</tr></thead><tbody>' +
+          rows.map(function (row) {
+            return '<tr>' + keys.map(function (k) {
+              var v = row[k];
+              return '<td>' + esc(typeof v === 'object' ? JSON.stringify(v) : String(v == null ? '' : v)) + '</td>';
+            }).join('') + '</tr>';
+          }).join('') + '</tbody></table>';
+      }
+      return '<div class="seg" data-open="false">' +
+        '<div class="seg__head"><span class="seg__chev">' + icon('chevron') + '</span><span class="seg__name">' + esc(seg.name || ('Segment ' + (i + 1))) + '</span><span class="seg__count">' + rows.length + ' rows</span></div>' +
+        '<div class="seg__reason">' + esc(seg.reason || '') + '</div>' +
+        '<div class="seg__rows">' + table + '</div>' +
+        '</div>';
+    }).join('');
+  }
+
   function loadKnowledge() {
+    $('#knowledgeList').innerHTML = skeletonCards(3);
     return api('/api/knowledge').then(function (d) { renderKnowledge(d.docs || []); }).catch(function (e) { toast(e.message, 'error'); });
   }
 
   function renderKnowledge(docs) {
     var el = $('#knowledgeList');
     el.innerHTML = '';
-    if (!docs.length) { el.innerHTML = '<div class="empty"><p class="muted">No documents yet — add context for the AI.</p></div>'; return; }
+    if (!docs.length) {
+      el.innerHTML = '<div class="empty"><div class="empty__icon">' + icon('book') + '</div><h2 class="empty__title">No documents yet</h2><p class="empty__text">Add context the AI can use when segmenting lists.</p><button class="btn btn--accent" id="emptyKnowledgeCta">Add document</button></div>';
+      $('#emptyKnowledgeCta').addEventListener('click', function () { $('#newKnowledgeForm').reset(); openModal('newKnowledge'); });
+      return;
+    }
     docs.forEach(function (d) {
       var box = document.createElement('div');
       box.className = 'conn';
@@ -604,22 +711,46 @@
         '<div class="conn__main">' +
           '<div class="conn__head"><span class="conn__name">' + esc(d.name) + '</span></div>' +
           '<div class="conn__meta"><span>' + d.size + ' chars</span></div>' +
+          (d.snippet ? '<p class="snippet">' + esc(d.snippet) + '</p>' : '') +
         '</div>' +
         '<div class="conn__actions"><button class="btn btn--danger btn--sm" data-action="deleteKnowledge" data-id="' + esc(d.id) + '">Delete</button></div>';
       el.appendChild(box);
     });
   }
 
-  function readFileInto(input, textarea) {
-    var f = input.files && input.files[0];
-    if (!f) return;
+  function readFileText(file, textarea) {
+    if (!file) return;
     var reader = new FileReader();
     reader.onload = function () { textarea.value = String(reader.result || ''); };
-    reader.readAsText(f);
+    reader.readAsText(file);
   }
 
-  $('#listFile').addEventListener('change', function () { readFileInto(this, $('#newListForm [name="content"]')); });
-  $('#knowledgeFile').addEventListener('change', function () { readFileInto(this, $('#newKnowledgeForm [name="content"]')); });
+  function wireDropzone(dropId, inputId, fileNameId, textareaSel) {
+    var drop = $('#' + dropId);
+    var input = $('#' + inputId);
+    var nameEl = $('#' + fileNameId);
+    if (!drop || !input) return;
+    input.addEventListener('change', function () {
+      readFileText(input.files && input.files[0], $(textareaSel));
+      if (nameEl) nameEl.textContent = (input.files && input.files[0]) ? input.files[0].name : '';
+    });
+    drop.addEventListener('click', function () { input.click(); });
+    drop.addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); input.click(); } });
+    ['dragenter', 'dragover'].forEach(function (ev) {
+      drop.addEventListener(ev, function (e) { e.preventDefault(); drop.classList.add('is-drag'); });
+    });
+    ['dragleave', 'drop'].forEach(function (ev) {
+      drop.addEventListener(ev, function (e) { e.preventDefault(); drop.classList.remove('is-drag'); });
+    });
+    drop.addEventListener('drop', function (e) {
+      var f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+      if (!f) return;
+      readFileText(f, $(textareaSel));
+      if (nameEl) nameEl.textContent = f.name;
+    });
+  }
+  wireDropzone('listDrop', 'listFile', 'listFileName', '#newListForm [name="content"]');
+  wireDropzone('knowledgeDrop', 'knowledgeFile', 'knowledgeFileName', '#newKnowledgeForm [name="content"]');
 
   $('#newListBtn').addEventListener('click', function () { $('#newListForm').reset(); openModal('newList'); });
   $('#newKnowledgeBtn').addEventListener('click', function () { $('#newKnowledgeForm').reset(); openModal('newKnowledge'); });
@@ -649,8 +780,10 @@
     if (btn.dataset.action === 'segment') segmentList(id);
     else if (btn.dataset.action === 'viewResult') viewListResult(id);
     else if (btn.dataset.action === 'deleteList') {
-      if (!confirm('Delete this list?')) return;
-      api('/api/lists/' + id, { method: 'DELETE' }).then(function () { toast('Deleted', 'success'); loadLists(); }).catch(function (err) { toast(err.message, 'error'); });
+      confirmDialog('Delete list?', 'This list and its segmentation result will be removed.', 'Delete').then(function (ok) {
+        if (!ok) return;
+        api('/api/lists/' + id, { method: 'DELETE' }).then(function () { toast('List deleted', 'success'); loadLists(); }).catch(function (err) { toast(err.message, 'error'); });
+      });
     }
   });
 
@@ -658,9 +791,18 @@
     var btn = e.target.closest('[data-action]');
     if (!btn) return;
     if (btn.dataset.action === 'deleteKnowledge') {
-      if (!confirm('Delete this document?')) return;
-      api('/api/knowledge/' + btn.dataset.id, { method: 'DELETE' }).then(function () { toast('Deleted', 'success'); loadKnowledge(); }).catch(function (err) { toast(err.message, 'error'); });
+      confirmDialog('Delete document?', 'This document will be removed from the knowledge base.', 'Delete').then(function (ok) {
+        if (!ok) return;
+        api('/api/knowledge/' + btn.dataset.id, { method: 'DELETE' }).then(function () { toast('Document deleted', 'success'); loadKnowledge(); }).catch(function (err) { toast(err.message, 'error'); });
+      });
     }
+  });
+
+  $('#listResultBody').addEventListener('click', function (e) {
+    var head = e.target.closest('.seg__head');
+    if (!head) return;
+    var seg = head.closest('.seg');
+    if (seg) seg.dataset.open = seg.dataset.open === 'true' ? 'false' : 'true';
   });
 
   /* ---- AI settings ---- */
@@ -718,29 +860,115 @@
       model: $('#aiModel').value || d.model || undefined,
       baseUrl: $('#aiBaseUrl').value || d.baseUrl || undefined
     };
-    api('/api/ai/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+    withBusy($('#aiSave'), api('/api/ai/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }))
       .then(function (r) { $('#aiKey').value = ''; $('#aiStatus').textContent = 'Saved (' + (r.apiKeyMasked || '') + ')'; toast('AI settings saved', 'success'); })
       .catch(function (e) { toast(e.message, 'error'); });
   }
 
   function testAi() {
     $('#aiStatus').textContent = 'Testing…';
-    api('/api/ai/test', { method: 'POST' })
+    withBusy($('#aiTest'), api('/api/ai/test', { method: 'POST' }))
       .then(function (d) { $('#aiStatus').textContent = 'Test OK — ' + d.reply; toast('AI test OK', 'success'); })
       .catch(function (e) { $('#aiStatus').textContent = 'Test failed — ' + e.message; toast(e.message, 'error'); });
   }
 
   /* ---- Modal helpers ---- */
-  function openModal(id) { $('#' + id).hidden = false; document.body.classList.add('no-scroll'); }
-  function closeModal(id) { $('#' + id).hidden = true; document.body.classList.remove('no-scroll'); }
+  var openStack = [];
+  var lastFocus = null;
+
+  function openModal(id) {
+    var el = $('#' + id);
+    if (!el) return;
+    lastFocus = document.activeElement;
+    el.hidden = false;
+    requestAnimationFrame(function () {
+      el.classList.add('is-open');
+      var f = el.querySelector('button, [href], input, select, textarea');
+      if (f) f.focus();
+    });
+    openStack.push(id);
+    document.body.classList.add('no-scroll');
+  }
+
+  function closeModal(id) {
+    var el = $('#' + id);
+    if (!el) return;
+    el.classList.remove('is-open');
+    setTimeout(function () { el.hidden = true; }, 160);
+    openStack = openStack.filter(function (x) { return x !== id; });
+    if (!openStack.length) document.body.classList.remove('no-scroll');
+    if (lastFocus && typeof lastFocus.focus === 'function') lastFocus.focus();
+  }
+
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && openStack.length) { closeModal(openStack[openStack.length - 1]); return; }
+    if (e.key === 'Tab' && openStack.length) {
+      var el = $('#' + openStack[openStack.length - 1]);
+      var f = el.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
+      if (!f.length) return;
+      var first = f[0];
+      var last = f[f.length - 1];
+      if (e.shiftKey && document.activeElement === first) { last.focus(); e.preventDefault(); }
+      else if (!e.shiftKey && document.activeElement === last) { first.focus(); e.preventDefault(); }
+    }
+  });
+
   $$('[data-close]').forEach(function (b) {
     b.addEventListener('click', function () { closeModal(b.dataset.close); });
   });
   $$('.backdrop').forEach(function (m) {
     m.addEventListener('click', function (e) {
-      if (e.target === m) { m.hidden = true; document.body.classList.remove('no-scroll'); }
+      if (e.target === m) closeModal(m.id);
     });
   });
+
+  function closeAllMenus() {
+    $$('.menu.is-open').forEach(function (m) { m.classList.remove('is-open'); });
+  }
+  function toggleMenu(btn) {
+    var wrap = btn.closest('.menu-wrap');
+    var menu = wrap && wrap.querySelector('.menu');
+    if (!menu) return;
+    var willOpen = !menu.classList.contains('is-open');
+    closeAllMenus();
+    if (willOpen) menu.classList.add('is-open');
+  }
+  document.addEventListener('click', function (e) {
+    if (!e.target.closest('.menu-wrap')) closeAllMenus();
+  });
+
+  function confirmDialog(title, message, okLabel) {
+    return new Promise(function (resolve) {
+      var old = $('#confirmBackdrop');
+      if (old) old.remove();
+      var bd = document.createElement('div');
+      bd.className = 'backdrop';
+      bd.id = 'confirmBackdrop';
+      bd.innerHTML =
+        '<div class="modal modal--sm" role="dialog" aria-modal="true" aria-labelledby="confirmTitle">' +
+          '<div class="modal__head"><h2 class="modal__title" id="confirmTitle"></h2><button class="icon-btn" id="confirmX" aria-label="Close">&times;</button></div>' +
+          '<p class="confirm__msg"></p>' +
+          '<div class="modal__foot"><span class="spacer"></span>' +
+            '<button class="btn btn--ghost" id="confirmCancel">Cancel</button>' +
+            '<button class="btn btn--danger" id="confirmOk"></button>' +
+          '</div>' +
+        '</div>';
+      document.body.appendChild(bd);
+      bd.querySelector('#confirmTitle').textContent = title;
+      bd.querySelector('.confirm__msg').textContent = message;
+      bd.querySelector('#confirmOk').textContent = okLabel || 'Delete';
+      var done = function (val) {
+        closeModal('confirmBackdrop');
+        setTimeout(function () { bd.remove(); }, 180);
+        resolve(val);
+      };
+      bd.addEventListener('click', function (e) { if (e.target === bd) done(false); });
+      bd.querySelector('#confirmOk').addEventListener('click', function () { done(true); });
+      bd.querySelector('#confirmCancel').addEventListener('click', function () { done(false); });
+      bd.querySelector('#confirmX').addEventListener('click', function () { done(false); });
+      openModal('confirmBackdrop');
+    });
+  }
 
   /* ---- Init ---- */
   $('#newConnectionBtn').addEventListener('click', openWizard);

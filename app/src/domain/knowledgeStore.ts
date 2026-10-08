@@ -14,6 +14,7 @@ export interface KnowledgeSummary {
   name: string;
   size: number;
   createdAt: number;
+  snippet: string;
 }
 
 export async function addKnowledge(name: string, content: string): Promise<KnowledgeDoc> {
@@ -34,7 +35,7 @@ export async function listKnowledge(): Promise<KnowledgeSummary[]> {
       if (!raw) return null;
       try {
         const d = JSON.parse(raw) as KnowledgeDoc;
-        return { id: d.id, name: d.name, size: d.content.length, createdAt: d.createdAt };
+        return { id: d.id, name: d.name, size: d.content.length, createdAt: d.createdAt, snippet: d.content.slice(0, 160).replace(/\s+/g, ' ').trim() };
       } catch {
         return null;
       }
