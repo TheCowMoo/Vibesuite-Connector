@@ -112,3 +112,24 @@ export function chunk<T>(items: T[], size: number): T[][] {
   for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
   return out;
 }
+
+/** "2026-10-08T13:18" (from a datetime-local input) → "2026-10-08T13:18:00" (RFC 3339). */
+export function toRfc3339(value: string): string {
+  const v = value.trim();
+  return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(v) ? `${v}:00` : v;
+}
+
+export function hasTimeZoneOffset(value: string): boolean {
+  return /([Zz]|[+-]\d{2}:?\d{2})$/.test(value.trim());
+}
+
+export function resolveEventTime(value: string, timeZone?: string): { dateTime: string; timeZone?: string } {
+  const dateTime = toRfc3339(value);
+  if (hasTimeZoneOffset(dateTime)) {
+    return { dateTime };
+  }
+  if (!timeZone || !timeZone.trim()) {
+    throw new Error('timeZone is required when start/end have no time-zone offset');
+  }
+  return { dateTime, timeZone: timeZone.trim() };
+}

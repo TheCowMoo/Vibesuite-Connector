@@ -709,7 +709,7 @@
           '<td>' + esc(inv.listName) + '</td>' +
           '<td>' + esc(inv.connectionName) + '</td>' +
           '<td>' + inv.recipientCount + '</td>' +
-          '<td>' + esc(inv.status) + '</td>' +
+          '<td>' + esc(inv.status) + (inv.error ? '<div class="muted" style="font-size:0.75rem">' + esc(inv.error) + '</div>' : '') + '</td>' +
           '<td>' + new Date(inv.createdAt).toLocaleString() + '</td>' +
           '<td>' + links + ' <button class="btn btn--ghost btn--sm" data-action="deleteInvite" data-id="' + esc(inv.id) + '">Delete</button></td>' +
           '</tr>';
@@ -789,7 +789,12 @@
             };
             return withBusy(document.getElementById('inviteSend'), api('/api/invites', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }))
               .then(function (r) {
-                toast('Invites sent (' + r.sent + ' recipients)', r.ok ? 'success' : 'error');
+                if (r.ok) {
+                  toast('Invites sent (' + r.sent + ' recipients)', 'success');
+                } else {
+                  var reason = (r.invite && r.invite.error) ? r.invite.error : 'some recipients failed';
+                  toast('Invite failed: ' + reason + ' (' + r.sent + '/' + (r.sent + r.failed) + ' sent)', 'error');
+                }
                 loadInviteHistory();
                 refreshInvitePreview();
               })

@@ -1,5 +1,6 @@
 import { createCalendarClient } from './auth';
 import type { StoredConnection } from '../domain/connection';
+import { resolveEventTime } from '../domain/invite';
 
 export interface InviteEventInput {
   summary: string;
@@ -24,6 +25,8 @@ export interface InviteEventResult {
  */
 export async function createInviteEvent(conn: StoredConnection, input: InviteEventInput): Promise<InviteEventResult> {
   const calendar = createCalendarClient(conn);
+  const start = resolveEventTime(input.start, input.timeZone);
+  const end = resolveEventTime(input.end, input.timeZone);
   const res = await calendar.events.insert({
     calendarId: conn.googleCalendarId,
     sendUpdates: 'all',
@@ -31,8 +34,8 @@ export async function createInviteEvent(conn: StoredConnection, input: InviteEve
       summary: input.summary,
       description: input.description,
       location: input.location,
-      start: { dateTime: input.start, timeZone: input.timeZone },
-      end: { dateTime: input.end, timeZone: input.timeZone },
+      start,
+      end,
       attendees: input.emails.map((email) => ({ email })),
       guestsCanInviteOthers: false,
       guestsCanModify: false,

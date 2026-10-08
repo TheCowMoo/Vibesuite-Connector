@@ -6,7 +6,7 @@ import { getAllKnowledge } from '../../domain/knowledgeStore';
 import { retrieveContext } from '../../domain/retrieval';
 import { generateJson } from '../../lib/ai';
 import { createInviteEvent } from '../../google/events';
-import { extractRecipients, chunk } from '../../domain/invite';
+import { extractRecipients, chunk, hasTimeZoneOffset } from '../../domain/invite';
 import { createInviteRecord, listInvites, deleteInvite, getInvitedEmails, markInvited } from '../../domain/inviteStore';
 import { withRetry, sleep } from '../../lib/backoff';
 import { env } from '../../config/env';
@@ -32,6 +32,15 @@ interface CreateInviteBody {
 interface PreviewBody {
   listId: string;
   segments?: string[];
+}
+
+function describeError(err: unknown): string {
+  const e = err as { response?: { status?: number; data?: { error?: { message?: string } | string } }; message?: string };
+  const status = e?.response?.status;
+  const d = e?.response?.data?.error;
+  const detail = typeof d === 'string' ? d : d?.message;
+  const base = detail || e?.message || 'unknown error';
+  return status ? `${status} ${base}` : base;
 }
 
 export async function inviteRoutes(app: FastifyInstance): Promise<void> {
@@ -113,6 +122,10 @@ export async function inviteRoutes(app: FastifyInstance): Promise<void> {
       reply.code(400).send({ error: 'event end must be after start' });
       return;
     }
+    if (!hasTimeZoneOffset(ev.start) && !(ev.timeZone && ev.timeZone.trim())) {
+      reply.code(400).send({ error: 'timeZone is required when start/end have no time-zone offset' });
+      return;
+    }
 
     const conn = await getConnection(b.connectionId);
     if (!conn) {
@@ -156,8 +169,9 @@ export async function inviteRoutes(app: FastifyInstance): Promise<void> {
         batches.push({ chunk: i + 1, eventId: res.id, htmlLink: res.htmlLink, count: part.length });
         sentEmails.push(...part);
       } catch (err) {
-        firstError = firstError || (err as Error).message;
-        logger.error({ connectionId: conn.id, listId: b.listId, chunk: i + 1, err: (err as Error).message }, 'invite chunk failed');
+        const msg = describeError(err);
+        firstError = firstError || msg;
+        logger.error({ connectionId: conn.id, listId: b.listId, chunk: i + 1, err: msg }, 'invite chunk failed');
       }
       if (i < chunks.length - 1) await sleep(env.INVITE_DELAY_MS);
     }

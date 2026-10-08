@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { extractRecipients, chunk } from '../../src/domain/invite';
+import { extractRecipients, chunk, toRfc3339, hasTimeZoneOffset, resolveEventTime } from '../../src/domain/invite';
 
 describe('extractRecipients', () => {
   it('extracts emails from object rows via an email-ish key', () => {
@@ -49,5 +49,37 @@ describe('extractRecipients', () => {
 describe('chunk', () => {
   it('splits arrays into fixed-size chunks', () => {
     expect(chunk([1, 2, 3, 4, 5], 2)).toEqual([[1, 2], [3, 4], [5]]);
+  });
+});
+
+describe('toRfc3339', () => {
+  it('appends seconds to a minutes-only datetime', () => {
+    expect(toRfc3339('2026-10-08T13:18')).toBe('2026-10-08T13:18:00');
+  });
+  it('leaves seconds intact', () => {
+    expect(toRfc3339('2026-10-08T13:18:30')).toBe('2026-10-08T13:18:30');
+  });
+  it('leaves offset-bearing values intact', () => {
+    expect(toRfc3339('2026-10-08T13:18:00-04:00')).toBe('2026-10-08T13:18:00-04:00');
+  });
+});
+
+describe('hasTimeZoneOffset', () => {
+  it('detects Z and numeric offsets', () => {
+    expect(hasTimeZoneOffset('2026-10-08T13:18:00Z')).toBe(true);
+    expect(hasTimeZoneOffset('2026-10-08T13:18:00-04:00')).toBe(true);
+    expect(hasTimeZoneOffset('2026-10-08T13:18')).toBe(false);
+  });
+});
+
+describe('resolveEventTime', () => {
+  it('returns naive dateTime + timeZone when provided', () => {
+    expect(resolveEventTime('2026-10-08T13:18', 'Asia/Manila')).toEqual({ dateTime: '2026-10-08T13:18:00', timeZone: 'Asia/Manila' });
+  });
+  it('drops timeZone when the value has an offset', () => {
+    expect(resolveEventTime('2026-10-08T13:18:00Z', 'Asia/Manila')).toEqual({ dateTime: '2026-10-08T13:18:00Z' });
+  });
+  it('throws when there is no offset and no timeZone', () => {
+    expect(() => resolveEventTime('2026-10-08T13:18')).toThrow(/timeZone is required/);
   });
 });
