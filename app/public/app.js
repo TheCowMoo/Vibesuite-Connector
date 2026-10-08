@@ -37,8 +37,12 @@
   function showView(name) {
     $$('.topnav__link').forEach(function (b) { b.classList.toggle('is-active', b.dataset.view === name); });
     $('#view-connections').hidden = name !== 'connections';
+    $('#view-lists').hidden = name !== 'lists';
+    $('#view-knowledge').hidden = name !== 'knowledge';
     $('#view-settings').hidden = name !== 'settings';
     if (name === 'settings') loadInfo();
+    if (name === 'lists') loadLists();
+    if (name === 'knowledge') loadKnowledge();
   }
   $$('.topnav__link').forEach(function (btn) {
     btn.addEventListener('click', function () { showView(btn.dataset.view); });
@@ -525,7 +529,9 @@
   /* ---- Settings ---- */
   function loadInfo() {
     return api('/api/info').then(function (info) {
-      $('#settingsCards').innerHTML = brandingCard() + securityCard(info);
+      $('#settingsCards').innerHTML = brandingCard() + securityCard(info) + aiCard();
+      wireAi();
+      loadAiSettings();
     }).catch(function (err) { $('#settingsCards').innerHTML = '<div class="card"><p class="muted">' + esc(err.message) + '</p></div>'; });
   }
   function brandingCard() {
@@ -540,6 +546,188 @@
     return '<div class="card"><h3 class="card__title">Security</h3>' +
       '<p class="muted">' + esc(msg) + '</p>' +
       '<p class="muted">Google webhooks are validated via per-connection channel tokens.</p></div>';
+  }
+
+  /* ---- Lists & Knowledge ---- */
+  function loadLists() {
+    return api('/api/lists').then(function (d) { renderLists(d.lists || []); }).catch(function (e) { toast(e.message, 'error'); });
+  }
+
+  function renderLists(lists) {
+    var el = $('#listsList');
+    el.innerHTML = '';
+    if (!lists.length) { el.innerHTML = '<div class="empty"><p class="muted">No lists yet — upload one to segment.</p></div>'; return; }
+    lists.forEach(function (l) {
+      var box = document.createElement('div');
+      box.className = 'conn';
+      box.innerHTML =
+        '<div class="conn__main">' +
+          '<div class="conn__head"><span class="conn__name">' + esc(l.name) + '</span>' + (l.hasResult ? '<span class="chip chip--success">Segmented</span>' : '<span class="chip chip--neutral">Pending</span>') + '</div>' +
+          '<div class="conn__meta"><span>' + esc(l.criteria || 'No criteria') + '</span></div>' +
+        '</div>' +
+        '<div class="conn__actions">' +
+          '<button class="btn btn--primary btn--sm" data-action="segment" data-id="' + esc(l.id) + '">Segment</button>' +
+          '<button class="btn btn--ghost btn--sm" data-action="viewResult" data-id="' + esc(l.id) + '">View</button>' +
+          '<button class="btn btn--danger btn--sm" data-action="deleteList" data-id="' + esc(l.id) + '">Delete</button>' +
+        '</div>';
+      el.appendChild(box);
+    });
+  }
+
+  function segmentList(id) {
+    toast('Segmenting…', 'info');
+    api('/api/lists/' + id + '/segment', { method: 'POST' })
+      .then(function () { toast('Segmentation complete', 'success'); loadLists(); viewListResult(id); })
+      .catch(function (e) { toast(e.message, 'error'); });
+  }
+
+  function viewListResult(id) {
+    api('/api/lists/' + id).then(function (d) {
+      var r = d.list && d.list.result;
+      $('#listResultBody').textContent = r ? JSON.stringify(r, null, 2) : 'No result yet — click Segment.';
+      openModal('listResult');
+    }).catch(function (e) { toast(e.message, 'error'); });
+  }
+
+  function loadKnowledge() {
+    return api('/api/knowledge').then(function (d) { renderKnowledge(d.docs || []); }).catch(function (e) { toast(e.message, 'error'); });
+  }
+
+  function renderKnowledge(docs) {
+    var el = $('#knowledgeList');
+    el.innerHTML = '';
+    if (!docs.length) { el.innerHTML = '<div class="empty"><p class="muted">No documents yet — add context for the AI.</p></div>'; return; }
+    docs.forEach(function (d) {
+      var box = document.createElement('div');
+      box.className = 'conn';
+      box.innerHTML =
+        '<div class="conn__main">' +
+          '<div class="conn__head"><span class="conn__name">' + esc(d.name) + '</span></div>' +
+          '<div class="conn__meta"><span>' + d.size + ' chars</span></div>' +
+        '</div>' +
+        '<div class="conn__actions"><button class="btn btn--danger btn--sm" data-action="deleteKnowledge" data-id="' + esc(d.id) + '">Delete</button></div>';
+      el.appendChild(box);
+    });
+  }
+
+  function readFileInto(input, textarea) {
+    var f = input.files && input.files[0];
+    if (!f) return;
+    var reader = new FileReader();
+    reader.onload = function () { textarea.value = String(reader.result || ''); };
+    reader.readAsText(f);
+  }
+
+  $('#listFile').addEventListener('change', function () { readFileInto(this, $('#newListForm [name="content"]')); });
+  $('#knowledgeFile').addEventListener('change', function () { readFileInto(this, $('#newKnowledgeForm [name="content"]')); });
+
+  $('#newListBtn').addEventListener('click', function () { $('#newListForm').reset(); openModal('newList'); });
+  $('#newKnowledgeBtn').addEventListener('click', function () { $('#newKnowledgeForm').reset(); openModal('newKnowledge'); });
+
+  $('#newListSave').addEventListener('click', function () {
+    var fd = new FormData($('#newListForm'));
+    var body = { name: fd.get('name') || undefined, criteria: fd.get('criteria') || undefined, content: fd.get('content') };
+    if (!body.content) { toast('List data is required', 'error'); return; }
+    api('/api/lists', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+      .then(function () { closeModal('newList'); toast('List created', 'success'); loadLists(); })
+      .catch(function (e) { toast(e.message, 'error'); });
+  });
+
+  $('#newKnowledgeSave').addEventListener('click', function () {
+    var fd = new FormData($('#newKnowledgeForm'));
+    var body = { name: fd.get('name') || undefined, content: fd.get('content') };
+    if (!body.content) { toast('Content is required', 'error'); return; }
+    api('/api/knowledge', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+      .then(function () { closeModal('newKnowledge'); toast('Document added', 'success'); loadKnowledge(); })
+      .catch(function (e) { toast(e.message, 'error'); });
+  });
+
+  $('#listsList').addEventListener('click', function (e) {
+    var btn = e.target.closest('[data-action]');
+    if (!btn) return;
+    var id = btn.dataset.id;
+    if (btn.dataset.action === 'segment') segmentList(id);
+    else if (btn.dataset.action === 'viewResult') viewListResult(id);
+    else if (btn.dataset.action === 'deleteList') {
+      if (!confirm('Delete this list?')) return;
+      api('/api/lists/' + id, { method: 'DELETE' }).then(function () { toast('Deleted', 'success'); loadLists(); }).catch(function (err) { toast(err.message, 'error'); });
+    }
+  });
+
+  $('#knowledgeList').addEventListener('click', function (e) {
+    var btn = e.target.closest('[data-action]');
+    if (!btn) return;
+    if (btn.dataset.action === 'deleteKnowledge') {
+      if (!confirm('Delete this document?')) return;
+      api('/api/knowledge/' + btn.dataset.id, { method: 'DELETE' }).then(function () { toast('Deleted', 'success'); loadKnowledge(); }).catch(function (err) { toast(err.message, 'error'); });
+    }
+  });
+
+  /* ---- AI settings ---- */
+  var AI_DEFAULTS = null;
+
+  function aiCard() {
+    return '<div class="card"><h3 class="card__title">AI provider</h3>' +
+      '<label class="field"><span class="field__label">Provider</span><select id="aiProvider">' +
+        '<option value="openai">OpenAI</option>' +
+        '<option value="claude">Claude (Anthropic)</option>' +
+        '<option value="gemini">Gemini (Google)</option>' +
+        '<option value="deepseek">DeepSeek</option>' +
+        '<option value="custom">Custom (OpenAI-compatible)</option>' +
+      '</select></label>' +
+      '<label class="field"><span class="field__label">API key</span><input id="aiKey" type="password" placeholder="Leave blank to keep current" /></label>' +
+      '<label class="field"><span class="field__label">Model</span><input id="aiModel" /></label>' +
+      '<label class="field"><span class="field__label">Base URL</span><input id="aiBaseUrl" /></label>' +
+      '<div class="conn__actions"><button class="btn btn--primary btn--sm" id="aiSave">Save</button> <button class="btn btn--ghost btn--sm" id="aiTest">Test</button></div>' +
+      '<p class="muted" id="aiStatus"></p></div>';
+  }
+
+  function wireAi() {
+    $('#aiProvider').addEventListener('change', function () {
+      var d = (AI_DEFAULTS && AI_DEFAULTS[this.value]) || {};
+      $('#aiModel').value = d.model || '';
+      $('#aiModel').placeholder = d.model || '';
+      $('#aiBaseUrl').value = d.baseUrl || '';
+      $('#aiBaseUrl').placeholder = d.baseUrl || '';
+    });
+    $('#aiSave').addEventListener('click', saveAi);
+    $('#aiTest').addEventListener('click', testAi);
+  }
+
+  function loadAiSettings() {
+    return api('/api/ai/settings').then(function (d) {
+      AI_DEFAULTS = d.defaults || {};
+      if (d.configured) {
+        $('#aiProvider').value = d.provider;
+        $('#aiModel').value = d.model || '';
+        $('#aiBaseUrl').value = d.baseUrl || '';
+        $('#aiKey').placeholder = 'Current: ' + d.apiKeyMasked + ' (leave blank to keep)';
+        $('#aiStatus').textContent = 'Configured (' + d.apiKeyMasked + ')';
+      } else {
+        $('#aiStatus').textContent = 'Not configured yet.';
+      }
+    }).catch(function () { $('#aiStatus').textContent = 'Could not load AI settings.'; });
+  }
+
+  function saveAi() {
+    var provider = $('#aiProvider').value;
+    var d = (AI_DEFAULTS && AI_DEFAULTS[provider]) || {};
+    var body = {
+      provider: provider,
+      apiKey: $('#aiKey').value || undefined,
+      model: $('#aiModel').value || d.model || undefined,
+      baseUrl: $('#aiBaseUrl').value || d.baseUrl || undefined
+    };
+    api('/api/ai/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+      .then(function (r) { $('#aiKey').value = ''; $('#aiStatus').textContent = 'Saved (' + (r.apiKeyMasked || '') + ')'; toast('AI settings saved', 'success'); })
+      .catch(function (e) { toast(e.message, 'error'); });
+  }
+
+  function testAi() {
+    $('#aiStatus').textContent = 'Testing…';
+    api('/api/ai/test', { method: 'POST' })
+      .then(function (d) { $('#aiStatus').textContent = 'Test OK — ' + d.reply; toast('AI test OK', 'success'); })
+      .catch(function (e) { $('#aiStatus').textContent = 'Test failed — ' + e.message; toast(e.message, 'error'); });
   }
 
   /* ---- Modal helpers ---- */

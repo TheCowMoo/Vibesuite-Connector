@@ -262,6 +262,16 @@ input[type="text"], input[type="password"], input[type="email"], input:not([type
   color: var(--ink);
 }
 input:focus { outline: none; border-color: var(--royal); box-shadow: 0 0 0 3px var(--yellow-300); }
+textarea {
+  font: inherit;
+  padding: 0.55rem 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #fff;
+  color: var(--ink);
+  resize: vertical;
+}
+textarea:focus { outline: none; border-color: var(--royal); box-shadow: 0 0 0 3px var(--yellow-300); }
 fieldset.field { border: none; padding: 0; margin-bottom: 1rem; }
 fieldset.field legend { margin-bottom: 0.4rem; }
 .radio { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.4rem; font-size: 0.9rem; cursor: pointer; }

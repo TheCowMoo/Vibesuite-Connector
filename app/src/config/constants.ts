@@ -25,5 +25,10 @@ export const REDIS_KEYS = {
   mapEvent: (connectionId: string, eventId: string) => `conn:${connectionId}:map:event:${eventId}`,
   mapContact: (connectionId: string, email: string) => `conn:${connectionId}:map:contact:${email.toLowerCase()}`,
   snapshot: (connectionId: string) => `conn:${connectionId}:snapshot`,
+  aiSettings: () => 'settings:ai',
+  knowledgeIndex: () => 'knowledge:index',
+  knowledgeDoc: (id: string) => `knowledge:doc:${id}`,
+  listsIndex: () => 'lists:index',
+  list: (id: string) => `list:${id}`,
 } as const;
 

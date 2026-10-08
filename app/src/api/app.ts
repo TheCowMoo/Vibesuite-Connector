@@ -9,6 +9,9 @@ import { connectionRoutes } from './routes/connections';
 import { oauthRoutes } from './routes/oauth';
 import { infoRoutes } from './routes/info';
 import { integrationRoutes } from './routes/integrations';
+import { aiRoutes } from './routes/ai';
+import { listRoutes } from './routes/lists';
+import { knowledgeRoutes } from './routes/knowledge';
 import { errorHandler } from './middleware/errorHandler';
 
 export function buildApp(): FastifyInstance {
@@ -27,6 +30,9 @@ export function buildApp(): FastifyInstance {
 
   void app.register(infoRoutes);
   void app.register(integrationRoutes);
+  void app.register(aiRoutes);
+  void app.register(listRoutes);
+  void app.register(knowledgeRoutes);
   void app.register(healthRoutes);
   void app.register(metricsRoutes);
   void app.register(webhookRoutes);

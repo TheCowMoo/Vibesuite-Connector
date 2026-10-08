@@ -17,6 +17,8 @@
     </a>
     <nav class="topnav__nav">
       <button class="topnav__link is-active" data-view="connections">Connections</button>
+      <button class="topnav__link" data-view="lists">Lists</button>
+      <button class="topnav__link" data-view="knowledge">Knowledge</button>
       <button class="topnav__link" data-view="settings">Settings</button>
     </nav>
     <div class="topnav__right">
@@ -46,6 +48,30 @@
       <p class="empty__text">Create a connection to start syncing RSVP changes to GoHighLevel.</p>
       <button class="btn btn--accent" id="emptyCta">+ New connection</button>
     </div>
+  </section>
+
+  <!-- Lists -->
+  <section id="view-lists" class="view" hidden>
+    <div class="page-head">
+      <div>
+        <h1 class="page-head__title">Lists</h1>
+        <p class="page-head__sub">Upload a list and let the AI segment it.</p>
+      </div>
+      <button class="btn btn--primary" id="newListBtn">+ New list</button>
+    </div>
+    <div id="listsList"></div>
+  </section>
+
+  <!-- Knowledge -->
+  <section id="view-knowledge" class="view" hidden>
+    <div class="page-head">
+      <div>
+        <h1 class="page-head__title">Knowledge</h1>
+        <p class="page-head__sub">Documents the AI uses as context.</p>
+      </div>
+      <button class="btn btn--primary" id="newKnowledgeBtn">+ Add document</button>
+    </div>
+    <div id="knowledgeList"></div>
   </section>
 
   <!-- Settings -->
@@ -174,6 +200,60 @@
       <span class="spacer"></span>
       <button class="btn btn--ghost" data-close="automations">Cancel</button>
       <button class="btn btn--primary" id="automationsSave">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- New list -->
+<div class="backdrop" id="newList" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="newListTitle">
+    <div class="modal__head">
+      <h2 class="modal__title" id="newListTitle">New list</h2>
+      <button class="icon-btn" data-close="newList" aria-label="Close">&times;</button>
+    </div>
+    <form id="newListForm" novalidate>
+      <label class="field"><span class="field__label">List name</span><input name="name" placeholder="e.g. Webinar leads" /></label>
+      <label class="field"><span class="field__label">Segmentation criteria</span><textarea name="criteria" rows="2" placeholder="e.g. Group into hot / warm / cold by job title and company size"></textarea></label>
+      <label class="field"><span class="field__label">List data</span><input type="file" id="listFile" accept=".csv,.txt,.md" /><textarea name="content" rows="6" placeholder="Paste CSV / list here, or choose a file above"></textarea></label>
+    </form>
+    <div class="modal__foot">
+      <span class="spacer"></span>
+      <button class="btn btn--ghost" data-close="newList">Cancel</button>
+      <button class="btn btn--primary" id="newListSave">Create list</button>
+    </div>
+  </div>
+</div>
+
+<!-- List result -->
+<div class="backdrop" id="listResult" hidden>
+  <div class="modal modal--wide" role="dialog" aria-modal="true" aria-labelledby="listResultTitle">
+    <div class="modal__head">
+      <h2 class="modal__title" id="listResultTitle">Segments</h2>
+      <button class="icon-btn" data-close="listResult" aria-label="Close">&times;</button>
+    </div>
+    <pre class="snapshot" id="listResultBody"></pre>
+    <div class="modal__foot">
+      <span class="spacer"></span>
+      <button class="btn btn--ghost" data-close="listResult">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- New knowledge doc -->
+<div class="backdrop" id="newKnowledge" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="newKnowledgeTitle">
+    <div class="modal__head">
+      <h2 class="modal__title" id="newKnowledgeTitle">Add document</h2>
+      <button class="icon-btn" data-close="newKnowledge" aria-label="Close">&times;</button>
+    </div>
+    <form id="newKnowledgeForm" novalidate>
+      <label class="field"><span class="field__label">Document name</span><input name="name" placeholder="e.g. Product FAQ" /></label>
+      <label class="field"><span class="field__label">Content</span><input type="file" id="knowledgeFile" accept=".txt,.md,.csv" /><textarea name="content" rows="8" placeholder="Paste text here, or choose a file above"></textarea></label>
+    </form>
+    <div class="modal__foot">
+      <span class="spacer"></span>
+      <button class="btn btn--ghost" data-close="newKnowledge">Cancel</button>
+      <button class="btn btn--primary" id="newKnowledgeSave">Add document</button>
     </div>
   </div>
 </div>
