@@ -18,6 +18,10 @@ export async function dispatchGhlWebhook(
   await axios.post(url, payload, { timeout: 15000 });
 }
 
+export async function postWebhook(url: string, payload: Record<string, unknown>): Promise<void> {
+  await axios.post(url, payload, { timeout: 15000 });
+}
+
 export function buildWebhookPayload(
   change: AttendeeChange,
   context: { contact?: { id: string } | null; appointment?: { id: string } | null },

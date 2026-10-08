@@ -92,6 +92,7 @@
         actions += '<a class="btn btn--outline btn--sm" href="/oauth/ghl/start?connectionId=' + encodeURIComponent(c.id) + '">Connect GHL</a>';
       }
       actions += '<button class="btn btn--outline btn--sm" data-action="edit" data-id="' + esc(c.id) + '">Edit</button>';
+      actions += '<button class="btn btn--ghost btn--sm" data-action="automations" data-id="' + esc(c.id) + '">Automations</button>';
       actions += '<button class="btn btn--ghost btn--sm" data-action="bootstrap" data-id="' + esc(c.id) + '">Bootstrap</button>';
       actions += '<button class="btn btn--ghost btn--sm" data-action="detail" data-id="' + esc(c.id) + '">Details</button>';
       actions += '<button class="btn btn--danger btn--sm" data-action="delete" data-id="' + esc(c.id) + '">Delete</button>';
@@ -261,6 +262,242 @@
       .catch(function (err) { toast(err.message, 'error'); });
   });
 
+  /* ---- Automations ---- */
+  var automationsId = null;
+  var editingRules = [];
+  var CATALOG = [];
+
+  function loadCatalog() {
+    return api('/api/integrations').then(function (d) {
+      CATALOG = d.integrations || [];
+    });
+  }
+
+  function fieldMeta(fieldKey) {
+    for (var i = 0; i < CATALOG.length; i++) {
+      var found = CATALOG[i].fields.filter(function (f) { return f.key === fieldKey; })[0];
+      if (found) return found;
+    }
+    return null;
+  }
+
+  function fieldOperators(fieldKey) {
+    var f = fieldMeta(fieldKey);
+    return (f && f.operators && f.operators.length) ? f.operators : ['equals'];
+  }
+
+  function operatorLabel(op) { return op.replace(/_/g, ' '); }
+
+  function newRule() {
+    return {
+      id: 'r' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+      name: '',
+      enabled: true,
+      conditions: [{ field: 'responseStatus', operator: 'equals', value: '' }],
+      webhookUrl: ''
+    };
+  }
+
+  function openAutomations(id) {
+    var c = state.connections.filter(function (x) { return x.id === id; })[0];
+    if (!c) return;
+    automationsId = id;
+    editingRules = (c.rules || []).map(function (r) { return JSON.parse(JSON.stringify(r)); });
+
+    var mode = c.ghlDeliveryMode || 'both';
+    $$('#automationsBody input[name="deliveryMode"]').forEach(function (r) { r.checked = r.value === mode; });
+
+    (CATALOG.length ? Promise.resolve() : loadCatalog()).then(function () {
+      renderRules();
+      loadSnapshot(id);
+      openModal('automations');
+    });
+  }
+
+  function renderRules() {
+    var el = $('#rulesList');
+    el.innerHTML = '';
+    if (editingRules.length === 0) {
+      el.innerHTML = '<p class="muted">No rules yet — add one below.</p>';
+    }
+    editingRules.forEach(function (rule) { el.appendChild(ruleEl(rule)); });
+  }
+
+  function ruleEl(rule) {
+    var box = document.createElement('div');
+    box.className = 'rule';
+
+    var head = document.createElement('div');
+    head.className = 'rule__head';
+
+    var title = document.createElement('span');
+    title.className = 'rule__title';
+    title.textContent = 'Rule';
+
+    var en = document.createElement('input');
+    en.type = 'checkbox';
+    en.checked = !!rule.enabled;
+    en.title = 'Enabled';
+    en.addEventListener('change', function () { rule.enabled = en.checked; });
+
+    var del = document.createElement('button');
+    del.type = 'button';
+    del.className = 'icon-btn';
+    del.textContent = '×';
+    del.title = 'Delete rule';
+    del.addEventListener('click', function () {
+      editingRules = editingRules.filter(function (r) { return r.id !== rule.id; });
+      renderRules();
+    });
+
+    head.appendChild(title);
+    head.appendChild(en);
+    head.appendChild(del);
+    box.appendChild(head);
+
+    var nameLabel = document.createElement('label');
+    nameLabel.className = 'field';
+    nameLabel.innerHTML = '<span class="field__label">Rule name</span>';
+    var nameInput = document.createElement('input');
+    nameInput.value = rule.name || '';
+    nameInput.placeholder = 'e.g. Webinar accepted';
+    nameInput.addEventListener('input', function () { rule.name = nameInput.value; });
+    nameLabel.appendChild(nameInput);
+    box.appendChild(nameLabel);
+
+    var condTitle = document.createElement('p');
+    condTitle.className = 'rule__cond-title';
+    condTitle.textContent = 'When ALL of these match:';
+    box.appendChild(condTitle);
+
+    var condList = document.createElement('div');
+    condList.className = 'cond-list';
+    rule.conditions.forEach(function (cond, idx) {
+      condList.appendChild(conditionEl(rule, cond, idx));
+    });
+    box.appendChild(condList);
+
+    var addCond = document.createElement('button');
+    addCond.type = 'button';
+    addCond.className = 'btn btn--ghost btn--sm';
+    addCond.textContent = '+ Add condition';
+    addCond.addEventListener('click', function () {
+      rule.conditions.push({ field: 'responseStatus', operator: 'equals', value: '' });
+      renderRules();
+    });
+    box.appendChild(addCond);
+
+    var urlLabel = document.createElement('label');
+    urlLabel.className = 'field';
+    urlLabel.innerHTML = '<span class="field__label">Then fire this webhook</span>';
+    var urlInput = document.createElement('input');
+    urlInput.value = rule.webhookUrl || '';
+    urlInput.placeholder = 'https://services.leadconnectorhq.com/hooks/…';
+    urlInput.addEventListener('input', function () { rule.webhookUrl = urlInput.value; });
+    urlLabel.appendChild(urlInput);
+    box.appendChild(urlLabel);
+
+    return box;
+  }
+
+  function conditionEl(rule, cond, idx) {
+    var row = document.createElement('div');
+    row.className = 'cond';
+
+    var fieldSel = document.createElement('select');
+    CATALOG.forEach(function (integration) {
+      var og = document.createElement('optgroup');
+      og.label = integration.label;
+      integration.fields.forEach(function (f) {
+        var o = document.createElement('option');
+        o.value = f.key;
+        o.textContent = f.label;
+        og.appendChild(o);
+      });
+      fieldSel.appendChild(og);
+    });
+    fieldSel.value = cond.field;
+    fieldSel.addEventListener('change', function () {
+      cond.field = fieldSel.value;
+      cond.operator = fieldOperators(cond.field)[0];
+      cond.value = '';
+      renderRules();
+    });
+
+    var opSel = document.createElement('select');
+    fieldOperators(cond.field).forEach(function (op) {
+      var o = document.createElement('option');
+      o.value = op;
+      o.textContent = operatorLabel(op);
+      opSel.appendChild(o);
+    });
+    opSel.value = cond.operator;
+    opSel.addEventListener('change', function () { cond.operator = opSel.value; });
+
+    var meta = fieldMeta(cond.field);
+    var valueControl;
+    if (meta && meta.values) {
+      valueControl = document.createElement('select');
+      var blank = document.createElement('option');
+      blank.value = '';
+      blank.textContent = '— pick value —';
+      valueControl.appendChild(blank);
+      meta.values.forEach(function (v) {
+        var o = document.createElement('option');
+        o.value = v;
+        o.textContent = v;
+        valueControl.appendChild(o);
+      });
+      valueControl.value = cond.value || '';
+      valueControl.addEventListener('change', function () { cond.value = valueControl.value; });
+    } else {
+      valueControl = document.createElement('input');
+      valueControl.value = cond.value || '';
+      valueControl.placeholder = meta && meta.sample ? 'e.g. ' + meta.sample : 'value';
+      valueControl.addEventListener('input', function () { cond.value = valueControl.value; });
+    }
+
+    var del = document.createElement('button');
+    del.type = 'button';
+    del.className = 'icon-btn';
+    del.textContent = '×';
+    del.title = 'Remove condition';
+    del.addEventListener('click', function () {
+      rule.conditions.splice(idx, 1);
+      renderRules();
+    });
+
+    row.appendChild(fieldSel);
+    row.appendChild(opSel);
+    row.appendChild(valueControl);
+    row.appendChild(del);
+    return row;
+  }
+
+  function loadSnapshot(id) {
+    var el = $('#snapshot');
+    el.textContent = 'Loading…';
+    api('/api/connections/' + id + '/snapshot')
+      .then(function (d) {
+        el.textContent = d.snapshot ? JSON.stringify(d.snapshot, null, 2) : 'No sample yet — sync an RSVP change to capture one.';
+      })
+      .catch(function () { el.textContent = 'No sample available.'; });
+  }
+
+  $('#addRuleBtn').addEventListener('click', function () {
+    editingRules.push(newRule());
+    renderRules();
+  });
+
+  $('#automationsSave').addEventListener('click', function () {
+    var checked = $('#automationsBody input[name="deliveryMode"]:checked');
+    var mode = (checked && checked.value) || 'both';
+    var body = { ghlDeliveryMode: mode, rules: editingRules };
+    api('/api/connections/' + automationsId, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+      .then(function () { closeModal('automations'); toast('Automations saved', 'success'); return load(); })
+      .catch(function (err) { toast(err.message, 'error'); });
+  });
+
   /* ---- List actions (event delegation) ---- */
   $('#list').addEventListener('click', function (e) {
     var btn = e.target.closest('[data-action]');
@@ -275,6 +512,8 @@
       openDetail(id);
     } else if (action === 'edit') {
       openEdit(id);
+    } else if (action === 'automations') {
+      openAutomations(id);
     } else if (action === 'delete') {
       if (!confirm('Delete this connection? Its watch channel will expire on its own.')) return;
       api('/api/connections/' + id, { method: 'DELETE' })
@@ -318,6 +557,7 @@
   /* ---- Init ---- */
   $('#newConnectionBtn').addEventListener('click', openWizard);
   $('#emptyCta').addEventListener('click', openWizard);
+  loadCatalog();
   showView('connections');
   load();
 })();

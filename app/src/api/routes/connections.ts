@@ -7,8 +7,9 @@ import {
   newConnectionId,
   publicConnection,
 } from '../../domain/connectionStore';
-import type { StoredConnection, WebhookUrls } from '../../domain/connection';
+import type { StoredConnection, WebhookUrls, DeliveryMode, AutomationRule } from '../../domain/connection';
 import { bootstrapConnection } from '../../domain/bootstrap';
+import { getSnapshot } from '../../domain/snapshotStore';
 
 interface CreateConnectionBody {
   name?: string;
@@ -17,6 +18,8 @@ interface CreateConnectionBody {
   ghlAuthType?: 'api_token' | 'oauth';
   ghlApiToken?: string;
   webhookUrls?: WebhookUrls;
+  ghlDeliveryMode?: DeliveryMode;
+  rules?: AutomationRule[];
 }
 
 interface UpdateConnectionBody {
@@ -26,6 +29,8 @@ interface UpdateConnectionBody {
   ghlAuthType?: 'api_token' | 'oauth';
   ghlApiToken?: string;
   webhookUrls?: WebhookUrls;
+  ghlDeliveryMode?: DeliveryMode;
+  rules?: AutomationRule[];
 }
 
 export async function connectionRoutes(app: FastifyInstance): Promise<void> {
@@ -41,6 +46,11 @@ export async function connectionRoutes(app: FastifyInstance): Promise<void> {
       return;
     }
     return { connection: publicConnection(conn) };
+  });
+
+  app.get('/api/connections/:id/snapshot', async (req, reply) => {
+    const snapshot = await getSnapshot((req.params as { id: string }).id);
+    return { snapshot };
   });
 
   app.post('/api/connections', async (req, reply) => {
@@ -62,6 +72,8 @@ export async function connectionRoutes(app: FastifyInstance): Promise<void> {
       ghlLocationId: body.ghlLocationId ?? '',
       ghlApiToken: body.ghlApiToken,
       webhookUrls: body.webhookUrls,
+      ghlDeliveryMode: body.ghlDeliveryMode ?? 'both',
+      rules: body.rules ?? [],
       createdAt: now,
       updatedAt: now,
     };
@@ -84,6 +96,8 @@ export async function connectionRoutes(app: FastifyInstance): Promise<void> {
     if (body.ghlLocationId !== undefined) conn.ghlLocationId = body.ghlLocationId;
     if (body.ghlAuthType !== undefined) conn.ghlAuthType = body.ghlAuthType;
     if (body.ghlApiToken) conn.ghlApiToken = body.ghlApiToken; // blank keeps existing
+    if (body.ghlDeliveryMode !== undefined) conn.ghlDeliveryMode = body.ghlDeliveryMode;
+    if (body.rules !== undefined) conn.rules = body.rules;
     if (body.webhookUrls !== undefined) {
       conn.webhookUrls = {
         yes: body.webhookUrls.yes || undefined,

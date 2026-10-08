@@ -147,6 +147,37 @@
   </div>
 </div>
 
+<!-- Automations (delivery mode + condition builder) -->
+<div class="backdrop" id="automations" hidden>
+  <div class="modal modal--wide" role="dialog" aria-modal="true" aria-labelledby="automationsTitle">
+    <div class="modal__head">
+      <h2 class="modal__title" id="automationsTitle">Automations</h2>
+      <button class="icon-btn" data-close="automations" aria-label="Close">&times;</button>
+    </div>
+    <div id="automationsBody">
+      <fieldset class="field">
+        <legend class="field__label">GHL integration method</legend>
+        <label class="radio"><input type="radio" name="deliveryMode" value="both" /> Both API + webhooks (default)</label>
+        <label class="radio"><input type="radio" name="deliveryMode" value="api" /> API only</label>
+        <label class="radio"><input type="radio" name="deliveryMode" value="webhook" /> Webhooks only</label>
+      </fieldset>
+
+      <h3 class="detail__sub">Condition builder</h3>
+      <p class="hint">Each rule fires its webhook when ALL of its conditions match an RSVP change. Fields and values come from the integration catalog.</p>
+      <div id="rulesList"></div>
+      <button class="btn btn--ghost btn--sm" id="addRuleBtn">+ Add rule</button>
+
+      <h3 class="detail__sub">Latest payload sample</h3>
+      <pre class="snapshot" id="snapshot">Loading…</pre>
+    </div>
+    <div class="modal__foot">
+      <span class="spacer"></span>
+      <button class="btn btn--ghost" data-close="automations">Cancel</button>
+      <button class="btn btn--primary" id="automationsSave">Save</button>
+    </div>
+  </div>
+</div>
+
 <div class="toasts" id="toasts" aria-live="polite"></div>
 
 <script src="/static/app.js"></script>

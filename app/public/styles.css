@@ -323,6 +323,34 @@ fieldset.field legend { margin-bottom: 0.4rem; }
 .dot--danger { background: var(--danger); }
 .dot--neutral { background: var(--neutral); }
 
+/* ---- Automations / condition builder ---- */
+.rule {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 0.9rem;
+  margin-bottom: 0.75rem;
+  background: var(--surface);
+}
+.rule__head { display: flex; align-items: center; gap: 0.6rem; margin-bottom: 0.5rem; }
+.rule__head input[type="checkbox"] { width: 16px; height: 16px; cursor: pointer; }
+.rule__title { font-weight: 700; color: var(--navy); flex: 1; }
+.rule__cond-title { font-size: 0.8rem; font-weight: 600; color: var(--ink-muted); margin: 0 0 0.4rem; }
+.cond-list { display: flex; flex-direction: column; gap: 0.4rem; margin-bottom: 0.5rem; }
+.cond { display: flex; gap: 0.4rem; align-items: center; }
+.cond select, .cond input { flex: 1; min-width: 0; }
+.snapshot {
+  background: var(--navy);
+  color: #e7ecff;
+  border-radius: var(--radius);
+  padding: 0.9rem;
+  font-size: 0.78rem;
+  overflow: auto;
+  max-height: 220px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin: 0;
+}
+
 /* ---- Toasts ---- */
 .toasts { position: fixed; top: 1rem; right: 1rem; z-index: 100; display: flex; flex-direction: column; gap: 0.5rem; }
 .toast {

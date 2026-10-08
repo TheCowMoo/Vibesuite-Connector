@@ -10,10 +10,12 @@ import { acquireLock } from '../domain/lock';
 import { computeChanges, buildChangeFingerprint, type AttendeeChange } from '../domain/dedupe';
 import { toGhlAction } from '../domain/transform';
 import { tryClaimDispatch, releaseDispatch } from '../domain/dispatchGuard';
+import { matchingRules, type ConditionContext } from '../domain/condition';
+import { saveSnapshot } from '../domain/snapshotStore';
 import { mapping } from '../ghl/mapping';
 import { updateAppointmentStatus } from '../ghl/appointments';
 import { addTags, removeTags, setDnd, updateCustomField, addNote } from '../ghl/contacts';
-import { dispatchGhlWebhook, buildWebhookPayload } from '../ghl/webhooks';
+import { dispatchGhlWebhook, buildWebhookPayload, postWebhook } from '../ghl/webhooks';
 
 export async function processSync(connectionId: string): Promise<void> {
   const conn = await getConnection(connectionId);
@@ -87,6 +89,7 @@ async function dispatchChange(conn: StoredConnection, change: AttendeeChange): P
   const connectionId = conn.id;
   const action = toGhlAction(change.newStatus);
   const fingerprint = buildChangeFingerprint(connectionId, change);
+  const mode = conn.ghlDeliveryMode ?? 'both';
 
   const claimed = await tryClaimDispatch(connectionId, fingerprint);
   if (!claimed) {
@@ -99,43 +102,57 @@ async function dispatchChange(conn: StoredConnection, change: AttendeeChange): P
   }
 
   logger.info(
-    { connectionId, eventId: change.eventId, email: change.email, from: change.previousStatus, to: change.newStatus },
+    { connectionId, eventId: change.eventId, email: change.email, from: change.previousStatus, to: change.newStatus, mode },
     'dispatching RSVP change'
   );
 
   try {
-    const contact = await mapping.resolveContact(conn, change.email);
-    const appointment = await mapping.resolveAppointment(connectionId, change.eventId);
+    let contact: { id: string } | null = null;
+    let appointment: { id: string } | null = null;
 
-    if (appointment?.id) {
-      await updateAppointmentStatus(conn, appointment.id, action.appointmentStatus, `${fingerprint}:status`);
-    } else {
-      logger.warn({ connectionId, eventId: change.eventId }, 'no GHL appointment mapping; skipping appointment status update');
+    if (mode === 'api' || mode === 'both') {
+      contact = await mapping.resolveContact(conn, change.email);
+      appointment = await mapping.resolveAppointment(connectionId, change.eventId);
+
+      if (appointment?.id) {
+        await updateAppointmentStatus(conn, appointment.id, action.appointmentStatus, `${fingerprint}:status`);
+      } else {
+        logger.warn({ connectionId, eventId: change.eventId }, 'no GHL appointment mapping; skipping appointment status update');
+      }
+
+      if (contact?.id) {
+        await addTags(conn, contact.id, action.tagsToAdd, `${fingerprint}:tags:add`);
+        await removeTags(conn, contact.id, action.tagsToRemove, `${fingerprint}:tags:del`);
+        if (action.setDnd) {
+          await setDnd(conn, contact.id, true, `${fingerprint}:dnd`);
+          await addNote(
+            conn,
+            contact.id,
+            `[RSVP sync] ${change.email} declined${change.causedByCancellation ? ' (event cancelled)' : ''} event "${
+              change.event.summary ?? change.eventId
+            }". DND enabled.`,
+            `${fingerprint}:note`
+          );
+        }
+        if (env.GHL_RSVP_CUSTOM_FIELD_ID) {
+          await updateCustomField(conn, contact.id, env.GHL_RSVP_CUSTOM_FIELD_ID, action.rsvp, `${fingerprint}:customfield`);
+        }
+      } else {
+        logger.warn({ connectionId, email: change.email }, 'no GHL contact found for attendee');
+      }
     }
 
-    if (contact?.id) {
-      await addTags(conn, contact.id, action.tagsToAdd, `${fingerprint}:tags:add`);
-      await removeTags(conn, contact.id, action.tagsToRemove, `${fingerprint}:tags:del`);
-      if (action.setDnd) {
-        await setDnd(conn, contact.id, true, `${fingerprint}:dnd`);
-        await addNote(
-          conn,
-          contact.id,
-          `[RSVP sync] ${change.email} declined${change.causedByCancellation ? ' (event cancelled)' : ''} event "${
-            change.event.summary ?? change.eventId
-          }". DND enabled.`,
-          `${fingerprint}:note`
-        );
+    if (mode === 'webhook' || mode === 'both') {
+      if (action.webhookBranch) {
+        await dispatchGhlWebhook(conn, action.webhookBranch, buildWebhookPayload(change, { contact, appointment }, fingerprint));
       }
-      if (env.GHL_RSVP_CUSTOM_FIELD_ID) {
-        await updateCustomField(conn, contact.id, env.GHL_RSVP_CUSTOM_FIELD_ID, action.rsvp, `${fingerprint}:customfield`);
-      }
-    } else {
-      logger.warn({ connectionId, email: change.email }, 'no GHL contact found for attendee');
+      await dispatchMatchingRules(conn, change, fingerprint, contact, appointment);
     }
 
-    if (action.webhookBranch) {
-      await dispatchGhlWebhook(conn, action.webhookBranch, buildWebhookPayload(change, { contact, appointment }, fingerprint));
+    try {
+      await saveSnapshot(connectionId, buildWebhookPayload(change, { contact, appointment }, fingerprint));
+    } catch (err) {
+      logger.warn({ connectionId, err: (err as Error).message }, 'failed to save payload snapshot');
     }
 
     inc('rsvp_dispatched_total', { status: action.rsvp });
@@ -143,6 +160,35 @@ async function dispatchChange(conn: StoredConnection, change: AttendeeChange): P
     inc('ghl_errors_total', { status: action.rsvp });
     await releaseDispatch(connectionId, fingerprint);
     throw err;
+  }
+}
+
+async function dispatchMatchingRules(
+  conn: StoredConnection,
+  change: AttendeeChange,
+  fingerprint: string,
+  contact: { id: string } | null,
+  appointment: { id: string } | null
+): Promise<void> {
+  if (!conn.rules || conn.rules.length === 0) return;
+
+  const ctx: ConditionContext = {
+    responseStatus: change.newStatus,
+    email: change.email,
+    eventSummary: change.event.summary ?? '',
+    eventId: change.eventId,
+    calendarId: conn.googleCalendarId,
+  };
+
+  const matched = matchingRules(conn.rules, ctx);
+  for (const rule of matched) {
+    try {
+      const payload = buildWebhookPayload(change, { contact, appointment }, `${fingerprint}:rule:${rule.id}`);
+      await postWebhook(rule.webhookUrl, payload);
+      logger.info({ connectionId: conn.id, ruleId: rule.id, ruleName: rule.name }, 'automation rule webhook fired');
+    } catch (err) {
+      logger.error({ connectionId: conn.id, ruleId: rule.id, err: (err as Error).message }, 'automation rule webhook failed');
+    }
   }
 }
 

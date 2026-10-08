@@ -8,6 +8,7 @@ import { metricsRoutes } from './routes/metrics';
 import { connectionRoutes } from './routes/connections';
 import { oauthRoutes } from './routes/oauth';
 import { infoRoutes } from './routes/info';
+import { integrationRoutes } from './routes/integrations';
 import { errorHandler } from './middleware/errorHandler';
 
 export function buildApp(): FastifyInstance {
@@ -25,6 +26,7 @@ export function buildApp(): FastifyInstance {
   });
 
   void app.register(infoRoutes);
+  void app.register(integrationRoutes);
   void app.register(healthRoutes);
   void app.register(metricsRoutes);
   void app.register(webhookRoutes);
