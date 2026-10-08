@@ -48,6 +48,8 @@ const EnvSchema = z.object({
   METRICS_PORT: z.coerce.number().int().min(0).default(9090),
   SYNC_RETRY_ATTEMPTS: z.coerce.number().int().positive().default(5),
   SYNC_BACKOFF_DELAY_MS: z.coerce.number().int().positive().default(2000),
+  INVITE_BATCH_SIZE: z.coerce.number().int().positive().default(100),
+  INVITE_DELAY_MS: z.coerce.number().int().min(0).default(300),
   LOG_LEVEL: z.string().default('info'),
 });
 

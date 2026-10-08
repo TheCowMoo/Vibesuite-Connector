@@ -30,5 +30,9 @@ export const REDIS_KEYS = {
   knowledgeDoc: (id: string) => `knowledge:doc:${id}`,
   listsIndex: () => 'lists:index',
   list: (id: string) => `list:${id}`,
+  invitesIndex: () => 'invites:index',
+  invite: (id: string) => `invite:${id}`,
+  listInvites: (listId: string) => `list:${listId}:invites`,
+  listInvited: (listId: string) => `list:${listId}:invited`,
 } as const;
 

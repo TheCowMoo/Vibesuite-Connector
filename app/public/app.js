@@ -44,10 +44,12 @@
     $('#view-connections').hidden = name !== 'connections';
     $('#view-lists').hidden = name !== 'lists';
     $('#view-knowledge').hidden = name !== 'knowledge';
+    $('#view-invites').hidden = name !== 'invites';
     $('#view-settings').hidden = name !== 'settings';
     if (name === 'settings') loadInfo();
     if (name === 'lists') loadLists();
     if (name === 'knowledge') loadKnowledge();
+    if (name === 'invites') loadInvitesView();
   }
   $$('.topnav__link').forEach(function (btn) {
     btn.addEventListener('click', function () { showView(btn.dataset.view); });
@@ -83,7 +85,8 @@
     alert: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>',
     info: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>',
     sliders: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg>',
-    x: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>'
+    x: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>',
+    send: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4 20-7z"/></svg>'
   };
   function icon(name) { return ICONS[name] || ''; }
   function menuBtn(action, label, glyph, id, danger) {
@@ -589,6 +592,228 @@
     }
   });
 
+  /* ---- Invites ---- */
+  var inviteConnections = [];
+  var inviteLists = [];
+
+  function loadInvitesView() {
+    var tz = document.getElementById('inviteTimezone');
+    if (tz && !tz.value) {
+      try { tz.value = Intl.DateTimeFormat().resolvedOptions().timeZone; } catch (e) {}
+    }
+    return Promise.all([
+      api('/api/connections').then(function (d) {
+        inviteConnections = (d.connections || []).filter(function (c) { return c.status === 'active'; });
+      }),
+      api('/api/lists').then(function (d) {
+        inviteLists = (d.lists || []).filter(function (l) { return l.hasResult; });
+      }),
+      loadInviteHistory()
+    ]).then(function () {
+      renderInviteConnections();
+      renderInviteLists();
+    }).catch(function (e) { toast(e.message, 'error'); });
+  }
+
+  function renderInviteConnections() {
+    var sel = document.getElementById('inviteConnection');
+    var prev = sel.value;
+    sel.innerHTML = '';
+    inviteConnections.forEach(function (c) {
+      var o = document.createElement('option');
+      o.value = c.id;
+      o.textContent = c.name + ' (' + c.googleCalendarId + ')';
+      sel.appendChild(o);
+    });
+    if (prev && inviteConnections.some(function (c) { return c.id === prev; })) sel.value = prev;
+    else if (inviteConnections.length) sel.value = inviteConnections[0].id;
+  }
+
+  function renderInviteLists() {
+    var sel = document.getElementById('inviteList');
+    var prev = sel.value;
+    sel.innerHTML = '<option value="">Select a list…</option>';
+    inviteLists.forEach(function (l) {
+      var o = document.createElement('option');
+      o.value = l.id;
+      o.textContent = l.name;
+      sel.appendChild(o);
+    });
+    if (prev && inviteLists.some(function (l) { return l.id === prev; })) sel.value = prev;
+  }
+
+  function selectedInviteSegments() {
+    var all = document.getElementById('inviteSegAll');
+    if (all && all.checked) return [];
+    return $$('#inviteSegments .invite-seg:checked').map(function (cb) { return cb.value; });
+  }
+
+  function renderInviteSegments(result) {
+    var wrap = document.getElementById('inviteSegments');
+    wrap.innerHTML = '';
+    var segs = (result && Array.isArray(result.segments)) ? result.segments : [];
+    if (!segs.length) {
+      wrap.innerHTML = '<p class="muted">This list has no segments yet — run Segment first.</p>';
+      return;
+    }
+    var allLab = document.createElement('label');
+    allLab.className = 'check';
+    allLab.innerHTML = '<input type="checkbox" id="inviteSegAll" checked /> <span>All segments</span>';
+    wrap.appendChild(allLab);
+    segs.forEach(function (s) {
+      var rows = Array.isArray(s.rows) ? s.rows.length : 0;
+      var lab = document.createElement('label');
+      lab.className = 'check';
+      lab.innerHTML = '<input type="checkbox" class="invite-seg" value="' + esc(s.name) + '" /> <span>' + esc(s.name) + ' <em class="muted">(' + rows + ')</em></span>';
+      wrap.appendChild(lab);
+    });
+    allLab.querySelector('input').addEventListener('change', function () {
+      var on = allLab.querySelector('input').checked;
+      $$('#inviteSegments .invite-seg').forEach(function (cb) { cb.checked = false; cb.disabled = on; });
+      refreshInvitePreview();
+    });
+    $$('#inviteSegments .invite-seg').forEach(function (cb) {
+      cb.addEventListener('change', refreshInvitePreview);
+    });
+  }
+
+  function refreshInvitePreview() {
+    var listId = document.getElementById('inviteList').value;
+    var el = document.getElementById('inviteRecipients');
+    if (!listId) { el.textContent = 'Select a list to preview recipients.'; return; }
+    api('/api/invites/preview', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ listId: listId, segments: selectedInviteSegments() }) })
+      .then(function (d) {
+        el.innerHTML = '<strong>' + d.emails.length + '</strong> recipients · ' +
+          '<span class="muted">' + d.duplicatesRemoved + ' duplicates · ' + (d.invalid ? d.invalid.length : 0) + ' invalid · ' + (d.alreadyInvited ? d.alreadyInvited.length : 0) + ' already invited</span>';
+      })
+      .catch(function (e) { el.textContent = 'Preview failed: ' + e.message; });
+  }
+
+  function loadInviteHistory() {
+    return api('/api/invites').then(function (d) { renderInviteHistory(d.invites || []); }).catch(function () {});
+  }
+
+  function renderInviteHistory(invites) {
+    var el = document.getElementById('inviteHistory');
+    if (!invites.length) {
+      el.innerHTML = '<div class="empty"><div class="empty__icon">' + icon('send') + '</div><h2 class="empty__title">No invites yet</h2></div>';
+      return;
+    }
+    el.innerHTML = '<table class="map"><thead><tr><th>Event</th><th>List</th><th>Calendar</th><th>Recipients</th><th>Status</th><th>Sent</th><th></th></tr></thead><tbody>' +
+      invites.map(function (inv) {
+        var links = inv.batches && inv.batches.length
+          ? inv.batches.map(function (b) { return b.htmlLink ? '<a href="' + esc(b.htmlLink) + '" target="_blank" rel="noopener">event</a>' : esc(b.eventId || ''); }).join(', ')
+          : '—';
+        return '<tr>' +
+          '<td>' + esc(inv.summary) + '</td>' +
+          '<td>' + esc(inv.listName) + '</td>' +
+          '<td>' + esc(inv.connectionName) + '</td>' +
+          '<td>' + inv.recipientCount + '</td>' +
+          '<td>' + esc(inv.status) + '</td>' +
+          '<td>' + new Date(inv.createdAt).toLocaleString() + '</td>' +
+          '<td>' + links + ' <button class="btn btn--ghost btn--sm" data-action="deleteInvite" data-id="' + esc(inv.id) + '">Delete</button></td>' +
+          '</tr>';
+      }).join('') + '</tbody></table>';
+  }
+
+  function goToInvite(listId) {
+    showView('invites');
+    loadInvitesView().then(function () {
+      document.getElementById('inviteList').value = listId || '';
+      var list = inviteLists.filter(function (l) { return l.id === listId; })[0];
+      if (list) document.getElementById('inviteSummary').value = list.name;
+      document.getElementById('inviteList').dispatchEvent(new Event('change'));
+    });
+  }
+
+  document.getElementById('inviteList').addEventListener('change', function () {
+    var id = this.value;
+    if (!id) {
+      document.getElementById('inviteSegments').innerHTML = '<p class="muted">Choose a list to see its segments.</p>';
+      document.getElementById('inviteRecipients').textContent = 'Select a list to preview recipients.';
+      return;
+    }
+    api('/api/lists/' + id).then(function (d) {
+      var list = d.list;
+      renderInviteSegments(list && list.result);
+      if (!document.getElementById('inviteSummary').value.trim()) {
+        document.getElementById('inviteSummary').value = (list && list.name) || '';
+      }
+      refreshInvitePreview();
+    }).catch(function (e) { toast(e.message, 'error'); });
+  });
+
+  document.getElementById('invitePreview').addEventListener('click', refreshInvitePreview);
+
+  document.getElementById('inviteDraftAi').addEventListener('click', function () {
+    var listId = document.getElementById('inviteList').value;
+    withBusy(this, api('/api/invites/copy', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ listId: listId }) }))
+      .then(function (d) {
+        if (d.summary) document.getElementById('inviteSummary').value = d.summary;
+        if (d.description) document.getElementById('inviteDescription').value = d.description;
+        toast('Draft ready', 'success');
+      })
+      .catch(function (e) { toast(e.message, 'error'); });
+  });
+
+  document.getElementById('inviteSend').addEventListener('click', function () {
+    var connId = document.getElementById('inviteConnection').value;
+    var listId = document.getElementById('inviteList').value;
+    var summary = document.getElementById('inviteSummary').value.trim();
+    var start = document.getElementById('inviteStart').value;
+    var end = document.getElementById('inviteEnd').value;
+    if (!connId) { toast('Choose a calendar connection', 'error'); return; }
+    if (!listId) { toast('Choose a segmented list', 'error'); return; }
+    if (!summary) { toast('Event title is required', 'error'); return; }
+    if (!start || !end) { toast('Set a start and end time', 'error'); return; }
+    if (new Date(end) <= new Date(start)) { toast('End must be after start', 'error'); return; }
+
+    api('/api/invites/preview', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ listId: listId, segments: selectedInviteSegments() }) })
+      .then(function (p) {
+        if (!p.emails.length) { toast('No recipients to invite (already invited or invalid)', 'error'); return; }
+        return confirmDialog('Send invites?', 'This emails a real calendar invite to ' + p.emails.length + ' recipient(s) via Google Calendar. It cannot be undone.', 'Send')
+          .then(function (ok) {
+            if (!ok) return;
+            var body = {
+              connectionId: connId,
+              listId: listId,
+              segments: selectedInviteSegments(),
+              event: {
+                summary: summary,
+                description: document.getElementById('inviteDescription').value,
+                location: document.getElementById('inviteLocation').value,
+                start: start,
+                end: end,
+                timeZone: document.getElementById('inviteTimezone').value || undefined
+              }
+            };
+            return withBusy(document.getElementById('inviteSend'), api('/api/invites', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }))
+              .then(function (r) {
+                toast('Invites sent (' + r.sent + ' recipients)', r.ok ? 'success' : 'error');
+                loadInviteHistory();
+                refreshInvitePreview();
+              })
+              .catch(function (e) { toast(e.message, 'error'); });
+          });
+      })
+      .catch(function (e) { toast(e.message, 'error'); });
+  });
+
+  document.getElementById('inviteHistory').addEventListener('click', function (e) {
+    var btn = e.target.closest('[data-action="deleteInvite"]');
+    if (!btn) return;
+    confirmDialog('Delete invite record?', 'This only removes the history entry — the calendar event and invitations remain in Google.', 'Delete').then(function (ok) {
+      if (!ok) return;
+      api('/api/invites/' + btn.dataset.id, { method: 'DELETE' })
+        .then(function () { toast('Record deleted', 'success'); loadInviteHistory(); })
+        .catch(function (err) { toast(err.message, 'error'); });
+    });
+  });
+
+  document.getElementById('listResultInvite').addEventListener('click', function () {
+    if (currentListResultId) goToInvite(currentListResultId);
+  });
+
   /* ---- Settings ---- */
   function loadInfo() {
     $('#settingsCards').innerHTML = '<div class="skeleton skel-card" style="height:180px"></div><div class="skeleton skel-card" style="height:180px"></div>';
@@ -641,6 +866,7 @@
         '</div>' +
         '<div class="conn__actions">' +
           '<button class="btn btn--primary btn--sm" data-action="segment" data-id="' + esc(l.id) + '">Segment</button>' +
+          (l.hasResult ? '<button class="btn btn--accent btn--sm" data-action="sendInvite" data-id="' + esc(l.id) + '">Send invite</button>' : '') +
           '<button class="btn btn--ghost btn--sm" data-action="viewResult" data-id="' + esc(l.id) + '">View</button>' +
           '<button class="btn btn--danger btn--sm" data-action="deleteList" data-id="' + esc(l.id) + '">Delete</button>' +
         '</div>';
@@ -655,7 +881,9 @@
       .catch(function (e) { toast(e.message, 'error'); });
   }
 
+  var currentListResultId = null;
   function viewListResult(id) {
+    currentListResultId = id;
     api('/api/lists/' + id).then(function (d) {
       var r = d.list && d.list.result;
       $('#listResultBody').innerHTML = renderSegments(r);
@@ -779,6 +1007,7 @@
     if (!btn) return;
     var id = btn.dataset.id;
     if (btn.dataset.action === 'segment') segmentList(id);
+    else if (btn.dataset.action === 'sendInvite') goToInvite(id);
     else if (btn.dataset.action === 'viewResult') viewListResult(id);
     else if (btn.dataset.action === 'deleteList') {
       confirmDialog('Delete list?', 'This list and its segmentation result will be removed.', 'Delete').then(function (ok) {
