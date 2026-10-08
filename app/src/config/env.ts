@@ -50,6 +50,12 @@ const EnvSchema = z.object({
   SYNC_BACKOFF_DELAY_MS: z.coerce.number().int().positive().default(2000),
   INVITE_BATCH_SIZE: z.coerce.number().int().positive().default(100),
   INVITE_DELAY_MS: z.coerce.number().int().min(0).default(300),
+  ATTENDANCE_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(900000),
+  ATTENDANCE_FETCH_DELAY_MIN: z.coerce.number().int().min(0).default(15),
+  ATTENDANCE_MIN_SECONDS: z.coerce.number().int().min(0).default(60),
+  ATTENDANCE_MATCH_MODE: z.enum(['email', 'email_or_name']).default('email'),
+  GHL_TAG_ATTENDED: z.string().default('attended'),
+  GHL_TAG_NO_SHOW: z.string().default('no-show'),
   LOG_LEVEL: z.string().default('info'),
 });
 

@@ -34,5 +34,10 @@ export const REDIS_KEYS = {
   invite: (id: string) => `invite:${id}`,
   listInvites: (listId: string) => `list:${listId}:invites`,
   listInvited: (listId: string) => `list:${listId}:invited`,
+  videoSettings: () => 'settings:video',
+  sessionsIndex: () => 'sessions:index',
+  session: (id: string) => `session:${id}`,
+  attendance: (sessionId: string) => `session:${sessionId}:attendance`,
+  attendanceDispatched: (sessionId: string, fingerprint: string) => `session:${sessionId}:dispatch:seen:${fingerprint}`,
 } as const;
 

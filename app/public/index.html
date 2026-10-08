@@ -22,6 +22,7 @@
       <button class="topnav__link" data-view="lists"><span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg></span>Lists</button>
       <button class="topnav__link" data-view="knowledge"><span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg></span>Knowledge</button>
       <button class="topnav__link" data-view="invites"><span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4 20-7z"/></svg></span>Invites</button>
+      <button class="topnav__link" data-view="attendance"><span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg></span>Attendance</button>
       <button class="topnav__link" data-view="settings"><span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg></span>Settings</button>
     </nav>
     <div class="topnav__right">
@@ -165,6 +166,20 @@
     <option value="Asia/Tokyo"></option>
     <option value="Australia/Sydney"></option>
   </datalist>
+
+  <!-- Attendance -->
+  <section id="view-attendance" class="view" hidden>
+    <div class="page-head">
+      <div>
+        <h1 class="page-head__title">Attendance</h1>
+        <p class="page-head__sub">Cross-reference who actually attended each video session.</p>
+      </div>
+      <button class="btn btn--primary" id="newSessionBtn">+ New session</button>
+    </div>
+
+    <div class="summary" id="attendanceSummaryStrip"></div>
+    <div id="sessionsList"></div>
+  </section>
 </main>
 
 <!-- New connection wizard -->
@@ -355,6 +370,85 @@
       <span class="spacer"></span>
       <button class="btn btn--ghost" data-close="newKnowledge">Cancel</button>
       <button class="btn btn--primary" id="newKnowledgeSave">Add document</button>
+    </div>
+  </div>
+</div>
+
+<!-- Session detail -->
+<div class="backdrop" id="sessionDetail" hidden>
+  <div class="modal modal--wide" role="dialog" aria-modal="true" aria-labelledby="sessionDetailTitle">
+    <div class="modal__head">
+      <h2 class="modal__title" id="sessionDetailTitle">Session</h2>
+      <button class="icon-btn" data-close="sessionDetail" aria-label="Close">&times;</button>
+    </div>
+    <div id="sessionDetailBody"></div>
+    <div class="modal__foot">
+      <button class="btn btn--outline" id="sessionDispatch">Push to GHL</button>
+      <span class="spacer"></span>
+      <button class="btn btn--ghost" data-close="sessionDetail">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- New session -->
+<div class="backdrop" id="newSession" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="newSessionTitle">
+    <div class="modal__head">
+      <h2 class="modal__title" id="newSessionTitle">New session</h2>
+      <button class="icon-btn" data-close="newSession" aria-label="Close">&times;</button>
+    </div>
+    <form id="newSessionForm" novalidate>
+      <label class="field"><span class="field__label">Provider</span>
+        <select name="provider">
+          <option value="zoom">Zoom</option>
+          <option value="google_meet">Google Meet (coming soon)</option>
+          <option value="webinargeek">WebinarGeek (coming soon)</option>
+        </select>
+      </label>
+      <label class="field"><span class="field__label">Meeting ID / UUID</span><input name="externalId" placeholder="e.g. 85412345678 or the Zoom UUID" /></label>
+      <label class="field"><span class="field__label">Session title</span><input name="title" placeholder="e.g. Product webinar" /></label>
+      <div class="invite-row">
+        <label class="field"><span class="field__label">Start</span><input type="datetime-local" name="startTime" /></label>
+        <label class="field"><span class="field__label">End</span><input type="datetime-local" name="endTime" /></label>
+      </div>
+      <label class="field"><span class="field__label">Calendar connection</span><select name="connectionId" id="sessionConnection"></select></label>
+      <label class="field"><span class="field__label">Link to invite (optional)</span><select name="inviteId" id="sessionInvite"><option value="">None</option></select></label>
+    </form>
+    <div class="modal__foot">
+      <span class="spacer"></span>
+      <button class="btn btn--ghost" data-close="newSession">Cancel</button>
+      <button class="btn btn--primary" id="newSessionSave">Create session</button>
+    </div>
+  </div>
+</div>
+
+<!-- Attendance automations -->
+<div class="backdrop" id="attendanceAutomations" hidden>
+  <div class="modal modal--wide" role="dialog" aria-modal="true" aria-labelledby="attendanceAutomationsTitle">
+    <div class="modal__head">
+      <h2 class="modal__title" id="attendanceAutomationsTitle">Attendance automations</h2>
+      <button class="icon-btn" data-close="attendanceAutomations" aria-label="Close">&times;</button>
+    </div>
+    <div id="attendanceAutomationsBody">
+      <fieldset class="field">
+        <legend class="field__label">GHL integration method</legend>
+        <label class="radio"><input type="radio" name="attendanceDeliveryMode" value="both" /> Both API + webhooks (default)</label>
+        <label class="radio"><input type="radio" name="attendanceDeliveryMode" value="api" /> API only</label>
+        <label class="radio"><input type="radio" name="attendanceDeliveryMode" value="webhook" /> Webhooks only</label>
+      </fieldset>
+
+      <h3 class="detail__sub">Condition builder</h3>
+      <p class="hint">Each rule fires its webhook when ALL of its conditions match an attendee outcome. Fields and values come from the video-attendance catalog.</p>
+      <div id="attendanceRulesList"></div>
+      <button class="btn btn--ghost btn--sm" id="attendanceAddRuleBtn">+ Add rule</button>
+
+      <h3 class="detail__sub">Example payload</h3>
+      <pre class="snapshot" id="attendanceSnapshot">…</pre>
+    </div>
+    <div class="modal__foot">
+      <span class="spacer"></span>
+      <button class="btn btn--ghost" data-close="attendanceAutomations">Cancel</button>
+      <button class="btn btn--primary" id="attendanceAutomationsSave">Save</button>
     </div>
   </div>
 </div>

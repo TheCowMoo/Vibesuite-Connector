@@ -10,7 +10,19 @@ export interface WebhookUrls {
 
 export type DeliveryMode = 'api' | 'webhook' | 'both';
 
-export type ConditionField = 'responseStatus' | 'email' | 'eventSummary' | 'eventId' | 'calendarId';
+export type ConditionField =
+  | 'responseStatus'
+  | 'email'
+  | 'eventSummary'
+  | 'eventId'
+  | 'calendarId'
+  | 'attendanceStatus'
+  | 'attendanceMinutes'
+  | 'provider'
+  | 'sessionTitle'
+  | 'sessionId'
+  | 'joinedAt'
+  | 'leftAt';
 export type ConditionOperator =
   | 'equals'
   | 'not_equals'
@@ -18,7 +30,11 @@ export type ConditionOperator =
   | 'starts_with'
   | 'ends_with'
   | 'is_empty'
-  | 'not_empty';
+  | 'not_empty'
+  | 'greater_than'
+  | 'greater_or_equal'
+  | 'less_than'
+  | 'less_or_equal';
 
 export interface Condition {
   field: ConditionField;
@@ -47,6 +63,8 @@ export interface Connection {
   webhookUrls?: WebhookUrls;
   ghlDeliveryMode?: DeliveryMode;
   rules?: AutomationRule[];
+  attendanceDeliveryMode?: DeliveryMode;
+  attendanceRules?: AutomationRule[];
   watchChannelId?: string;
   watchExpiresAt?: number;
   createdAt: number;

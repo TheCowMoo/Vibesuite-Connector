@@ -45,11 +45,13 @@
     $('#view-lists').hidden = name !== 'lists';
     $('#view-knowledge').hidden = name !== 'knowledge';
     $('#view-invites').hidden = name !== 'invites';
+    $('#view-attendance').hidden = name !== 'attendance';
     $('#view-settings').hidden = name !== 'settings';
     if (name === 'settings') loadInfo();
     if (name === 'lists') loadLists();
     if (name === 'knowledge') loadKnowledge();
     if (name === 'invites') loadInvitesView();
+    if (name === 'attendance') loadAttendance();
   }
   $$('.topnav__link').forEach(function (btn) {
     btn.addEventListener('click', function () { showView(btn.dataset.view); });
@@ -86,7 +88,8 @@
     info: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>',
     sliders: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg>',
     x: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>',
-    send: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4 20-7z"/></svg>'
+    send: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4 20-7z"/></svg>',
+    video: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>'
   };
   function icon(name) { return ICONS[name] || ''; }
   function menuBtn(action, label, glyph, id, danger) {
@@ -146,6 +149,7 @@
       if (c.ghlAuthType === 'oauth') {
         items += '<a class="menu__item" href="/oauth/ghl/start?connectionId=' + encodeURIComponent(c.id) + '">' + icon('link') + '<span>Connect GHL</span></a>';
       }
+      items += menuBtn('attendanceAutomations', 'Attendance automations', 'sliders', c.id);
       items += menuBtn('delete', 'Delete', 'trash', c.id, true);
 
       var card = document.createElement('div');
@@ -331,6 +335,8 @@
   var automationsId = null;
   var editingRules = [];
   var CATALOG = [];
+  var currentScope = 'calendar';
+  var currentRulesEl = null;
 
   function loadCatalog() {
     return api('/api/integrations').then(function (d) {
@@ -340,6 +346,7 @@
 
   function fieldMeta(fieldKey) {
     for (var i = 0; i < CATALOG.length; i++) {
+      if (currentScope && CATALOG[i].scope !== currentScope) continue;
       var found = CATALOG[i].fields.filter(function (f) { return f.key === fieldKey; })[0];
       if (found) return found;
     }
@@ -354,11 +361,12 @@
   function operatorLabel(op) { return op.replace(/_/g, ' '); }
 
   function newRule() {
+    var defaultField = currentScope === 'attendance' ? 'attendanceStatus' : 'responseStatus';
     return {
       id: 'r' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
       name: '',
       enabled: true,
-      conditions: [{ field: 'responseStatus', operator: 'equals', value: '' }],
+      conditions: [{ field: defaultField, operator: 'equals', value: '' }],
       webhookUrl: ''
     };
   }
@@ -368,6 +376,8 @@
     if (!c) return;
     automationsId = id;
     editingRules = (c.rules || []).map(function (r) { return JSON.parse(JSON.stringify(r)); });
+    currentScope = 'calendar';
+    currentRulesEl = $('#rulesList');
 
     var mode = c.ghlDeliveryMode || 'both';
     $$('#automationsBody input[name="deliveryMode"]').forEach(function (r) { r.checked = r.value === mode; });
@@ -380,12 +390,13 @@
   }
 
   function renderRules() {
-    var el = $('#rulesList');
+    var el = currentRulesEl || $('#rulesList');
+    var rules = editingRules;
     el.innerHTML = '';
-    if (editingRules.length === 0) {
+    if (rules.length === 0) {
       el.innerHTML = '<p class="muted">No rules yet — add one below.</p>';
     }
-    editingRules.forEach(function (rule) { el.appendChild(ruleEl(rule)); });
+    rules.forEach(function (rule) { el.appendChild(ruleEl(rule)); });
   }
 
   function ruleEl(rule) {
@@ -447,7 +458,7 @@
     addCond.className = 'btn btn--ghost btn--sm';
     addCond.textContent = '+ Add condition';
     addCond.addEventListener('click', function () {
-      rule.conditions.push({ field: 'responseStatus', operator: 'equals', value: '' });
+      rule.conditions.push({ field: currentScope === 'attendance' ? 'attendanceStatus' : 'responseStatus', operator: 'equals', value: '' });
       renderRules();
     });
     box.appendChild(addCond);
@@ -471,6 +482,7 @@
 
     var fieldSel = document.createElement('select');
     CATALOG.forEach(function (integration) {
+      if (currentScope && integration.scope !== currentScope) return;
       var og = document.createElement('optgroup');
       og.label = integration.label;
       integration.fields.forEach(function (f) {
@@ -582,6 +594,8 @@
       openEdit(id);
     } else if (action === 'automations') {
       openAutomations(id);
+    } else if (action === 'attendanceAutomations') {
+      openAttendanceAutomations(id);
     } else if (action === 'delete') {
       confirmDialog('Delete connection?', 'This connection and its watch channel will be removed. Its Google watch channel expires on its own.', 'Delete').then(function (ok) {
         if (!ok) return;
@@ -1006,13 +1020,271 @@
   document.getElementById('inviteConnection').addEventListener('change', syncInviteValidity);
   document.getElementById('inviteSummary').addEventListener('input', syncInviteValidity);
 
+  /* ---- Attendance ---- */
+  var attendanceSessions = [];
+  var currentSessionId = null;
+
+  function sessionChip(status) {
+    if (status === 'synced') return '<span class="chip chip--success">Synced</span>';
+    if (status === 'failed') return '<span class="chip chip--danger">Failed</span>';
+    return '<span class="chip chip--neutral">Pending</span>';
+  }
+
+  function providerLabel(p) {
+    if (p === 'google_meet') return 'Google Meet';
+    if (p === 'webinargeek') return 'WebinarGeek';
+    return 'Zoom';
+  }
+
+  function loadAttendance() {
+    document.getElementById('sessionsList').innerHTML = skeletonCards(3);
+    return api('/api/sessions').then(function (d) {
+      attendanceSessions = d.sessions || [];
+      renderAttendanceSummary(attendanceSessions);
+      renderSessions(attendanceSessions);
+    }).catch(function (e) { toast(e.message, 'error'); });
+  }
+
+  function renderAttendanceSummary(sessions) {
+    var el = document.getElementById('attendanceSummaryStrip');
+    var synced = sessions.filter(function (s) { return s.status === 'synced'; }).length;
+    el.innerHTML =
+      '<div class="summary__item"><span class="summary__value">' + sessions.length + '</span><span class="summary__label">sessions</span></div>' +
+      '<div class="summary__item"><span class="summary__value">' + synced + '</span><span class="summary__label">synced</span></div>';
+  }
+
+  function renderSessions(sessions) {
+    var el = document.getElementById('sessionsList');
+    el.innerHTML = '';
+    if (!sessions.length) {
+      el.innerHTML = '<div class="empty"><div class="empty__icon">' + icon('video') + '</div><h2 class="empty__title">No sessions yet</h2><p class="empty__text">Create a session to cross-reference attendance against your invite list.</p><button class="btn btn--accent" id="emptySessionsCta">New session</button></div>';
+      document.getElementById('emptySessionsCta').addEventListener('click', openNewSession);
+      return;
+    }
+    sessions.forEach(function (s) {
+      var box = document.createElement('div');
+      box.className = 'conn';
+      box.innerHTML =
+        '<div class="conn__main">' +
+          '<div class="conn__head"><span class="conn__name">' + esc(s.title) + '</span>' + sessionChip(s.status) + '</div>' +
+          '<div class="conn__meta">' +
+            '<span class="conn__cal">' + icon('video') + esc(providerLabel(s.provider)) + ' · ' + esc(s.externalId) + '</span>' +
+            badge(new Date(s.startTime).toLocaleString()) +
+          '</div>' +
+          (s.error ? '<div class="muted" style="font-size:0.8rem">' + esc(s.error) + '</div>' : '') +
+        '</div>' +
+        '<div class="conn__actions">' +
+          '<button class="btn btn--primary btn--sm" data-action="syncSession" data-id="' + esc(s.id) + '">Sync now</button>' +
+          '<button class="btn btn--ghost btn--sm" data-action="openSession" data-id="' + esc(s.id) + '">Details</button>' +
+          '<button class="btn btn--danger btn--sm" data-action="deleteSession" data-id="' + esc(s.id) + '">Delete</button>' +
+        '</div>';
+      el.appendChild(box);
+    });
+  }
+
+  function syncSession(id) {
+    var btn = document.querySelector('#sessionsList [data-action="syncSession"][data-id="' + id + '"]');
+    withBusy(btn, api('/api/sessions/' + id + '/sync', { method: 'POST' }))
+      .then(function (r) { toast('Attendance synced (' + r.report.attendedCount + ' attended, ' + r.report.noShowCount + ' no-show)', 'success'); loadAttendance(); })
+      .catch(function (e) { toast(e.message, 'error'); });
+  }
+
+  function openSession(id) {
+    currentSessionId = id;
+    api('/api/sessions/' + id).then(function (d) {
+      renderSessionDetail(d.session, d.attendance);
+      openModal('sessionDetail');
+    }).catch(function (e) { toast(e.message, 'error'); });
+  }
+
+  function renderSessionDetail(session, attendance) {
+    document.getElementById('sessionDetailTitle').textContent = session.title || 'Session';
+    var head = '<div class="detail__head">' + esc(session.title) + ' ' + sessionChip(session.status) + '</div>' +
+      '<table class="kv">' +
+      '<tr><th>Provider</th><td>' + esc(providerLabel(session.provider)) + '</td></tr>' +
+      '<tr><th>Meeting ID</th><td>' + esc(session.externalId) + '</td></tr>' +
+      '<tr><th>Start</th><td>' + new Date(session.startTime).toLocaleString() + '</td></tr>' +
+      '<tr><th>End</th><td>' + new Date(session.endTime).toLocaleString() + '</td></tr>' +
+      (session.error ? '<tr><th>Error</th><td>' + esc(session.error) + '</td></tr>' : '') +
+      '</table>';
+
+    var body = head;
+    if (!attendance) {
+      body += '<p class="muted">No attendance synced yet.</p>';
+    } else {
+      body += '<h3 class="detail__sub">Attended (' + attendance.attendedCount + ')</h3>' + attendanceTable(attendance.attended);
+      body += '<h3 class="detail__sub">No-show (' + attendance.noShowCount + ')</h3>' +
+        (attendance.noShow.length ? '<table class="map"><tbody>' + attendance.noShow.map(function (e) { return '<tr><td>' + esc(e) + '</td></tr>'; }).join('') + '</tbody></table>' : '<p class="muted">None</p>');
+    }
+    document.getElementById('sessionDetailBody').innerHTML = body;
+  }
+
+  function attendanceTable(people) {
+    if (!people.length) return '<p class="muted">None</p>';
+    return '<table class="map"><thead><tr><th>Email</th><th>Name</th><th>Status</th><th>Duration</th></tr></thead><tbody>' +
+      people.map(function (p) {
+        var min = p.durationSec !== undefined ? Math.round(p.durationSec / 60) + ' min' : '—';
+        return '<tr><td>' + esc(p.email || '—') + '</td><td>' + esc(p.name || '—') + '</td><td>' + esc(p.status) + '</td><td>' + min + '</td></tr>';
+      }).join('') + '</tbody></table>';
+  }
+
+  function dispatchSession() {
+    if (!currentSessionId) return;
+    withBusy(document.getElementById('sessionDispatch'), api('/api/sessions/' + currentSessionId + '/dispatch', { method: 'POST' }))
+      .then(function (r) { toast('Pushed to GHL (' + r.dispatched + ' records)', 'success'); })
+      .catch(function (e) { toast(e.message, 'error'); });
+  }
+
+  function openNewSession() {
+    document.getElementById('newSessionForm').reset();
+    populateSessionSelects();
+    openModal('newSession');
+  }
+
+  function populateSessionSelects() {
+    var connSel = document.getElementById('sessionConnection');
+    connSel.innerHTML = '<option value="">None</option>';
+    state.connections.forEach(function (c) {
+      var o = document.createElement('option');
+      o.value = c.id;
+      o.textContent = c.name;
+      connSel.appendChild(o);
+    });
+    api('/api/invites').then(function (d) {
+      var invSel = document.getElementById('sessionInvite');
+      invSel.innerHTML = '<option value="">None</option>';
+      (d.invites || []).forEach(function (i) {
+        var o = document.createElement('option');
+        o.value = i.id;
+        o.textContent = i.summary;
+        invSel.appendChild(o);
+      });
+    }).catch(function () {});
+  }
+
+  function saveNewSession() {
+    var fd = new FormData(document.getElementById('newSessionForm'));
+    var body = {
+      provider: fd.get('provider'),
+      externalId: fd.get('externalId'),
+      title: fd.get('title'),
+      startTime: fd.get('startTime'),
+      endTime: fd.get('endTime'),
+      connectionId: fd.get('connectionId') || undefined,
+      inviteId: fd.get('inviteId') || undefined
+    };
+    if (!body.externalId || !body.title || !body.startTime || !body.endTime) { toast('Meeting ID, title, start and end are required', 'error'); return; }
+    api('/api/sessions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+      .then(function () { closeModal('newSession'); toast('Session created', 'success'); loadAttendance(); })
+      .catch(function (e) { toast(e.message, 'error'); });
+  }
+
+  document.getElementById('newSessionBtn').addEventListener('click', openNewSession);
+  document.getElementById('newSessionSave').addEventListener('click', saveNewSession);
+  document.getElementById('sessionDispatch').addEventListener('click', dispatchSession);
+
+  document.getElementById('sessionsList').addEventListener('click', function (e) {
+    var btn = e.target.closest('[data-action]');
+    if (!btn) return;
+    var id = btn.dataset.id;
+    if (btn.dataset.action === 'syncSession') syncSession(id);
+    else if (btn.dataset.action === 'openSession') openSession(id);
+    else if (btn.dataset.action === 'deleteSession') {
+      confirmDialog('Delete session?', 'The session and its attendance report will be removed.', 'Delete').then(function (ok) {
+        if (!ok) return;
+        api('/api/sessions/' + id, { method: 'DELETE' }).then(function () { toast('Session deleted', 'success'); loadAttendance(); }).catch(function (err) { toast(err.message, 'error'); });
+      });
+    }
+  });
+
+  function openAttendanceAutomations(id) {
+    var c = state.connections.filter(function (x) { return x.id === id; })[0];
+    if (!c) return;
+    automationsId = id;
+    editingRules = (c.attendanceRules || []).map(function (r) { return JSON.parse(JSON.stringify(r)); });
+    currentScope = 'attendance';
+    currentRulesEl = document.getElementById('attendanceRulesList');
+
+    var mode = c.attendanceDeliveryMode || 'both';
+    $$('#attendanceAutomationsBody input[name="attendanceDeliveryMode"]').forEach(function (r) { r.checked = r.value === mode; });
+
+    (CATALOG.length ? Promise.resolve() : loadCatalog()).then(function () {
+      renderRules();
+      document.getElementById('attendanceSnapshot').textContent = JSON.stringify({
+        sessionId: 'sess_…', provider: 'zoom', title: c.name, email: 'person@example.com', status: 'attended',
+        joinedAt: '2026-10-08T13:02:00Z', leftAt: '2026-10-08T13:58:00Z', durationSec: 3360,
+        invitedCount: 142, attendedCount: 98, noShowCount: 44, timestamp: new Date().toISOString()
+      }, null, 2);
+      openModal('attendanceAutomations');
+    });
+  }
+
+  document.getElementById('attendanceAddRuleBtn').addEventListener('click', function () {
+    editingRules.push(newRule());
+    renderRules();
+  });
+
+  document.getElementById('attendanceAutomationsSave').addEventListener('click', function () {
+    var checked = document.querySelector('#attendanceAutomationsBody input[name="attendanceDeliveryMode"]:checked');
+    var mode = (checked && checked.value) || 'both';
+    var body = { attendanceDeliveryMode: mode, attendanceRules: editingRules };
+    api('/api/connections/' + automationsId, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+      .then(function () { closeModal('attendanceAutomations'); toast('Attendance automations saved', 'success'); return load(); })
+      .catch(function (err) { toast(err.message, 'error'); });
+  });
+
+  function videoCard() {
+    return '<div class="card"><h3 class="card__title">Video conferencing</h3>' +
+      '<p class="muted">Connect Zoom to cross-reference attendance. Google Meet and WebinarGeek are coming soon.</p>' +
+      '<label class="field"><span class="field__label">Zoom — Account ID</span><input id="zoomAccountId" /></label>' +
+      '<label class="field"><span class="field__label">Zoom — Client ID</span><input id="zoomClientId" /></label>' +
+      '<label class="field"><span class="field__label">Zoom — Client secret</span><input id="zoomClientSecret" type="password" placeholder="Leave blank to keep current" /></label>' +
+      '<p class="muted" id="videoStatus"></p>' +
+      '<div class="conn__actions"><button class="btn btn--ghost btn--sm" id="videoTest">Test</button><button class="btn btn--primary btn--sm" id="videoSave">Save</button></div>' +
+      '</div>';
+  }
+
+  function wireVideo() {
+    api('/api/video/settings').then(function (d) {
+      if (d.zoom) {
+        document.getElementById('zoomAccountId').value = d.zoom.accountId || '';
+        document.getElementById('zoomClientId').value = d.zoom.clientId || '';
+        document.getElementById('zoomClientSecret').placeholder = d.zoom.clientSecretMasked ? ('Current: ' + d.zoom.clientSecretMasked) : 'Leave blank to keep current';
+        document.getElementById('videoStatus').textContent = 'Zoom configured.';
+      } else {
+        document.getElementById('videoStatus').textContent = 'Zoom not configured yet.';
+      }
+    }).catch(function () {});
+
+    document.getElementById('videoSave').addEventListener('click', function () {
+      var body = { zoom: {
+        accountId: document.getElementById('zoomAccountId').value,
+        clientId: document.getElementById('zoomClientId').value,
+        clientSecret: document.getElementById('zoomClientSecret').value || undefined
+      } };
+      withBusy(this, api('/api/video/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }))
+        .then(function () { document.getElementById('zoomClientSecret').value = ''; toast('Video settings saved', 'success'); })
+        .catch(function (e) { toast(e.message, 'error'); });
+    });
+
+    document.getElementById('videoTest').addEventListener('click', function () {
+      withBusy(this, api('/api/video/test', { method: 'POST' }))
+        .then(function (r) {
+          if (r.ok) { document.getElementById('videoStatus').textContent = 'Zoom connection OK.'; toast('Zoom test OK', 'success'); }
+          else { document.getElementById('videoStatus').textContent = 'Test failed — ' + (r.detail || 'unknown'); toast('Zoom test failed: ' + (r.detail || ''), 'error'); }
+        })
+        .catch(function (e) { toast(e.message, 'error'); });
+    });
+  }
+
   /* ---- Settings ---- */
   function loadInfo() {
     $('#settingsCards').innerHTML = '<div class="skeleton skel-card" style="height:180px"></div><div class="skeleton skel-card" style="height:180px"></div>';
     return api('/api/info').then(function (info) {
-      $('#settingsCards').innerHTML = aiCard() + securityCard(info) + brandingCard();
+      $('#settingsCards').innerHTML = aiCard() + videoCard() + securityCard(info) + brandingCard();
       wireAi();
       loadAiSettings();
+      wireVideo();
     }).catch(function (err) { $('#settingsCards').innerHTML = '<div class="card"><p class="muted">' + esc(err.message) + '</p></div>'; });
   }
   function brandingCard() {

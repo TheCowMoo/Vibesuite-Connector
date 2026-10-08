@@ -31,6 +31,8 @@ interface UpdateConnectionBody {
   webhookUrls?: WebhookUrls;
   ghlDeliveryMode?: DeliveryMode;
   rules?: AutomationRule[];
+  attendanceDeliveryMode?: DeliveryMode;
+  attendanceRules?: AutomationRule[];
 }
 
 export async function connectionRoutes(app: FastifyInstance): Promise<void> {
@@ -98,6 +100,8 @@ export async function connectionRoutes(app: FastifyInstance): Promise<void> {
     if (body.ghlApiToken) conn.ghlApiToken = body.ghlApiToken; // blank keeps existing
     if (body.ghlDeliveryMode !== undefined) conn.ghlDeliveryMode = body.ghlDeliveryMode;
     if (body.rules !== undefined) conn.rules = body.rules;
+    if (body.attendanceDeliveryMode !== undefined) conn.attendanceDeliveryMode = body.attendanceDeliveryMode;
+    if (body.attendanceRules !== undefined) conn.attendanceRules = body.attendanceRules;
     if (body.webhookUrls !== undefined) {
       conn.webhookUrls = {
         yes: body.webhookUrls.yes || undefined,

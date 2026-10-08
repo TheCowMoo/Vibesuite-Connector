@@ -79,3 +79,38 @@ describe('ruleMatches / matchingRules', () => {
     expect(matchingRules([rule({ conditions: [] })], ctx)).toHaveLength(0);
   });
 });
+
+describe('numeric operators', () => {
+  it('greater_than / greater_or_equal', () => {
+    const aCtx: ConditionContext = { attendanceMinutes: '12' };
+    expect(matchesCondition({ field: 'attendanceMinutes', operator: 'greater_than', value: '10' }, aCtx)).toBe(true);
+    expect(matchesCondition({ field: 'attendanceMinutes', operator: 'greater_or_equal', value: '12' }, aCtx)).toBe(true);
+    expect(matchesCondition({ field: 'attendanceMinutes', operator: 'greater_than', value: '12' }, aCtx)).toBe(false);
+  });
+
+  it('less_than / less_or_equal', () => {
+    const aCtx: ConditionContext = { attendanceMinutes: '5' };
+    expect(matchesCondition({ field: 'attendanceMinutes', operator: 'less_than', value: '10' }, aCtx)).toBe(true);
+    expect(matchesCondition({ field: 'attendanceMinutes', operator: 'less_or_equal', value: '5' }, aCtx)).toBe(true);
+  });
+
+  it('is false on empty or non-numeric values', () => {
+    const aCtx: ConditionContext = { attendanceMinutes: '' };
+    expect(matchesCondition({ field: 'attendanceMinutes', operator: 'greater_than', value: '' }, aCtx)).toBe(false);
+    expect(matchesCondition({ field: 'attendanceMinutes', operator: 'greater_than', value: '10' }, aCtx)).toBe(false);
+  });
+});
+
+describe('attendance fields', () => {
+  const aCtx: ConditionContext = { email: 'a@x.com', attendanceStatus: 'attended', provider: 'zoom', sessionTitle: 'Webinar' };
+
+  it('matches attendanceStatus and provider', () => {
+    expect(matchesCondition({ field: 'attendanceStatus', operator: 'equals', value: 'attended' }, aCtx)).toBe(true);
+    expect(matchesCondition({ field: 'provider', operator: 'equals', value: 'zoom' }, aCtx)).toBe(true);
+    expect(matchesCondition({ field: 'provider', operator: 'equals', value: 'meet' }, aCtx)).toBe(false);
+  });
+
+  it('matches sessionTitle contains', () => {
+    expect(matchesCondition({ field: 'sessionTitle', operator: 'contains', value: 'webinar' }, aCtx)).toBe(true);
+  });
+});

@@ -19,6 +19,8 @@ function toMeta(conn: StoredConnection): Connection {
     webhookUrls: conn.webhookUrls,
     ghlDeliveryMode: conn.ghlDeliveryMode,
     rules: conn.rules,
+    attendanceDeliveryMode: conn.attendanceDeliveryMode,
+    attendanceRules: conn.attendanceRules,
     watchChannelId: conn.watchChannelId,
     watchExpiresAt: conn.watchExpiresAt,
     createdAt: conn.createdAt,

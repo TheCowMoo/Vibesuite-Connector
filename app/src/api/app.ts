@@ -13,6 +13,8 @@ import { aiRoutes } from './routes/ai';
 import { listRoutes } from './routes/lists';
 import { knowledgeRoutes } from './routes/knowledge';
 import { inviteRoutes } from './routes/invites';
+import { sessionRoutes } from './routes/sessions';
+import { videoRoutes } from './routes/video';
 import { errorHandler } from './middleware/errorHandler';
 
 export function buildApp(): FastifyInstance {
@@ -35,6 +37,8 @@ export function buildApp(): FastifyInstance {
   void app.register(listRoutes);
   void app.register(knowledgeRoutes);
   void app.register(inviteRoutes);
+  void app.register(sessionRoutes);
+  void app.register(videoRoutes);
   void app.register(healthRoutes);
   void app.register(metricsRoutes);
   void app.register(webhookRoutes);
