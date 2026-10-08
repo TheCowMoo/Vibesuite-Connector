@@ -16,10 +16,11 @@
 
 ## Verify it works
 
-- `curl http://localhost:3000/healthz` → `{"status":"ok"}`.
-- `curl http://localhost:3000/readyz` → `{"status":"ready"}`.
-- `curl http://localhost:3000/metrics` → ingestion metrics (Prometheus text).
-- `curl http://localhost:9090/metrics` → worker metrics (sync/dispatch/error counters).
+- `curl -s https://connect.vibesuite.io/healthz` → `{"status":"ok"}`.
+- `curl -s https://connect.vibesuite.io/readyz` → `{"status":"ready"}`.
+- `curl -s https://connect.vibesuite.io/metrics` → ingestion metrics (Prometheus text).
+- `docker compose exec app-worker wget -qO- http://localhost:9090/metrics` → worker metrics
+  (sync/dispatch/error counters).
 - Change an attendee RSVP in a connected Google Calendar; within seconds the worker logs
   `dispatching RSVP change` and GHL receives the mapped update.
 

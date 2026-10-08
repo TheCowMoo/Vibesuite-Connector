@@ -4,6 +4,19 @@
 > For design decisions and the Redis key map see [`architecture.md`](architecture.md); for day-to-day
 > operations see [`runbook.md`](runbook.md).
 
+## TL;DR — push an update
+
+```bash
+git fetch origin && git reset --hard origin/main
+docker compose up -d --build --force-recreate
+docker compose restart nginx
+curl -s https://connect.vibesuite.io/api/lists
+```
+
+> **Copy-paste rules:** paste **one command at a time** and press Enter. Do **not** include the
+> `ubuntu@...$` prompt or any trailing `#` comment — pasting those produces
+> `bash: syntax error near unexpected token 'newline'` or `...: No such file or directory`.
+
 ## Stack overview
 
 | Service      | Image / build   | Role                                                             |
@@ -34,21 +47,23 @@ Only `nginx` publishes host ports.
 ```bash
 git clone <repo-url> && cd <repo>
 cp .env.example .env
-# edit .env, at minimum:
-#   OAUTH_BASE_URL=https://connect.vibesuite.io
-#   GOOGLE_WEBHOOK_URL=https://connect.vibesuite.io/webhooks/google/calendar
-#   CREDENTIALS_ENCRYPTION_KEY=<strong random key>
-#   GOOGLE_OAUTH_CLIENT_ID / GOOGLE_OAUTH_CLIENT_SECRET (or service-account vars)
-#   GHL_OAUTH_* (or GHL_API_TOKEN + GHL_LOCATION_ID)
 docker compose up -d --build
 ```
+
+Edit `.env` before the build, at minimum:
+
+- `OAUTH_BASE_URL=https://connect.vibesuite.io`
+- `GOOGLE_WEBHOOK_URL=https://connect.vibesuite.io/webhooks/google/calendar`
+- `CREDENTIALS_ENCRYPTION_KEY=<strong random key>`
+- `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` (or service-account vars)
+- `GHL_OAUTH_*` (or `GHL_API_TOKEN` + `GHL_LOCATION_ID`)
 
 Notes:
 
 - `REDIS_URL` is pinned to `redis://redis:6379` in `docker-compose.yml` and **must stay that way**
   inside Compose — the `.env` `redis://127.0.0.1:6379` value is only for running outside Docker.
-- Generate the encryption key with: `openssl rand -hex 32`. This key protects GHL/Google tokens
-  **and AI provider API keys** at rest. Rotating it invalidates all stored secrets.
+- Generate the encryption key with `openssl rand -hex 32`. It protects GHL/Google tokens **and AI
+  provider API keys** at rest; rotating it invalidates all stored secrets.
 - The **AI provider keys** (OpenAI / Claude / Gemini / DeepSeek / custom) are configured in the
   dashboard (**Settings → AI**), not in `.env`.
 
@@ -63,7 +78,7 @@ The `nginx` image bundles `certbot`. The live cert lives at
 
 ```bash
 docker compose exec nginx certbot renew
-docker compose restart nginx        # reload the renewed certificate
+docker compose restart nginx
 ```
 
 ### Issue for a new / first domain
@@ -107,14 +122,77 @@ The HTTPS server block references a cert that does not exist yet, so on a fresh 
 Worker metrics (`9090`) are **not published**; inspect from inside the network if needed
 (`docker compose exec app-worker wget -qO- http://localhost:9090/metrics`).
 
+### Confirm the new code is actually live
+
+After any update, prove the new code made it onto the box:
+
+```bash
+ls app/src/api/routes/
+curl -s https://connect.vibesuite.io/api/lists
+```
+
+`ls` should list `ai.ts  knowledge.ts  lists.ts`; `curl` should print `{"lists":[]}` (old code → `404`).
+
+Then hard-refresh the browser with **Ctrl+F5** — you should see **Lists** and **Knowledge** nav items
+and a **Settings → AI provider** card.
+
 ---
 
 ## 4. Updating the stack
 
+### Push from your workstation (PowerShell → SSH)
+
+On your local machine:
+
+```powershell
+cd "c:\path\to\repo"
+git push origin main
+```
+
+Over SSH on the VPS:
+
 ```bash
-cd <repo>
-git pull
-docker compose up -d --build        # rebuilds app-api / app-worker (and nginx if its files changed)
+cd ~/Vibesuite-Connector
+git fetch origin && git reset --hard origin/main
+docker compose up -d --build --force-recreate
+docker compose restart nginx
+```
+
+### VPS-local changes block `git pull`
+
+If `git pull` prints:
+
+```
+error: Your local changes to the following files would be overwritten by merge:
+        nginx/conf.d/default.conf
+Please commit your changes or stash them before you merge.
+Aborting
+```
+
+…it means a tracked file was edited **directly on the server** (most often `nginx/conf.d/default.conf`
+during an SSL change). Make the server match the remote exactly:
+
+```bash
+git fetch origin && git reset --hard origin/main
+```
+
+This is safe: `nginx/certs/`, `nginx/www/`, and `.env` are **gitignored**, so your certificate,
+certbot webroot, and secrets are untouched.
+
+### Did the pull actually take?
+
+Before building, confirm the new code is on disk:
+
+```bash
+git log --oneline -3
+ls app/src/api/routes/
+```
+
+`git log` should show the new commit SHAs; `ls` should list `ai.ts  knowledge.ts  lists.ts`. Then build:
+
+```bash
+docker compose up -d --build --force-recreate
+docker compose restart nginx
 ```
 
 ### Update quirks (learned on the VPS)
@@ -127,10 +205,13 @@ docker compose up -d --build        # rebuilds app-api / app-worker (and nginx i
 3. **After recreating `app-api`, restart `nginx`.** nginx resolves `app-api` through Docker DNS
    (`resolver 127.0.0.11`) and caches the container IP. A recreated `app-api` gets a new IP, so run
    `docker compose restart nginx` to clear the cached upstream.
+4. **A ~1-second `Built` means nothing changed.** If the build finishes in ~1s and containers show
+   `Running` (not `Recreated`), the source on disk was unchanged — usually because `git pull` aborted
+   before the build. Re-check "Did the pull actually take?" above.
 
 Rule of thumb:
 
-- app / nginx code changed → `docker compose up -d --build`
+- app / nginx code changed → `docker compose up -d --build --force-recreate` then `docker compose restart nginx`
 - only `.env` changed → `docker compose up -d --force-recreate` then `docker compose restart nginx`
 
 ---
@@ -145,22 +226,26 @@ Rule of thumb:
 | Rebuild one service     | `docker compose up -d --build app-api`                              |
 | Redis shell             | `docker compose exec redis redis-cli`                               |
 | Status                  | `docker compose ps`                                                 |
-| Rollback                | `git checkout <sha> && docker compose up -d --build`                |
+| Rollback                | `git checkout <sha> && docker compose up -d --build --force-recreate` |
 
 ---
 
 ## 6. Troubleshooting
 
-| Symptom                            | Likely cause / fix                                                                        |
-|------------------------------------|-------------------------------------------------------------------------------------------|
-| nginx `502 Bad Gateway`            | `app-api` down/crashed, or cached upstream IP — `docker compose ps`, then `docker compose restart nginx` |
-| `ECONNREFUSED redis:6379` in logs  | `REDIS_URL` must be `redis://redis:6379` inside Compose (not `localhost`/`127.0.0.1`)     |
-| TLS / cert errors                  | Renew or re-issue via certbot (see SSL); confirm the `./nginx/certs` mount is intact      |
-| `403 invalid channel token`        | Google watch channel created under a different token — re-run bootstrap for that connection |
-| `unknown channel`                  | Channel not persisted — re-run bootstrap for that connection                              |
-| `410` in worker logs               | Expired `syncToken` — handled automatically (reset + full sync)                           |
-| OAuth callback `invalid state`     | State expired (>10 min) or mismatched — restart the OAuth flow                            |
-| **"Awaiting Google" status stuck** | Bootstrap/watch failed after OAuth — see below                                            |
+| Symptom                                              | Likely cause / fix                                                                        |
+|------------------------------------------------------|-------------------------------------------------------------------------------------------|
+| `bash: syntax error near unexpected token 'newline'`  | Pasted the `ubuntu@...$` prompt or a `#` comment — paste only the command, one line at a time |
+| `bash: ...: No such file or directory`                | Pasted shell prompt text as a command — copy only the command line                         |
+| nginx `502 Bad Gateway`                               | `app-api` down/crashed, or cached upstream IP — `docker compose ps`, then `docker compose restart nginx` |
+| `ECONNREFUSED redis:6379` in logs                     | `REDIS_URL` must be `redis://redis:6379` inside Compose (not `localhost`/`127.0.0.1`)     |
+| TLS / cert errors                                     | Renew or re-issue via certbot (see SSL); confirm the `./nginx/certs` mount is intact      |
+| `git pull` aborts ("would be overwritten by merge")   | Server has local edits — `git fetch origin && git reset --hard origin/main` (§4)          |
+| New features missing after a deploy                   | Code never updated (fast build + `Running` containers) — re-check "Did the pull actually take?" (§4) |
+| `403 invalid channel token`                           | Google watch channel created under a different token — re-run bootstrap for that connection |
+| `unknown channel`                                     | Channel not persisted — re-run bootstrap for that connection                              |
+| `410` in worker logs                                  | Expired `syncToken` — handled automatically (reset + full sync)                           |
+| OAuth callback `invalid state`                        | State expired (>10 min) or mismatched — restart the OAuth flow                            |
+| **"Awaiting Google" status stuck**                    | Bootstrap/watch failed after OAuth — see below                                            |
 
 ### "Awaiting Google" (OAuth completes but the connection never goes active)
 
