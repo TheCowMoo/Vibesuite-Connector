@@ -595,12 +595,39 @@
   /* ---- Invites ---- */
   var inviteConnections = [];
   var inviteLists = [];
+  var inviteRecipientCount = 0;
+
+  function inviteChip(status) {
+    if (status === 'sent') return '<span class="chip chip--success">Sent</span>';
+    if (status === 'partial') return '<span class="chip chip--warning">Partial</span>';
+    if (status === 'failed') return '<span class="chip chip--danger">Failed</span>';
+    return '<span class="chip chip--neutral">' + esc(status) + '</span>';
+  }
+
+  function relativeTime(ts) {
+    var s = Math.round((Date.now() - ts) / 1000);
+    if (s < 60) return 'just now';
+    var m = Math.round(s / 60);
+    if (m < 60) return m + ' min ago';
+    var h = Math.round(m / 60);
+    if (h < 24) return h + ' hr ago';
+    var d = Math.round(h / 24);
+    if (d < 30) return d + ' day' + (d === 1 ? '' : 's') + ' ago';
+    return new Date(ts).toLocaleDateString();
+  }
+
+  function pad2(n) { return (n < 10 ? '0' : '') + n; }
+
+  function pill(label, value, tone) {
+    return '<span class="pill pill--' + tone + '">' + value + ' ' + esc(label) + '</span>';
+  }
 
   function loadInvitesView() {
     var tz = document.getElementById('inviteTimezone');
     if (tz && !tz.value) {
       try { tz.value = Intl.DateTimeFormat().resolvedOptions().timeZone; } catch (e) {}
     }
+    document.getElementById('inviteHistory').innerHTML = skeletonCards(3);
     return Promise.all([
       api('/api/connections').then(function (d) {
         inviteConnections = (d.connections || []).filter(function (c) { return c.status === 'active'; });
@@ -610,8 +637,11 @@
       }),
       loadInviteHistory()
     ]).then(function () {
+      renderInvitePrereqs();
       renderInviteConnections();
       renderInviteLists();
+      renderInviteEventPreview();
+      syncInviteValidity();
     }).catch(function (e) { toast(e.message, 'error'); });
   }
 
@@ -619,6 +649,12 @@
     var sel = document.getElementById('inviteConnection');
     var prev = sel.value;
     sel.innerHTML = '';
+    if (!inviteConnections.length) {
+      sel.innerHTML = '<option value="">No active connections</option>';
+      sel.disabled = true;
+      return;
+    }
+    sel.disabled = false;
     inviteConnections.forEach(function (c) {
       var o = document.createElement('option');
       o.value = c.id;
@@ -632,6 +668,13 @@
   function renderInviteLists() {
     var sel = document.getElementById('inviteList');
     var prev = sel.value;
+    sel.innerHTML = '';
+    if (!inviteLists.length) {
+      sel.innerHTML = '<option value="">No segmented lists yet</option>';
+      sel.disabled = true;
+      return;
+    }
+    sel.disabled = false;
     sel.innerHTML = '<option value="">Select a list…</option>';
     inviteLists.forEach(function (l) {
       var o = document.createElement('option');
@@ -656,20 +699,26 @@
       wrap.innerHTML = '<p class="muted">This list has no segments yet — run Segment first.</p>';
       return;
     }
-    var allLab = document.createElement('label');
-    allLab.className = 'check';
-    allLab.innerHTML = '<input type="checkbox" id="inviteSegAll" checked /> <span>All segments</span>';
-    wrap.appendChild(allLab);
+    var box = document.createElement('div');
+    box.className = 'seg-pick';
+    var all = document.createElement('label');
+    all.className = 'seg-pick__row seg-pick__all';
+    all.innerHTML = '<input type="checkbox" id="inviteSegAll" checked /> <span class="seg-pick__name">All segments</span><span class="seg-pick__count">' + segs.length + ' groups</span>';
+    box.appendChild(all);
     segs.forEach(function (s) {
       var rows = Array.isArray(s.rows) ? s.rows.length : 0;
       var lab = document.createElement('label');
-      lab.className = 'check';
-      lab.innerHTML = '<input type="checkbox" class="invite-seg" value="' + esc(s.name) + '" /> <span>' + esc(s.name) + ' <em class="muted">(' + rows + ')</em></span>';
-      wrap.appendChild(lab);
+      lab.className = 'seg-pick__row';
+      lab.dataset.seg = s.name;
+      lab.innerHTML = '<input type="checkbox" class="invite-seg" value="' + esc(s.name) + '" /> <span class="seg-pick__name">' + esc(s.name) + '</span><span class="seg-pick__count">' + rows + ' rows · <span class="seg-pick__emails"></span></span>';
+      box.appendChild(lab);
     });
-    allLab.querySelector('input').addEventListener('change', function () {
-      var on = allLab.querySelector('input').checked;
+    wrap.appendChild(box);
+
+    all.querySelector('input').addEventListener('change', function () {
+      var on = all.querySelector('input').checked;
       $$('#inviteSegments .invite-seg').forEach(function (cb) { cb.checked = false; cb.disabled = on; });
+      $$('#inviteSegments .seg-pick__row[data-seg]').forEach(function (r) { r.classList.toggle('is-disabled', on); });
       refreshInvitePreview();
     });
     $$('#inviteSegments .invite-seg').forEach(function (cb) {
@@ -680,13 +729,132 @@
   function refreshInvitePreview() {
     var listId = document.getElementById('inviteList').value;
     var el = document.getElementById('inviteRecipients');
-    if (!listId) { el.textContent = 'Select a list to preview recipients.'; return; }
+    if (!listId) {
+      el.innerHTML = '<span class="muted">Select a list to preview recipients.</span>';
+      inviteRecipientCount = 0;
+      updateInviteSegmentCounts(null);
+      syncInviteValidity();
+      return;
+    }
     api('/api/invites/preview', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ listId: listId, segments: selectedInviteSegments() }) })
       .then(function (d) {
-        el.innerHTML = '<strong>' + d.emails.length + '</strong> recipients · ' +
-          '<span class="muted">' + d.duplicatesRemoved + ' duplicates · ' + (d.invalid ? d.invalid.length : 0) + ' invalid · ' + (d.alreadyInvited ? d.alreadyInvited.length : 0) + ' already invited</span>';
+        inviteRecipientCount = d.emails.length;
+        updateInviteSegmentCounts(d.perSegment);
+        var html = pill('recipients', d.emails.length, d.emails.length ? 'ok' : 'danger');
+        if (d.duplicatesRemoved) html += pill('duplicates', d.duplicatesRemoved, 'neutral');
+        if (d.invalid && d.invalid.length) html += pill('invalid', d.invalid.length, 'warn');
+        if (d.alreadyInvited && d.alreadyInvited.length) html += pill('already invited', d.alreadyInvited.length, 'warn');
+        if (!d.emails.length) html += ' <span class="muted" style="font-size:0.85rem">No new recipients to invite.</span>';
+        el.innerHTML = html;
+        syncInviteValidity();
       })
-      .catch(function (e) { el.textContent = 'Preview failed: ' + e.message; });
+      .catch(function (e) { el.textContent = 'Preview failed: ' + e.message; syncInviteValidity(); });
+  }
+
+  function updateInviteSegmentCounts(perSegment) {
+    $$('#inviteSegments .seg-pick__row[data-seg]').forEach(function (row) {
+      var cnt = row.querySelector('.seg-pick__emails');
+      if (!cnt) return;
+      if (!perSegment) { cnt.textContent = ''; return; }
+      var m = perSegment.filter(function (s) { return s.name === row.dataset.seg; })[0];
+      cnt.textContent = m ? (m.emails.length + ' emails') : '0 emails';
+    });
+  }
+
+  function renderInviteEventPreview() {
+    var el = document.getElementById('inviteEventPreview');
+    var start = document.getElementById('inviteStart').value;
+    var end = document.getElementById('inviteEnd').value;
+    var tz = document.getElementById('inviteTimezone').value.trim();
+    if (!start || !end) { el.className = 'invite-event-preview'; el.textContent = 'Set a start and end time.'; return; }
+    var min = Math.round((new Date(end) - new Date(start)) / 60000);
+    if (min <= 0) { el.className = 'invite-event-preview is-invalid'; el.textContent = 'End must be after start.'; return; }
+    var fmt = new Intl.DateTimeFormat(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' });
+    var parts = [];
+    try { parts.push(fmt.format(new Date(start))); parts.push('–'); parts.push(fmt.format(new Date(end))); } catch (e) {}
+    parts.push('· ' + min + ' min');
+    if (tz) parts.push('· ' + tz);
+    var isPast = new Date(start) < new Date();
+    el.className = 'invite-event-preview' + (isPast ? ' is-warn' : '');
+    el.textContent = parts.join(' ');
+    if (isPast) el.textContent += ' — start is in the past';
+  }
+
+  function autoEnd() {
+    var start = document.getElementById('inviteStart').value;
+    var endEl = document.getElementById('inviteEnd');
+    if (!start) return;
+    if (endEl.value && endEl.dataset.auto !== '1') return;
+    var d = new Date(start);
+    if (isNaN(d.getTime())) return;
+    d.setMinutes(d.getMinutes() + 60);
+    endEl.value = d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()) + 'T' + pad2(d.getHours()) + ':' + pad2(d.getMinutes());
+    endEl.dataset.auto = '1';
+  }
+
+  function syncInviteValidity() {
+    var btn = document.getElementById('inviteSend');
+    var reasons = [];
+    if (!document.getElementById('inviteConnection').value) reasons.push('a calendar connection');
+    if (!document.getElementById('inviteList').value) reasons.push('a segmented list');
+    if (!document.getElementById('inviteSummary').value.trim()) reasons.push('an event title');
+    var start = document.getElementById('inviteStart').value;
+    var end = document.getElementById('inviteEnd').value;
+    if (!start || !end) reasons.push('start and end times');
+    else if (new Date(end) <= new Date(start)) reasons.push('an end after start');
+    if (!inviteRecipientCount) reasons.push('recipients');
+    btn.disabled = reasons.length > 0;
+    btn.title = reasons.length ? ('Send is disabled — choose ' + reasons.join(', ')) : 'Send invites';
+  }
+
+  function renderInviteSummaryStrip(invites) {
+    var el = document.getElementById('inviteSummaryStrip');
+    var sent = invites.filter(function (i) { return i.status === 'sent' || i.status === 'partial'; }).length;
+    var reached = invites.reduce(function (a, i) { return a + (i.recipientCount || 0); }, 0);
+    var last = invites.length ? relativeTime(invites[0].createdAt) : '—';
+    el.innerHTML =
+      '<div class="summary__item"><span class="summary__value">' + sent + '</span><span class="summary__label">invites sent</span></div>' +
+      '<div class="summary__item"><span class="summary__value">' + reached + '</span><span class="summary__label">recipients reached</span></div>' +
+      '<div class="summary__item"><span class="summary__value">' + last + '</span><span class="summary__label">last sent</span></div>';
+  }
+
+  function renderInviteResult(r) {
+    var el = document.getElementById('inviteResult');
+    el.hidden = false;
+    var links = ((r.invite && r.invite.batches) || []).map(function (b) {
+      return b.htmlLink ? '<a href="' + esc(b.htmlLink) + '" target="_blank" rel="noopener">open event</a>' : '';
+    }).filter(Boolean).join(', ');
+    if (r.ok) {
+      el.className = 'invite-result invite-result--success';
+      el.innerHTML = 'Sent to ' + r.sent + ' recipient' + (r.sent === 1 ? '' : 's') + (links ? ' — ' + links : '') + '.';
+    } else {
+      el.className = 'invite-result invite-result--error';
+      el.innerHTML = 'Failed: ' + (r.invite && r.invite.error ? esc(r.invite.error) : 'unknown error') + '. ' + r.sent + '/' + (r.sent + r.failed) + ' sent' + (links ? ' — ' + links : '') + '.';
+    }
+  }
+
+  function renderInvitePrereqs() {
+    var pre = document.getElementById('invitePrereqs');
+    var composer = document.getElementById('inviteComposer');
+    var problem = null;
+    if (!inviteConnections.length) {
+      problem = { title: 'No active connections', text: 'You need at least one active Google Calendar connection to send invites from.', cta: 'Go to Connections', view: 'connections' };
+    } else if (!inviteLists.length) {
+      problem = { title: 'No segmented lists', text: 'Upload a list and run Segment first, then come back here to invite it.', cta: 'Go to Lists', view: 'lists' };
+    }
+    if (problem) {
+      pre.hidden = false;
+      composer.hidden = true;
+      document.getElementById('invitePrereqsTitle').textContent = problem.title;
+      document.getElementById('invitePrereqsText').textContent = problem.text;
+      var cta = document.getElementById('invitePrereqsCta');
+      cta.textContent = problem.cta;
+      cta.hidden = false;
+      cta.onclick = function () { showView(problem.view); };
+    } else {
+      pre.hidden = true;
+      composer.hidden = false;
+    }
   }
 
   function loadInviteHistory() {
@@ -695,25 +863,26 @@
 
   function renderInviteHistory(invites) {
     var el = document.getElementById('inviteHistory');
+    renderInviteSummaryStrip(invites);
     if (!invites.length) {
-      el.innerHTML = '<div class="empty"><div class="empty__icon">' + icon('send') + '</div><h2 class="empty__title">No invites yet</h2></div>';
+      el.innerHTML = '<div class="empty"><div class="empty__icon">' + icon('send') + '</div><h2 class="empty__title">No invites yet</h2><p class="empty__text">Send your first invite and it will show up here.</p></div>';
       return;
     }
-    el.innerHTML = '<table class="map"><thead><tr><th>Event</th><th>List</th><th>Calendar</th><th>Recipients</th><th>Status</th><th>Sent</th><th></th></tr></thead><tbody>' +
-      invites.map(function (inv) {
-        var links = inv.batches && inv.batches.length
-          ? inv.batches.map(function (b) { return b.htmlLink ? '<a href="' + esc(b.htmlLink) + '" target="_blank" rel="noopener">event</a>' : esc(b.eventId || ''); }).join(', ')
-          : '—';
-        return '<tr>' +
-          '<td>' + esc(inv.summary) + '</td>' +
-          '<td>' + esc(inv.listName) + '</td>' +
-          '<td>' + esc(inv.connectionName) + '</td>' +
-          '<td>' + inv.recipientCount + '</td>' +
-          '<td>' + esc(inv.status) + (inv.error ? '<div class="muted" style="font-size:0.75rem">' + esc(inv.error) + '</div>' : '') + '</td>' +
-          '<td>' + new Date(inv.createdAt).toLocaleString() + '</td>' +
-          '<td>' + links + ' <button class="btn btn--ghost btn--sm" data-action="deleteInvite" data-id="' + esc(inv.id) + '">Delete</button></td>' +
-          '</tr>';
-      }).join('') + '</tbody></table>';
+    var rows = invites.map(function (inv) {
+      var links = inv.batches && inv.batches.length
+        ? inv.batches.map(function (b) { return b.htmlLink ? '<a class="btn btn--outline btn--sm" href="' + esc(b.htmlLink) + '" target="_blank" rel="noopener">Open event</a>' : ''; }).join(' ')
+        : '';
+      var err = inv.error ? '<div class="muted" style="font-size:0.75rem; margin-top:0.2rem">' + esc(inv.error) + '</div>' : '';
+      return '<tr>' +
+        '<td><strong>' + esc(inv.summary) + '</strong><div class="muted" style="font-size:0.8rem">' + esc(inv.listName) + '</div></td>' +
+        '<td>' + esc(inv.connectionName) + '</td>' +
+        '<td>' + inv.recipientCount + '</td>' +
+        '<td>' + inviteChip(inv.status) + err + '</td>' +
+        '<td title="' + esc(new Date(inv.createdAt).toLocaleString()) + '">' + relativeTime(inv.createdAt) + '</td>' +
+        '<td>' + links + ' <button class="btn btn--ghost btn--sm" data-action="deleteInvite" data-id="' + esc(inv.id) + '" aria-label="Delete invite record">Delete</button></td>' +
+        '</tr>';
+    }).join('');
+    el.innerHTML = '<table class="map" aria-label="Invite history"><thead><tr><th>Event</th><th>Calendar</th><th>Recipients</th><th>Status</th><th>Sent</th><th></th></tr></thead><tbody>' + rows + '</tbody></table>';
   }
 
   function goToInvite(listId) {
@@ -795,6 +964,7 @@
                   var reason = (r.invite && r.invite.error) ? r.invite.error : 'some recipients failed';
                   toast('Invite failed: ' + reason + ' (' + r.sent + '/' + (r.sent + r.failed) + ' sent)', 'error');
                 }
+                renderInviteResult(r);
                 loadInviteHistory();
                 refreshInvitePreview();
               })
@@ -818,6 +988,23 @@
   document.getElementById('listResultInvite').addEventListener('click', function () {
     if (currentListResultId) goToInvite(currentListResultId);
   });
+
+  document.getElementById('inviteStart').addEventListener('input', function () {
+    autoEnd();
+    renderInviteEventPreview();
+    syncInviteValidity();
+  });
+  document.getElementById('inviteEnd').addEventListener('input', function () {
+    this.dataset.auto = '0';
+    renderInviteEventPreview();
+    syncInviteValidity();
+  });
+  document.getElementById('inviteTimezone').addEventListener('input', function () {
+    renderInviteEventPreview();
+    syncInviteValidity();
+  });
+  document.getElementById('inviteConnection').addEventListener('change', syncInviteValidity);
+  document.getElementById('inviteSummary').addEventListener('input', syncInviteValidity);
 
   /* ---- Settings ---- */
   function loadInfo() {

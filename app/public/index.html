@@ -97,43 +97,74 @@
       </div>
     </div>
 
-    <div class="invite-grid">
-      <div class="card">
-        <h3 class="card__title">Event details</h3>
-        <label class="field"><span class="field__label">Calendar (connection)</span><select id="inviteConnection"></select></label>
-        <label class="field"><span class="field__label">Event title</span><input id="inviteSummary" placeholder="e.g. Product webinar" /></label>
-        <div class="field">
-          <span class="field__label">Description</span>
-          <textarea id="inviteDescription" rows="4" placeholder="What's this event about?"></textarea>
-          <button class="btn btn--ghost btn--sm" id="inviteDraftAi" type="button">Draft with AI</button>
-        </div>
-        <div class="invite-row">
-          <label class="field"><span class="field__label">Start</span><input type="datetime-local" id="inviteStart" /></label>
-          <label class="field"><span class="field__label">End</span><input type="datetime-local" id="inviteEnd" /></label>
-          <label class="field"><span class="field__label">Timezone</span><input id="inviteTimezone" placeholder="e.g. America/New_York" /></label>
-        </div>
-        <label class="field"><span class="field__label">Location / meeting link</span><input id="inviteLocation" placeholder="Optional" /></label>
-      </div>
+    <div class="summary" id="inviteSummaryStrip"></div>
 
-      <div class="card">
-        <h3 class="card__title">Audience</h3>
-        <label class="field"><span class="field__label">Segmented list</span><select id="inviteList"><option value="">Select a list…</option></select></label>
-        <div class="field">
-          <span class="field__label">Segments</span>
-          <div id="inviteSegments"><p class="muted">Choose a list to see its segments.</p></div>
-        </div>
-        <div class="invite-preview" id="inviteRecipients">Select a list to preview recipients.</div>
-      </div>
+    <div class="empty" id="invitePrereqs" hidden>
+      <div class="empty__icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4 20-7z"/></svg></div>
+      <h2 class="empty__title" id="invitePrereqsTitle"></h2>
+      <p class="empty__text" id="invitePrereqsText"></p>
+      <button class="btn btn--accent" id="invitePrereqsCta" hidden></button>
     </div>
 
-    <div class="invite-actions">
-      <button class="btn btn--ghost" id="invitePreview">Preview</button>
-      <button class="btn btn--primary" id="inviteSend">Send invites</button>
+    <div id="inviteComposer">
+      <div class="invite-grid">
+        <div class="card">
+          <h3 class="invite-step">1 · Event details</h3>
+          <label class="field"><span class="field__label">Calendar (connection)</span><select id="inviteConnection"></select></label>
+          <label class="field"><span class="field__label">Event title</span><input id="inviteSummary" placeholder="e.g. Product webinar" /></label>
+          <div class="field">
+            <div class="field__label-row"><span class="field__label">Description</span><button class="btn btn--ghost btn--sm" id="inviteDraftAi" type="button">Draft with AI</button></div>
+            <textarea id="inviteDescription" rows="4" placeholder="What's this event about?"></textarea>
+          </div>
+          <div class="invite-row">
+            <label class="field"><span class="field__label">Start</span><input type="datetime-local" id="inviteStart" /></label>
+            <label class="field"><span class="field__label">End</span><input type="datetime-local" id="inviteEnd" /></label>
+            <label class="field"><span class="field__label">Timezone</span><input id="inviteTimezone" list="tzList" placeholder="e.g. America/New_York" /></label>
+          </div>
+          <div class="invite-event-preview" id="inviteEventPreview"></div>
+          <label class="field"><span class="field__label">Location / meeting link</span><input id="inviteLocation" placeholder="Optional" /></label>
+        </div>
+
+        <div class="card">
+          <h3 class="invite-step">2 · Audience</h3>
+          <label class="field"><span class="field__label">Segmented list</span><select id="inviteList"><option value="">Select a list…</option></select></label>
+          <div class="field">
+            <span class="field__label">Segments</span>
+            <div id="inviteSegments" role="group" aria-label="Segments"><p class="muted">Choose a list to see its segments.</p></div>
+          </div>
+          <div class="invite-preview" id="inviteRecipients" aria-live="polite">Select a list to preview recipients.</div>
+        </div>
+      </div>
+
+      <div class="invite-result" id="inviteResult" hidden></div>
+
+      <div class="invite-actions">
+        <span class="invite-actions__note">Guest list is hidden from invitees</span>
+        <span class="spacer"></span>
+        <button class="btn btn--ghost" id="invitePreview">Preview</button>
+        <button class="btn btn--primary" id="inviteSend" disabled title="Choose a calendar, list, and valid times">Send invites</button>
+      </div>
     </div>
 
     <h2 class="section-title">Invite history</h2>
-    <div id="inviteHistory"></div>
+    <div class="table-scroll" id="inviteHistory"></div>
   </section>
+
+  <datalist id="tzList">
+    <option value="UTC"></option>
+    <option value="America/New_York"></option>
+    <option value="America/Chicago"></option>
+    <option value="America/Denver"></option>
+    <option value="America/Los_Angeles"></option>
+    <option value="Europe/London"></option>
+    <option value="Europe/Berlin"></option>
+    <option value="Europe/Paris"></option>
+    <option value="Asia/Dubai"></option>
+    <option value="Asia/Manila"></option>
+    <option value="Asia/Singapore"></option>
+    <option value="Asia/Tokyo"></option>
+    <option value="Australia/Sydney"></option>
+  </datalist>
 </main>
 
 <!-- New connection wizard -->
