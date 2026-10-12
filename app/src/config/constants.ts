@@ -49,5 +49,10 @@ export const REDIS_KEYS = {
   authLoginAttempts: (key: string) => `auth:loginAttempts:${key}`,
   authAudit: () => 'auth:audit',
   teamSettings: () => 'settings:team',
+  senderProfile: (connectionId: string) => `sender:profile:${connectionId}`,
+  senderProfiles: () => 'sender:profiles',
+  senderDay: (connectionId: string, date: string) => `sender:day:${connectionId}:${date}`,
+  senderHour: (connectionId: string, hour: string) => `sender:hour:${connectionId}:${hour}`,
+  senderState: (connectionId: string) => `sender:state:${connectionId}`,
 } as const;
 

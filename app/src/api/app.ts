@@ -19,6 +19,7 @@ import { errorHandler } from './middleware/errorHandler';
 import { registerAuth } from './middleware/requireAuth';
 import { authRoutes } from './routes/auth';
 import { teamRoutes } from './routes/team';
+import { senderRoutes } from './routes/senders';
 
 export function buildApp(): FastifyInstance {
   const app = Fastify({ logger: false });
@@ -50,6 +51,7 @@ export function buildApp(): FastifyInstance {
   void app.register(videoRoutes);
   void app.register(authRoutes);
   void app.register(teamRoutes);
+  void app.register(senderRoutes);
   void app.register(healthRoutes);
   void app.register(metricsRoutes);
   void app.register(webhookRoutes);

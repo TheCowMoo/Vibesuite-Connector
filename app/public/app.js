@@ -41,12 +41,14 @@
   /* ---- Navigation ---- */
   function showView(name) {
     if (name === 'team' && authState.enabled && !isAdmin()) name = 'connections';
+    if (name === 'senders' && authState.enabled && !isAdmin()) name = 'connections';
     $$('.topnav__link').forEach(function (b) { b.classList.toggle('is-active', b.dataset.view === name); });
     $('#view-connections').hidden = name !== 'connections';
     $('#view-lists').hidden = name !== 'lists';
     $('#view-knowledge').hidden = name !== 'knowledge';
     $('#view-invites').hidden = name !== 'invites';
     $('#view-attendance').hidden = name !== 'attendance';
+    $('#view-senders').hidden = name !== 'senders';
     $('#view-team').hidden = name !== 'team';
     $('#view-settings').hidden = name !== 'settings';
     if (name === 'settings') loadInfo();
@@ -54,6 +56,7 @@
     if (name === 'knowledge') loadKnowledge();
     if (name === 'invites') loadInvitesView();
     if (name === 'attendance') loadAttendance();
+    if (name === 'senders') loadSenders();
     if (name === 'team') loadTeam();
   }
   $$('.topnav__link').forEach(function (btn) {
@@ -1735,8 +1738,8 @@
       document.getElementById('accountName').textContent = (authState.user.name || authState.user.email) + ' · ' + authState.user.role;
       document.getElementById('accountBtn').textContent = initials(authState.user.name || authState.user.email);
     }
-    var teamNav = document.querySelector('.topnav__link[data-view="team"]');
-    if (teamNav) teamNav.hidden = !(isAdmin() || !authState.enabled);
+    var privileged = isAdmin() || !authState.enabled;
+    $$('.topnav__link[data-role="admin"]').forEach(function (b) { b.hidden = !privileged; });
     loadCatalog();
     showView('connections');
     load();
@@ -2025,6 +2028,164 @@
   document.getElementById('authForm').addEventListener('submit', function (e) {
     e.preventDefault();
     submitAuth();
+  });
+
+  /* ---- Senders ---- */
+  var senderData = [];
+
+  function daysCheckboxes(selected) {
+    var days = [['0', 'S'], ['1', 'M'], ['2', 'T'], ['3', 'W'], ['4', 'T'], ['5', 'F'], ['6', 'S']];
+    return days
+      .map(function (d) {
+        return '<label class="daychk"><input type="checkbox" data-day="' + d[0] + '"' +
+          (selected.indexOf(Number(d[0])) !== -1 ? ' checked' : '') + ' /><span>' + d[1] + '</span></label>';
+      })
+      .join('');
+  }
+
+  function loadSenders() {
+    document.getElementById('sendersList').innerHTML = skeletonCards(2);
+    return api('/api/senders')
+      .then(function (d) {
+        senderData = d.senders || [];
+        renderSenders(senderData);
+      })
+      .catch(function (e) {
+        document.getElementById('sendersList').innerHTML = '<div class="card"><p class="muted">' + esc(e.message) + '</p></div>';
+      });
+  }
+
+  function renderSenders(senders) {
+    var el = document.getElementById('sendersList');
+    el.innerHTML = '';
+    if (!senders.length) {
+      el.innerHTML = '<div class="empty"><div class="empty__icon">' + icon('send') + '</div><h2 class="empty__title">No senders yet</h2><p class="empty__text">Connect a Google account and it will appear here with its own load controls.</p></div>';
+      return;
+    }
+
+    senders.forEach(function (s) {
+      var p = s.profile;
+      var t = s.today;
+
+      var chips = p.enabled ? '<span class="chip chip--success">active</span>' : '<span class="chip chip--neutral">paused</span>';
+      if (t.cooling) chips += '<span class="chip chip--danger">cooling down</span>';
+      if (p.enabled && !t.inWindow) chips += '<span class="chip chip--warning">outside window</span>';
+      if (p.mode === 'ramp' && t.rampDayIndex) chips += '<span class="chip chip--neutral">ramp day ' + t.rampDayIndex + '</span>';
+
+      var pct = t.capToday > 0 ? Math.min(100, Math.round((t.sentToday / t.capToday) * 100)) : 0;
+      var hourly = p.hourlyCap ? ' / ' + p.hourlyCap : '';
+
+      var box = document.createElement('div');
+      box.className = 'conn sender';
+      box.innerHTML =
+        '<div class="conn__main">' +
+          '<div class="conn__head"><span class="conn__name">' + esc(s.name) + '</span>' + chips + '</div>' +
+          '<div class="conn__meta"><span class="conn__cal">' + icon('send') + esc(s.calendarId) + '</span></div>' +
+          '<div class="gauge"><div class="gauge__bar"><span style="width:' + pct + '%"></span></div>' +
+            '<div class="gauge__label">Sent today <strong>' + t.sentToday + '</strong> / ' + t.capToday +
+              ' · headroom ' + t.headroom + ' · this hour ' + t.sentThisHour + hourly +
+              (t.failedToday ? ' · failed ' + t.failedToday : '') + '</div></div>' +
+          '<div class="sender__grid">' +
+            '<label class="field"><span class="field__label">Mode</span><select data-f="mode">' +
+              '<option value="flat"' + (p.mode === 'flat' ? ' selected' : '') + '>Flat</option>' +
+              '<option value="ramp"' + (p.mode === 'ramp' ? ' selected' : '') + '>Ramp</option></select></label>' +
+            '<label class="field"><span class="field__label">Daily cap</span><input type="number" min="1" max="5000" data-f="dailyCap" value="' + p.dailyCap + '" /></label>' +
+            '<label class="field"><span class="field__label">Hourly cap</span><input type="number" min="1" max="1000" data-f="hourlyCap" value="' + (p.hourlyCap || '') + '" /></label>' +
+            '<label class="field"><span class="field__label">Min delay (ms)</span><input type="number" min="0" max="600000" data-f="minDelayMs" value="' + (p.minDelayMs === undefined ? '' : p.minDelayMs) + '" /></label>' +
+          '</div>' +
+          '<div class="sender__ramp"' + (p.mode === 'ramp' ? '' : ' hidden') + '>' +
+            '<div class="sender__grid">' +
+              '<label class="field"><span class="field__label">Ramp start / day</span><input type="number" min="1" max="5000" data-f="rampStart" value="' + (p.ramp ? p.ramp.startDailyCap : 50) + '" /></label>' +
+              '<label class="field"><span class="field__label">+ per day</span><input type="number" min="0" max="5000" data-f="rampInc" value="' + (p.ramp ? p.ramp.incrementPerDay : 50) + '" /></label>' +
+              '<label class="field"><span class="field__label">Ramp max</span><input type="number" min="1" max="5000" data-f="rampMax" value="' + (p.ramp ? p.ramp.maxDailyCap : 800) + '" /></label>' +
+              '<label class="field"><span class="field__label">Ramp start date</span><input type="date" data-f="rampStartDate" value="' + (p.ramp ? p.ramp.startDate : new Date().toISOString().slice(0, 10)) + '" /></label>' +
+            '</div>' +
+          '</div>' +
+          '<div class="sender__grid">' +
+            '<label class="field"><span class="field__label">Window from (hr)</span><input type="number" min="0" max="23" data-f="winStart" value="' + p.window.startHour + '" /></label>' +
+            '<label class="field"><span class="field__label">Window to (hr)</span><input type="number" min="0" max="23" data-f="winEnd" value="' + p.window.endHour + '" /></label>' +
+            '<label class="field"><span class="field__label">Timezone</span><input data-f="winTz" list="tzList" value="' + esc(p.window.timeZone) + '" /></label>' +
+            '<div class="field"><span class="field__label">Days</span><div class="daychks">' + daysCheckboxes(p.window.days || []) + '</div></div>' +
+          '</div>' +
+        '</div>' +
+        '<div class="conn__actions">' +
+          '<button class="btn btn--ghost btn--sm" data-action="toggleSender" data-id="' + esc(s.connectionId) + '" data-enabled="' + (p.enabled ? '1' : '0') + '">' + (p.enabled ? 'Pause' : 'Resume') + '</button>' +
+          '<button class="btn btn--primary btn--sm" data-action="saveSender" data-id="' + esc(s.connectionId) + '">Save</button>' +
+        '</div>';
+      el.appendChild(box);
+    });
+  }
+
+  function readSenderCard(card) {
+    function num(sel, fallback) {
+      var e = card.querySelector(sel);
+      if (!e) return fallback;
+      var raw = String(e.value).trim();
+      if (raw === '') return fallback;
+      var v = Number(raw);
+      return Number.isFinite(v) ? v : fallback;
+    }
+    function str(sel, fallback) {
+      var e = card.querySelector(sel);
+      var v = e ? String(e.value).trim() : '';
+      return v || fallback;
+    }
+
+    var days = $$('[data-day]', card)
+      .filter(function (c) { return c.checked; })
+      .map(function (c) { return Number(c.dataset.day); });
+
+    var mode = str('[data-f="mode"]', 'flat');
+    var body = {
+      mode: mode,
+      dailyCap: num('[data-f="dailyCap"]', 800),
+      minDelayMs: num('[data-f="minDelayMs"]', undefined),
+      window: {
+        startHour: num('[data-f="winStart"]', 9),
+        endHour: num('[data-f="winEnd"]', 17),
+        days: days,
+        timeZone: str('[data-f="winTz"]', 'UTC')
+      }
+    };
+
+    var hourly = num('[data-f="hourlyCap"]', undefined);
+    if (hourly !== undefined) body.hourlyCap = hourly;
+
+    if (mode === 'ramp') {
+      body.ramp = {
+        startDailyCap: num('[data-f="rampStart"]', 50),
+        incrementPerDay: num('[data-f="rampInc"]', 50),
+        maxDailyCap: num('[data-f="rampMax"]', 800),
+        startDate: str('[data-f="rampStartDate"]', new Date().toISOString().slice(0, 10))
+      };
+    }
+    return body;
+  }
+
+  document.getElementById('sendersList').addEventListener('change', function (e) {
+    var sel = e.target.closest('[data-f="mode"]');
+    if (!sel) return;
+    var card = sel.closest('.sender');
+    var ramp = card && card.querySelector('.sender__ramp');
+    if (ramp) ramp.hidden = sel.value !== 'ramp';
+  });
+
+  document.getElementById('sendersList').addEventListener('click', function (e) {
+    var btn = e.target.closest('[data-action]');
+    if (!btn) return;
+    var id = btn.dataset.id;
+    var card = btn.closest('.sender');
+
+    if (btn.dataset.action === 'saveSender' && card) {
+      withBusy(btn, api('/api/senders/' + id, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(readSenderCard(card)) }))
+        .then(function () { toast('Sender settings saved', 'success'); loadSenders(); })
+        .catch(function (err) { toast(err.message, 'error'); });
+    } else if (btn.dataset.action === 'toggleSender') {
+      var action = btn.dataset.enabled === '1' ? 'pause' : 'resume';
+      withBusy(btn, api('/api/senders/' + id + '/' + action, { method: 'POST' }))
+        .then(function () { toast(action === 'pause' ? 'Sender paused' : 'Sender resumed', 'success'); loadSenders(); })
+        .catch(function (err) { toast(err.message, 'error'); });
+    }
   });
 
   /* ---- Init ---- */

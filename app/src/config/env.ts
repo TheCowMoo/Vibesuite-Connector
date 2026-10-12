@@ -62,6 +62,12 @@ const EnvSchema = z.object({
   INVITE_TTL_DAYS: z.coerce.number().int().positive().default(7),
   AUTH_ALLOW_FIRST_RUN_SETUP: z.enum(['true', 'false']).default('true').transform((v) => v === 'true'),
   TEAM_INVITE_WEBHOOK_URL: z.string().url().optional(),
+  CAMPAIGN_TICK_INTERVAL_MS: z.coerce.number().int().positive().default(300000),
+  CAMPAIGN_DEFAULT_DAILY_CAP: z.coerce.number().int().positive().default(800),
+  CAMPAIGN_DEFAULT_HOURLY_CAP: z.coerce.number().int().positive().default(100),
+  CAMPAIGN_DEFAULT_MIN_DELAY_MS: z.coerce.number().int().min(0).default(5000),
+  CAMPAIGN_COOLDOWN_ON_ERRORS: z.coerce.number().int().positive().default(3),
+  CAMPAIGN_COOLDOWN_HOURS: z.coerce.number().int().positive().default(24),
   LOG_LEVEL: z.string().default('info'),
 });
 

@@ -511,6 +511,18 @@ fieldset.field legend { margin-bottom: 0.4rem; }
   border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface);
 }
 
+/* ---- Senders ---- */
+.sender__grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.6rem; margin-top: 0.6rem; }
+.sender__grid .field { margin-bottom: 0; }
+.gauge { margin-top: 0.5rem; }
+.gauge__bar { height: 6px; border-radius: 999px; background: var(--neutral-tint); overflow: hidden; }
+.gauge__bar > span { display: block; height: 100%; background: var(--royal); }
+.gauge__label { font-size: 0.78rem; color: var(--ink-muted); margin-top: 0.3rem; }
+.daychks { display: flex; gap: 0.35rem; flex-wrap: wrap; }
+.daychk { display: inline-flex; align-items: center; gap: 0.2rem; font-size: 0.8rem; }
+.daychk input { width: auto; margin: 0; }
+@media (max-width: 900px) { .sender__grid { grid-template-columns: repeat(2, 1fr); } }
+
 /* ---- Responsive ---- */
 @media (max-width: 900px) {
   .stats { grid-template-columns: repeat(2, 1fr); }
