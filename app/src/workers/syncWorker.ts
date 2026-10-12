@@ -9,6 +9,7 @@ import { processSync } from './pipeline';
 import type { SyncJobData } from '../queue/jobs/types';
 import { startWatchRenewal } from '../scheduler/renewal';
 import { startAttendancePolling } from '../scheduler/attendance';
+import { startCampaignScheduler } from '../scheduler/campaigns';
 
 async function main(): Promise<void> {
   const worker = new Worker<SyncJobData>(
@@ -27,6 +28,7 @@ async function main(): Promise<void> {
 
   startWatchRenewal();
   startAttendancePolling();
+  startCampaignScheduler();
 
   if (env.METRICS_PORT > 0) {
     startMetricsServer(env.METRICS_PORT);

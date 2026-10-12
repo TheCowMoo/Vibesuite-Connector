@@ -49,3 +49,7 @@ defineCounter('rsvp_duplicates_skipped_total', 'Total duplicate dispatches skipp
 defineCounter('ghl_errors_total', 'Total GHL dispatch errors, by status.');
 defineCounter('watch_renewals_total', 'Total watch channel renewals.');
 defineCounter('watch_renewal_errors_total', 'Total watch channel renewal failures.');
+defineCounter('campaign_invites_sent_total', 'Total campaign invite batches sent.');
+defineCounter('campaign_invites_failed_total', 'Total campaign invite batches that failed.');
+defineCounter('campaign_invites_redistributed_total', 'Total queued invites moved off stalled mailboxes.');
+defineCounter('campaign_ticks_total', 'Total campaign scheduler ticks.');

@@ -2112,6 +2112,7 @@
         '</div>' +
         '<div class="conn__actions">' +
           '<button class="btn btn--ghost btn--sm" data-action="toggleSender" data-id="' + esc(s.connectionId) + '" data-enabled="' + (p.enabled ? '1' : '0') + '">' + (p.enabled ? 'Pause' : 'Resume') + '</button>' +
+          '<button class="btn btn--outline btn--sm" data-action="sendNowSender" data-id="' + esc(s.connectionId) + '">Send now</button>' +
           '<button class="btn btn--primary btn--sm" data-action="saveSender" data-id="' + esc(s.connectionId) + '">Save</button>' +
         '</div>';
       el.appendChild(box);
@@ -2181,6 +2182,14 @@
     if (btn.dataset.action === 'saveSender' && card) {
       withBusy(btn, api('/api/senders/' + id, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(readSenderCard(card)) }))
         .then(function () { toast('Sender settings saved', 'success'); loadSenders(); })
+        .catch(function (err) { toast(err.message, 'error'); });
+    } else if (btn.dataset.action === 'sendNowSender') {
+      withBusy(btn, api('/api/senders/' + id + '/send-now', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ maxPerSender: 200 }) }))
+        .then(function (r) {
+          var note = r.reason ? ' (' + r.reason + ')' : '';
+          toast('Sent ' + r.sent + (r.failed ? ', ' + r.failed + ' failed' : '') + note, r.sent ? 'success' : 'error');
+          loadSenders();
+        })
         .catch(function (err) { toast(err.message, 'error'); });
     } else if (btn.dataset.action === 'toggleSender') {
       var action = btn.dataset.enabled === '1' ? 'pause' : 'resume';

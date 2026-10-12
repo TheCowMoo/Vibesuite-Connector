@@ -33,7 +33,8 @@ import {
   setRecipients,
   tryClaimRecipient,
 } from './campaignStore';
-import { allocateEmails, type Campaign, type RecipientRecord } from './campaign';
+import { allocateEmails, type Campaign, type CampaignSender, type RecipientRecord } from './campaign';
+import { dueForNextBatch, senderReadiness } from './campaignSchedule';
 
 function describeError(err: unknown): string {
   const e = err as { response?: { status?: number; data?: { error?: { message?: string } | string } }; message?: string };
@@ -107,54 +108,59 @@ export interface BatchResult {
   completed: boolean;
 }
 
+export interface SendOptions {
+  /** Operators pressing "send now" skip the inter-batch pacing delay. */
+  ignoreDelay?: boolean;
+}
+
 /**
- * Send at most `maxPerSender` invites per mailbox right now, honouring each
- * mailbox's cap, ramp, window and cooldown. Returns what actually went out.
+ * Send at most `maxCount` invites from one mailbox for one campaign, honouring that
+ * mailbox's cap, ramp, hourly limit, send window and cooldown.
  */
-export async function sendCampaignBatch(campaignId: string, maxPerSender = 200): Promise<BatchResult> {
-  const camp = await getCampaign(campaignId);
-  if (!camp) throw new Error('campaign not found');
-  if (camp.status !== 'active') throw new Error('campaign is not active');
+export async function sendFromSender(
+  camp: Campaign,
+  ps: CampaignSender,
+  maxCount: number,
+  opts: SendOptions = {},
+): Promise<SenderBatchResult> {
+  const campaignId = camp.id;
+  const queued = await queueLength(campaignId, ps.connectionId);
+  const conn = await getConnection(ps.connectionId);
+  if (!conn) {
+    return { connectionId: ps.connectionId, sent: 0, failed: 0, remaining: queued, skipped: true, reason: 'connection missing' };
+  }
+
+  const profile = await getSenderProfile(ps.connectionId);
+  const gauge = await getSenderGauge(ps.connectionId);
+
+  const readiness = senderReadiness({
+    enabled: profile.enabled,
+    inWindow: gauge.inWindow,
+    coolingUntil: gauge.state.cooldownUntil,
+    now: Date.now(),
+    capToday: gauge.capToday,
+    sentToday: gauge.sentToday,
+    hourlyCap: profile.hourlyCap,
+    sentThisHour: gauge.sentThisHour,
+  });
+  if (!readiness.ready) {
+    return { connectionId: ps.connectionId, sent: 0, failed: 0, remaining: queued, skipped: true, reason: readiness.reason };
+  }
+  if (!opts.ignoreDelay && !dueForNextBatch(gauge.state.lastSentAt, profile.minDelayMs, Date.now())) {
+    return { connectionId: ps.connectionId, sent: 0, failed: 0, remaining: queued, skipped: true, reason: 'inter-batch delay' };
+  }
+
+  const allowance = Math.min(readiness.allowance, maxCount, queued);
+  if (allowance <= 0) {
+    return { connectionId: ps.connectionId, sent: 0, failed: 0, remaining: queued, skipped: true, reason: 'nothing queued' };
+  }
 
   const joinUrl = await resolveJoinUrl(camp);
   const now = new Date();
   const todayISO = isoDate(now);
   const hourISO = isoHour(now);
 
-  const perSender: SenderBatchResult[] = [];
-  let totalSent = 0;
-  let totalFailed = 0;
-
-  for (const ps of camp.senders) {
-    if (!ps.enabled) continue;
-    const queued = await queueLength(campaignId, ps.connectionId);
-    const conn = await getConnection(ps.connectionId);
-    if (!conn) {
-      perSender.push({ connectionId: ps.connectionId, sent: 0, failed: 0, remaining: queued, skipped: true, reason: 'connection missing' });
-      continue;
-    }
-
-    const profile = await getSenderProfile(ps.connectionId);
-    const gauge = await getSenderGauge(ps.connectionId, now);
-
-    let reason = '';
-    if (!profile.enabled) reason = 'paused';
-    else if (gauge.cooling) reason = 'cooling down';
-    else if (!gauge.inWindow) reason = 'outside send window';
-
-    const allowance = Math.min(gauge.headroom, maxPerSender, queued);
-    if (reason || allowance <= 0) {
-      perSender.push({
-        connectionId: ps.connectionId,
-        sent: 0,
-        failed: 0,
-        remaining: queued,
-        skipped: true,
-        reason: reason || 'at daily cap',
-      });
-      continue;
-    }
-
+  {
     const popped = await popQueue(campaignId, ps.connectionId, allowance);
 
     // Claim first — a recipient is only ever invited once per campaign.
@@ -224,26 +230,107 @@ export async function sendCampaignBatch(campaignId: string, maxPerSender = 200):
     }
     await saveSenderState(ps.connectionId, state);
 
-    perSender.push({
+    return {
       connectionId: ps.connectionId,
       sent,
       failed,
       remaining: await queueLength(campaignId, ps.connectionId),
       skipped: false,
-    });
-    totalSent += sent;
-    totalFailed += failed;
+    };
   }
+}
 
-  const outstanding = (
-    await Promise.all(camp.senders.map((s) => queueLength(campaignId, s.connectionId)))
-  ).reduce((a, b) => a + b, 0);
+/** Flip a campaign to `completed` once every mailbox queue is empty. */
+export async function finalizeIfDone(campaignId: string): Promise<boolean> {
+  const camp = await getCampaign(campaignId);
+  if (!camp) return false;
 
-  if (outstanding === 0) {
+  const outstanding = (await Promise.all(camp.senders.map((s) => queueLength(campaignId, s.connectionId)))).reduce((a, b) => a + b, 0);
+  if (outstanding > 0) return false;
+
+  if (camp.status === 'active') {
     camp.status = 'completed';
     camp.completedAt = Date.now();
     await saveCampaign(camp);
   }
+  return true;
+}
 
-  return { sent: totalSent, failed: totalFailed, perSender, completed: outstanding === 0 };
+/**
+ * Move queued work off mailboxes that cannot make progress (paused or cooling) onto
+ * mailboxes that can, so one bad mailbox never strands a campaign. Cooldowns are
+ * temporary, but the work still moves — the cooled mailbox refills on its own.
+ */
+export async function redistributeStranded(camp: Campaign): Promise<number> {
+  const gauges = await Promise.all(camp.senders.map((s) => getSenderGauge(s.connectionId)));
+  const healthy: CampaignSender[] = [];
+  const stranded: string[] = [];
+
+  camp.senders.forEach((s, i) => {
+    if (s.enabled && !gauges[i].cooling) healthy.push(s);
+    else stranded.push(s.connectionId);
+  });
+  if (!healthy.length || !stranded.length) return 0;
+
+  let moved = 0;
+
+  for (const from of stranded) {
+    const queued = await queueLength(camp.id, from);
+    if (queued <= 0) continue;
+
+    const emails = await popQueue(camp.id, from, queued);
+    if (!emails.length) continue;
+
+    const targets = healthy.filter((h) => h.connectionId !== from);
+    if (!targets.length) {
+      await requeueFront(camp.id, from, emails);
+      continue;
+    }
+
+    const allocated = allocateEmails(
+      emails,
+      targets.map((t) => ({ connectionId: t.connectionId, enabled: true, priority: t.priority })),
+    );
+
+    for (const target of Object.keys(allocated)) {
+      const slice = allocated[target];
+      if (!slice.length) continue;
+      await pushQueue(camp.id, target, slice);
+      for (const email of slice) {
+        await saveRecipient(camp.id, { email, connectionId: target, status: 'pending' });
+      }
+      moved += slice.length;
+    }
+
+    logger.info({ campaignId: camp.id, from, moved: emails.length }, 'redistributed stranded invites');
+  }
+
+  if (moved > 0) inc('campaign_invites_redistributed_total', {}, moved);
+  return moved;
+}
+
+/**
+ * Send a batch from every enabled mailbox of a campaign — the manual "send batch"
+ * action. The scheduler calls `sendFromSender` directly so it can arbitrate between
+ * campaigns that share a mailbox.
+ */
+export async function sendCampaignBatch(campaignId: string, maxPerSender = 200): Promise<BatchResult> {
+  const camp = await getCampaign(campaignId);
+  if (!camp) throw new Error('campaign not found');
+  if (camp.status !== 'active') throw new Error('campaign is not active');
+
+  const perSender: SenderBatchResult[] = [];
+  let sent = 0;
+  let failed = 0;
+
+  for (const ps of camp.senders) {
+    if (!ps.enabled) continue;
+    const res = await sendFromSender(camp, ps, maxPerSender, { ignoreDelay: true });
+    perSender.push(res);
+    sent += res.sent;
+    failed += res.failed;
+  }
+
+  const completed = await finalizeIfDone(campaignId);
+  return { sent, failed, perSender, completed };
 }

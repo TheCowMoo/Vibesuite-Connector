@@ -79,6 +79,28 @@ them up. Once `errorStreak` reaches `CAMPAIGN_COOLDOWN_ON_ERRORS` the mailbox en
 The campaign flips to `completed` when no mailbox has work left. `planSchedule()` powers the
 capacity planner by walking day by day and summing each mailbox's cap for that date.
 
+### Distribution engine
+
+`startCampaignScheduler()` runs inside the sync worker as a self-rescheduling loop
+(`CAMPAIGN_TICK_INTERVAL_MS` + up to 10% jitter), and a tick is never started while the previous
+one is still running. Each tick collects every mailbox that has queued campaign work and calls
+`runMailbox()` once per mailbox, so **a mailbox is treated as one shared, rate-limited resource**
+rather than one queue per campaign.
+
+`orderClaims()` ranks a mailbox's campaigns by campaign priority then age, and `allocateBatch()`
+gives every campaign an equal slice of the mailbox's allowance before letting leftover capacity
+flow back down the priority order — a huge high-priority campaign cannot starve a small one, and
+the small one still finishes. `senderReadiness()` derives the allowance from the daily headroom,
+the hourly headroom, the send window and any cooldown; `dueForNextBatch()` then enforces
+`minDelayMs` between batches so sends are never back-to-back.
+
+After the send pass, `redistributeStranded()` moves queued recipients off mailboxes that cannot
+progress (paused, or inside a cooldown) onto healthy mailboxes in the same campaign, so a single
+bad mailbox never strands a campaign — the cooled mailbox simply refills on its own once its
+cooldown lapses. `finalizeIfDone()` then flips the campaign to `completed` when every queue is
+drained. Operators can bypass the pacing (but never the caps) for one mailbox with
+`POST /api/senders/:connectionId/send-now`.
+
 ## Security model
 
 - **Webhook authentication**: the only reliable Google push validation is the
