@@ -2411,14 +2411,18 @@
     currentCampaignId = id;
     document.getElementById('campaignDetailBody').innerHTML = skeletonCards(1);
     openModal('campaignDetail');
-    return Promise.all([api('/api/campaigns/' + id), api('/api/campaigns/' + id + '/plan')])
-      .then(function (r) { renderCampaignDetail(r[0].campaign, r[1]); })
+    return Promise.all([
+      api('/api/campaigns/' + id),
+      api('/api/campaigns/' + id + '/plan'),
+      api('/api/campaigns/' + id + '/stats').catch(function () { return null; })
+    ])
+      .then(function (r) { renderCampaignDetail(r[0].campaign, r[1], r[2] && r[2].stats); })
       .catch(function (e) {
         document.getElementById('campaignDetailBody').innerHTML = '<p class="muted">' + esc(e.message) + '</p>';
       });
   }
 
-  function renderCampaignDetail(c, plan) {
+  function renderCampaignDetail(c, plan, stats) {
     document.getElementById('campaignDetailTitle').textContent = c.name;
     var counts = c.counts || { total: 0, sent: 0, pending: 0, failed: 0 };
 
@@ -2443,8 +2447,45 @@
         '<div class="summary__item"><span class="summary__value">' + counts.failed + '</span><span class="summary__label">failed</span></div>' +
       '</div>' +
       '<p class="muted">' + planText + '</p>' +
+      '<h3 class="detail__sub">Progress by mailbox</h3>' +
       '<table class="map"><thead><tr><th>Mailbox</th><th>Sent</th><th>Queued</th><th>Failed</th><th>On</th></tr></thead><tbody>' +
-        (rows || '<tr><td colspan="5" class="muted">Not started yet.</td></tr>') + '</tbody></table>';
+        (rows || '<tr><td colspan="5" class="muted">Not started yet.</td></tr>') + '</tbody></table>' +
+      campaignStatsHtml(stats);
+  }
+
+  function campaignStatsHtml(stats) {
+    if (!stats || !stats.funnel) return '';
+    var f = stats.funnel;
+    var withAtt = !!stats.hasAttendance;
+
+    var html = '<h3 class="detail__sub">Funnel</h3>' +
+      '<div class="summary">' +
+        '<div class="summary__item"><span class="summary__value">' + f.sent + '</span><span class="summary__label">invited (' + f.rsvpRate + '% replied)</span></div>' +
+        '<div class="summary__item"><span class="summary__value">' + f.accepted + '</span><span class="summary__label">accepted (' + f.acceptanceRate + '% of sent)</span></div>' +
+        '<div class="summary__item"><span class="summary__value">' + f.declined + '</span><span class="summary__label">declined</span></div>' +
+        '<div class="summary__item"><span class="summary__value">' + f.tentative + '</span><span class="summary__label">tentative</span></div>' +
+        '<div class="summary__item"><span class="summary__value">' + f.noResponse + '</span><span class="summary__label">no reply</span></div>' +
+      '</div>';
+
+    if (withAtt) {
+      html += '<div class="summary">' +
+        '<div class="summary__item"><span class="summary__value">' + f.attended + '</span><span class="summary__label">attended (' + f.attendanceRate + '% of yes)</span></div>' +
+        '<div class="summary__item"><span class="summary__value">' + f.noShow + '</span><span class="summary__label">no-show</span></div>' +
+      '</div>';
+    } else {
+      html += '<p class="muted">Attendance appears once the linked session has been synced in the Attendance tab.</p>';
+    }
+
+    var head = '<tr><th>Mailbox</th><th>Sent</th><th>Yes</th><th>No</th><th>Maybe</th><th>No reply</th>' + (withAtt ? '<th>Attended</th>' : '') + '</tr>';
+    var body = (stats.perSender || []).map(function (x) {
+      return '<tr><td>' + esc(connName(x.connectionId)) + '</td><td>' + x.sent + '</td><td>' + x.accepted +
+        '</td><td>' + x.declined + '</td><td>' + x.tentative + '</td><td>' + x.noResponse + '</td>' +
+        (withAtt ? '<td>' + x.attended + '</td>' : '') + '</tr>';
+    }).join('');
+
+    return html + '<h3 class="detail__sub">Results by sending mailbox</h3>' +
+      '<table class="map"><thead>' + head + '</thead><tbody>' +
+      (body || '<tr><td colspan="' + (withAtt ? 7 : 6) + '" class="muted">Nothing sent yet.</td></tr>') + '</tbody></table>';
   }
 
   $('#campaignNew').addEventListener('click', openCampaignWizard);

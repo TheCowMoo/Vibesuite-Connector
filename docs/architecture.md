@@ -101,6 +101,18 @@ cooldown lapses. `finalizeIfDone()` then flips the campaign to `completed` when 
 drained. Operators can bypass the pacing (but never the caps) for one mailbox with
 `POST /api/senders/:connectionId/send-now`.
 
+### Stats & attribution
+
+`buildCampaignStats()` is pure: it folds the frozen recipient records, the per-mailbox Google RSVP
+state (`conn:{id}:sync:state`, read via `stateStore.getStates()`) and the linked session's Zoom
+attendance into one funnel — invited → sent/failed/queued → accepted/declined/tentative/no-reply →
+attended/no-show — and emits the same numbers broken down **per sending mailbox**. Every figure is
+attributable to the mailbox that actually created the calendar event, because each recipient row
+keeps its `connectionId` and `eventId`. Rates are real percentages of real denominators
+(`rsvpRate = (accepted + declined + tentative) / sent`, `attendanceRate = attended / (accepted +
+tentative)`), never estimates. Bounce/open metrics are intentionally absent until the GHL reminder
+layer exists.
+
 ## Security model
 
 - **Webhook authentication**: the only reliable Google push validation is the

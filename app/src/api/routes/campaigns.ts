@@ -17,6 +17,10 @@ import {
 } from '../../domain/campaignStore';
 import { sendCampaignBatch, startCampaign } from '../../domain/campaignDispatch';
 import { getSenderProfile } from '../../domain/senderStore';
+import { buildCampaignStats, normalizeRsvp } from '../../domain/campaignStats';
+import { normalizeEmail } from '../../domain/attendance';
+import { getAttendance } from '../../domain/attendanceStore';
+import { stateStore } from '../../domain/stateStore';
 import { requireRole } from '../middleware/requireAuth';
 
 async function withStats(camp: Campaign): Promise<Record<string, unknown>> {
@@ -111,6 +115,43 @@ export async function campaignRoutes(app: FastifyInstance): Promise<void> {
       dailyCapacity: plan.days.length ? plan.days[0].total : 0,
       ...plan,
       spread: camp.distribution.mode,
+    };
+  });
+
+  /** Sends, RSVP funnel and session attendance — attributed per sending mailbox. */
+  app.get('/api/campaigns/:id/stats', async (req, reply) => {
+    const id = (req.params as { id: string }).id;
+    const camp = await getCampaign(id);
+    if (!camp) {
+      reply.code(404).send({ error: 'campaign not found' });
+      return;
+    }
+
+    const recipients = await getRecipients(id);
+
+    const rsvpByConnection: Record<string, Record<string, Record<string, string>>> = {};
+    const connectionIds = Array.from(new Set(recipients.map((r) => r.connectionId)));
+    for (const connectionId of connectionIds) {
+      const states = await stateStore.getStates(connectionId);
+      const perEvent: Record<string, Record<string, string>> = {};
+      for (const [eventId, map] of states) perEvent[eventId] = map;
+      rsvpByConnection[connectionId] = perEvent;
+    }
+
+    const attendance = camp.sessionId ? await getAttendance(camp.sessionId) : null;
+    let attendanceByEmail: Record<string, boolean> | undefined;
+    if (attendance) {
+      attendanceByEmail = {};
+      for (const person of attendance.attended) {
+        if (person.email) attendanceByEmail[normalizeEmail(person.email)] = true;
+      }
+      for (const email of attendance.noShow) attendanceByEmail[normalizeEmail(email)] = false;
+    }
+
+    return {
+      stats: buildCampaignStats({ recipients, rsvpByConnection, attendanceByEmail }),
+      sessionId: camp.sessionId ?? null,
+      rsvpStatuses: ['accepted', 'declined', 'tentative', 'needsAction'].map((s) => normalizeRsvp(s)),
     };
   });
 
