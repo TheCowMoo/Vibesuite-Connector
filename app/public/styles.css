@@ -474,6 +474,43 @@ fieldset.field legend { margin-bottom: 0.4rem; }
 .invite-result a { color: var(--royal); font-weight: 600; }
 .section-title { margin: 1.5rem 0 0.6rem; font-size: 1.1rem; }
 
+/* ---- Auth gate ---- */
+.auth-gate {
+  position: fixed; inset: 0; z-index: 80;
+  display: flex; align-items: center; justify-content: center;
+  padding: 1.25rem;
+  background: linear-gradient(160deg, var(--navy) 0%, #16224f 100%);
+}
+.auth-card {
+  width: 100%; max-width: 380px; background: #fff;
+  border-radius: var(--radius-lg); padding: 1.6rem 1.5rem 1.4rem;
+  box-shadow: var(--shadow-md);
+}
+.auth-logo { display: block; height: 34px; width: auto; margin-bottom: 1rem; }
+.auth-title { font-size: 1.35rem; margin-bottom: 0.2rem; }
+.auth-sub { color: var(--ink-muted); font-size: 0.9rem; margin-bottom: 1.1rem; }
+.auth-submit { width: 100%; justify-content: center; margin-top: 0.35rem; }
+.auth-error {
+  background: #FBEDEB; border: 1px solid #E8B8B4; color: var(--danger);
+  border-radius: var(--radius); padding: 0.5rem 0.7rem;
+  font-size: 0.85rem; margin: 0 0 0.75rem;
+}
+.menu__head {
+  font-size: 0.75rem; font-weight: 700; color: var(--ink-muted);
+  text-transform: uppercase; letter-spacing: 0.02em;
+  padding: 0.4rem 0.6rem 0.3rem; border-bottom: 1px solid var(--line); margin-bottom: 0.25rem;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.avatar--btn { border: none; cursor: pointer; font: inherit; font-weight: 700; color: #fff; }
+.menu--right { right: 0; }
+.invite-link {
+  display: flex; gap: 0.5rem; align-items: center; margin-top: 0.6rem;
+}
+.invite-link input {
+  flex: 1; font-size: 0.82rem; padding: 0.45rem 0.6rem;
+  border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface);
+}
+
 /* ---- Responsive ---- */
 @media (max-width: 900px) {
   .stats { grid-template-columns: repeat(2, 1fr); }

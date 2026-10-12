@@ -16,6 +16,8 @@
     "bootstrap:prod": "node dist/scripts/bootstrap-watch.js",
     "seed": "tsx src/scripts/seed-connection.ts",
     "seed:prod": "node dist/scripts/seed-connection.js",
+    "create-owner": "tsx src/scripts/create-owner.ts",
+    "create-owner:prod": "node dist/scripts/create-owner.js",
     "test": "vitest run",
     "test:watch": "vitest"
   },

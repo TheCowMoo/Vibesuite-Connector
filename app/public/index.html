@@ -23,10 +23,18 @@
       <button class="topnav__link" data-view="knowledge"><span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg></span>Knowledge</button>
       <button class="topnav__link" data-view="invites"><span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4 20-7z"/></svg></span>Invites</button>
       <button class="topnav__link" data-view="attendance"><span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg></span>Attendance</button>
+      <button class="topnav__link" data-view="team" data-role="admin" hidden><span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span>Team</button>
       <button class="topnav__link" data-view="settings"><span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg></span>Settings</button>
     </nav>
     <div class="topnav__right">
-      <span class="avatar" title="Signed in">VS</span>
+      <div class="menu-wrap" id="accountWrap" hidden>
+        <button class="avatar avatar--btn" id="accountBtn" data-menu-btn aria-haspopup="menu" aria-label="Account">VS</button>
+        <div class="menu menu--right" data-menu>
+          <div class="menu__head" id="accountName">Account</div>
+          <button class="menu__item" data-action="changePassword">Change password</button>
+          <button class="menu__item menu__item--danger" data-action="logout">Sign out</button>
+        </div>
+      </div>
     </div>
   </div>
 </header>
@@ -179,6 +187,36 @@
 
     <div class="summary" id="attendanceSummaryStrip"></div>
     <div id="sessionsList"></div>
+  </section>
+
+  <!-- Team -->
+  <section id="view-team" class="view" hidden>
+    <div class="page-head">
+      <div>
+        <h1 class="page-head__title">Team</h1>
+        <p class="page-head__sub">Invite people and manage access.</p>
+      </div>
+      <button class="btn btn--primary" id="newMemberBtn">+ Invite member</button>
+    </div>
+
+    <div id="teamMembers"></div>
+
+    <h2 class="section-title">Pending invites</h2>
+    <div id="teamInvites"></div>
+
+    <h2 class="section-title">Invite delivery</h2>
+    <div class="card">
+      <p class="muted">Every invite always shows a copyable link. Optionally POST it to a GoHighLevel inbound webhook so GHL sends the email.</p>
+      <label class="field"><span class="field__label">GHL invite webhook URL</span><input id="teamWebhookUrl" placeholder="https://services.leadconnectorhq.com/hooks/…" /></label>
+      <p class="muted" id="teamWebhookStatus"></p>
+      <div class="conn__actions">
+        <button class="btn btn--ghost btn--sm" id="teamWebhookTest">Send test</button>
+        <button class="btn btn--primary btn--sm" id="teamWebhookSave">Save</button>
+      </div>
+    </div>
+
+    <h2 class="section-title">Activity</h2>
+    <div class="table-scroll" id="teamAudit"></div>
   </section>
 </main>
 
@@ -455,6 +493,68 @@
       <span class="spacer"></span>
       <button class="btn btn--ghost" data-close="attendanceAutomations">Cancel</button>
       <button class="btn btn--primary" id="attendanceAutomationsSave">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Auth gate (login / first-run setup / accept invite) -->
+<div class="auth-gate" id="authGate" hidden>
+  <div class="auth-card">
+    <img src="/static/logo.png" alt="Vibesuite" class="auth-logo" />
+    <h1 class="auth-title" id="authTitle">Sign in</h1>
+    <p class="auth-sub" id="authSub">Welcome back.</p>
+    <form id="authForm" novalidate>
+      <label class="field" id="authNameWrap" hidden><span class="field__label">Your name</span><input name="name" autocomplete="name" /></label>
+      <label class="field" id="authEmailWrap"><span class="field__label">Email</span><input name="email" type="email" autocomplete="username" /></label>
+      <label class="field"><span class="field__label">Password</span><input name="password" type="password" autocomplete="current-password" placeholder="At least 8 characters" /></label>
+    </form>
+    <p class="auth-error" id="authError" hidden></p>
+    <button class="btn btn--primary auth-submit" id="authSubmit">Sign in</button>
+  </div>
+</div>
+
+<!-- Invite member -->
+<div class="backdrop" id="inviteMember" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="inviteMemberTitle">
+    <div class="modal__head">
+      <h2 class="modal__title" id="inviteMemberTitle">Invite member</h2>
+      <button class="icon-btn" data-close="inviteMember" aria-label="Close">&times;</button>
+    </div>
+    <form id="inviteMemberForm" novalidate>
+      <label class="field"><span class="field__label">Email</span><input name="email" type="email" placeholder="teammate@example.com" /></label>
+      <label class="field"><span class="field__label">Name (optional)</span><input name="name" /></label>
+      <label class="field"><span class="field__label">Role</span>
+        <select name="role">
+          <option value="member">Member — product access only</option>
+          <option value="admin">Admin — can invite &amp; manage the team</option>
+          <option value="owner">Owner — full control</option>
+        </select>
+      </label>
+    </form>
+    <div id="inviteMemberResult" hidden></div>
+    <div class="modal__foot">
+      <span class="spacer"></span>
+      <button class="btn btn--ghost" data-close="inviteMember">Close</button>
+      <button class="btn btn--primary" id="inviteMemberSave">Send invite</button>
+    </div>
+  </div>
+</div>
+
+<!-- Change password -->
+<div class="backdrop" id="changePassword" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="changePasswordTitle">
+    <div class="modal__head">
+      <h2 class="modal__title" id="changePasswordTitle">Change password</h2>
+      <button class="icon-btn" data-close="changePassword" aria-label="Close">&times;</button>
+    </div>
+    <form id="changePasswordForm" novalidate>
+      <label class="field"><span class="field__label">Current password</span><input name="currentPassword" type="password" autocomplete="current-password" /></label>
+      <label class="field"><span class="field__label">New password</span><input name="newPassword" type="password" autocomplete="new-password" placeholder="At least 8 characters" /></label>
+    </form>
+    <div class="modal__foot">
+      <span class="spacer"></span>
+      <button class="btn btn--ghost" data-close="changePassword">Cancel</button>
+      <button class="btn btn--primary" id="changePasswordSave">Update password</button>
     </div>
   </div>
 </div>

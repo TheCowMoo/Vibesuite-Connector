@@ -272,6 +272,51 @@ Most likely causes, in order:
   (**Settings → AI**), stored encrypted in Redis (not in `.env`).
 - Full variable list and defaults: [`.env.example`](../.env.example).
 
+## 8. Auth & team (login system)
+
+The dashboard ships with a login system that is **off by default** (`AUTH_ENABLED=false`) so a deploy can never lock you out.
+
+### Safe rollout
+
+```bash
+# 1) deploy with auth off (the default) — behaviour is unchanged
+git fetch origin && git reset --hard origin/main
+docker compose up -d --build --force-recreate
+docker compose restart nginx
+
+# 2) create the owner — either path
+#    a) enable AUTH_ENABLED=true, open the panel and complete "Create your owner account"
+#       (the first-run form only appears while zero users exist)
+#    b) CLI, no redeploy needed:
+docker compose exec app-api npm run create-owner:prod -- --email you@example.com --password "a-strong-password"
+
+# 3) turn auth on
+#    set AUTH_ENABLED=true in .env, then:
+docker compose up -d --force-recreate
+docker compose restart nginx
+```
+
+### Roles
+
+| Role | Can do |
+|---|---|
+| `owner` | Everything, including promoting/demoting owners |
+| `admin` | Invite members, change roles, disable/remove members |
+| `member` | Use the product only (no Team tab) |
+
+### Invites
+
+- **Team → Invite member** always produces a **copyable link** (`/invite?token=…`), single-use and expiring after `INVITE_TTL_DAYS` (default 7).
+- Optionally set a **GHL inbound webhook URL** in **Team → Invite delivery** (or `TEAM_INVITE_WEBHOOK_URL`); every invite is also POSTed there so GHL sends the email. Use **Send test** first.
+- The webhook payload includes `email`, `name`, `role`, `inviteUrl`, `invitedBy`, `expiresAt`, `subject`.
+
+### Notes
+
+- Sessions live in Redis (`auth:session:*`) and are issued as an httpOnly `SameSite=Lax` cookie; only the token's SHA-256 is stored.
+- `/webhooks/google/calendar` and `/oauth/**` **must remain public** — they are allowlisted in `app/src/lib/authPaths.ts`. If RSVP sync breaks right after enabling auth, check that first.
+- Login attempts are rate-limited (10 per 15 min per email+IP).
+- With `AUTH_ENABLED=false` every route behaves exactly as before.
+
 ## Related docs
 
 - [`architecture.md`](architecture.md) — design decisions, data flow, Redis key map.

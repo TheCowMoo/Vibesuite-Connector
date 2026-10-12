@@ -39,5 +39,15 @@ export const REDIS_KEYS = {
   session: (id: string) => `session:${id}`,
   attendance: (sessionId: string) => `session:${sessionId}:attendance`,
   attendanceDispatched: (sessionId: string, fingerprint: string) => `session:${sessionId}:dispatch:seen:${fingerprint}`,
+  authUser: (id: string) => `auth:user:${id}`,
+  authUsers: () => 'auth:users',
+  authEmail: (emailLower: string) => `auth:email:${emailLower}`,
+  authInvite: (id: string) => `auth:invite:${id}`,
+  authInvites: () => 'auth:invites',
+  authSession: (tokenHash: string) => `auth:session:${tokenHash}`,
+  authLogins: (userId: string) => `auth:logins:${userId}`,
+  authLoginAttempts: (key: string) => `auth:loginAttempts:${key}`,
+  authAudit: () => 'auth:audit',
+  teamSettings: () => 'settings:team',
 } as const;
 

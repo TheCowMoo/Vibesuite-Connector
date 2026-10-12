@@ -40,18 +40,21 @@
 
   /* ---- Navigation ---- */
   function showView(name) {
+    if (name === 'team' && authState.enabled && !isAdmin()) name = 'connections';
     $$('.topnav__link').forEach(function (b) { b.classList.toggle('is-active', b.dataset.view === name); });
     $('#view-connections').hidden = name !== 'connections';
     $('#view-lists').hidden = name !== 'lists';
     $('#view-knowledge').hidden = name !== 'knowledge';
     $('#view-invites').hidden = name !== 'invites';
     $('#view-attendance').hidden = name !== 'attendance';
+    $('#view-team').hidden = name !== 'team';
     $('#view-settings').hidden = name !== 'settings';
     if (name === 'settings') loadInfo();
     if (name === 'lists') loadLists();
     if (name === 'knowledge') loadKnowledge();
     if (name === 'invites') loadInvitesView();
     if (name === 'attendance') loadAttendance();
+    if (name === 'team') loadTeam();
   }
   $$('.topnav__link').forEach(function (btn) {
     btn.addEventListener('click', function () { showView(btn.dataset.view); });
@@ -1691,10 +1694,341 @@
     });
   }
 
+  /* ---- Auth & Team ---- */
+  var authState = { enabled: false, authenticated: false, user: null };
+  var authMode = 'login';
+  var inviteToken = null;
+  var teamData = null;
+
+  function isAdmin() {
+    return !!(authState.user && (authState.user.role === 'owner' || authState.user.role === 'admin'));
+  }
+
+  function initials(name) {
+    var parts = String(name || '?').trim().split(/\s+/);
+    var a = (parts[0] || '?')[0] || '?';
+    var b = parts.length > 1 ? (parts[parts.length - 1][0] || '') : '';
+    return (a + b).toUpperCase();
+  }
+
+  function bootstrapAuth() {
+    inviteToken = new URLSearchParams(window.location.search).get('token');
+    return api('/api/auth/me')
+      .then(function (d) {
+        authState = d;
+        if (d.needsSetup) return showAuthGate('setup');
+        if (inviteToken) return showAuthGate('invite');
+        if (d.enabled && !d.authenticated) return showAuthGate('login');
+        startPanel();
+      })
+      .catch(function () {
+        // /api/auth/me unreachable → assume auth is off and open the panel.
+        startPanel();
+      });
+  }
+
+  function startPanel() {
+    document.getElementById('authGate').hidden = true;
+    var wrap = document.getElementById('accountWrap');
+    wrap.hidden = !authState.user;
+    if (authState.user) {
+      document.getElementById('accountName').textContent = (authState.user.name || authState.user.email) + ' · ' + authState.user.role;
+      document.getElementById('accountBtn').textContent = initials(authState.user.name || authState.user.email);
+    }
+    var teamNav = document.querySelector('.topnav__link[data-view="team"]');
+    if (teamNav) teamNav.hidden = !(isAdmin() || !authState.enabled);
+    loadCatalog();
+    showView('connections');
+    load();
+  }
+
+  function showAuthGate(mode) {
+    authMode = mode;
+    document.getElementById('authGate').hidden = false;
+    document.getElementById('authError').hidden = true;
+    var form = document.getElementById('authForm');
+    form.reset();
+    document.getElementById('authEmailWrap').hidden = mode === 'invite';
+    document.getElementById('authNameWrap').hidden = mode === 'login';
+
+    var titles = { login: 'Sign in', setup: 'Create your owner account', invite: 'Accept your invite' };
+    var subs = {
+      login: 'Welcome back.',
+      setup: 'First-run setup — this disappears once an account exists.',
+      invite: 'Set a password to join the team.'
+    };
+    document.getElementById('authTitle').textContent = titles[mode];
+    document.getElementById('authSub').textContent = subs[mode];
+    document.getElementById('authSubmit').textContent = mode === 'login' ? 'Sign in' : mode === 'setup' ? 'Create account' : 'Join team';
+    form.querySelector('[name="password"]').setAttribute('autocomplete', mode === 'login' ? 'current-password' : 'new-password');
+  }
+
+  function submitAuth() {
+    var fd = new FormData(document.getElementById('authForm'));
+    var errEl = document.getElementById('authError');
+    errEl.hidden = true;
+
+    var path = authMode === 'login' ? '/api/auth/login' : authMode === 'setup' ? '/api/auth/setup' : '/api/auth/accept-invite';
+    var body = { email: fd.get('email'), name: fd.get('name'), password: fd.get('password') };
+    if (authMode === 'invite') body.token = inviteToken;
+
+    withBusy(document.getElementById('authSubmit'), api(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }))
+      .then(function (r) {
+        authState = { enabled: true, authenticated: true, user: r.user, needsSetup: false };
+        if (inviteToken) {
+          history.replaceState(null, '', '/');
+          inviteToken = null;
+        }
+        toast('Welcome, ' + (r.user.name || r.user.email), 'success');
+        startPanel();
+      })
+      .catch(function (e) {
+        errEl.textContent = e.message;
+        errEl.hidden = false;
+      });
+  }
+
+  function roleChip(role) {
+    var tone = role === 'owner' ? 'chip--warning' : role === 'admin' ? 'chip--success' : 'chip--neutral';
+    return '<span class="chip ' + tone + '">' + esc(role) + '</span>';
+  }
+
+  function loadTeam() {
+    document.getElementById('teamMembers').innerHTML = skeletonCards(3);
+    return api('/api/team')
+      .then(function (d) {
+        teamData = d;
+        renderTeamMembers(d.users || []);
+        renderTeamInvites(d.invites || []);
+        renderTeamAudit(d.audit || []);
+        document.getElementById('teamWebhookUrl').value = (d.settings && d.settings.inviteWebhookUrl) || '';
+      })
+      .catch(function (e) {
+        document.getElementById('teamMembers').innerHTML = '<div class="card"><p class="muted">' + esc(e.message) + '</p></div>';
+      });
+  }
+
+  function renderTeamMembers(users) {
+    var el = document.getElementById('teamMembers');
+    el.innerHTML = '';
+    users.forEach(function (u) {
+      var me = authState.user && authState.user.id === u.id;
+      var box = document.createElement('div');
+      box.className = 'conn';
+      box.innerHTML =
+        '<div class="conn__main">' +
+          '<div class="conn__head"><span class="conn__name">' + esc(u.name) + (me ? ' <span class="muted" style="font-size:0.8rem">(you)</span>' : '') + '</span>' +
+            roleChip(u.role) + (u.status === 'disabled' ? '<span class="chip chip--danger">disabled</span>' : '') + '</div>' +
+          '<div class="conn__meta"><span>' + esc(u.email) + '</span>' +
+            badge('Last login: ' + (u.lastLoginAt ? new Date(u.lastLoginAt).toLocaleString() : 'never')) + '</div>' +
+        '</div>' +
+        '<div class="conn__actions">' +
+          '<select data-role-for="' + esc(u.id) + '" aria-label="Role">' +
+            ['member', 'admin', 'owner'].map(function (r) {
+              return '<option value="' + r + '"' + (r === u.role ? ' selected' : '') + '>' + r + '</option>';
+            }).join('') +
+          '</select>' +
+          '<button class="btn btn--ghost btn--sm" data-action="toggleUser" data-id="' + esc(u.id) + '" data-status="' +
+            (u.status === 'disabled' ? 'active' : 'disabled') + '">' + (u.status === 'disabled' ? 'Enable' : 'Disable') + '</button>' +
+          '<button class="btn btn--danger btn--sm" data-action="removeUser" data-id="' + esc(u.id) + '">Remove</button>' +
+        '</div>';
+      el.appendChild(box);
+    });
+  }
+
+  function renderTeamInvites(invites) {
+    var el = document.getElementById('teamInvites');
+    if (!invites.length) {
+      el.innerHTML = '<p class="muted">No pending invites.</p>';
+      return;
+    }
+    el.innerHTML = '';
+    invites.forEach(function (i) {
+      var box = document.createElement('div');
+      box.className = 'conn';
+      box.innerHTML =
+        '<div class="conn__main">' +
+          '<div class="conn__head"><span class="conn__name">' + esc(i.email) + '</span>' + roleChip(i.role) + '</div>' +
+          '<div class="conn__meta"><span>Invited by ' + esc(i.invitedBy) + '</span>' +
+            badge('Expires ' + new Date(i.expiresAt).toLocaleDateString()) + '</div>' +
+          '<div class="invite-link"><input readonly value="' + esc(i.inviteUrl) + '" aria-label="Invite link" />' +
+            '<button class="btn btn--ghost btn--sm" data-action="copyInvite" data-url="' + esc(i.inviteUrl) + '">Copy</button></div>' +
+        '</div>' +
+        '<div class="conn__actions">' +
+          '<button class="btn btn--ghost btn--sm" data-action="resendInvite" data-id="' + esc(i.id) + '">Resend</button>' +
+          '<button class="btn btn--danger btn--sm" data-action="revokeInvite" data-id="' + esc(i.id) + '">Revoke</button>' +
+        '</div>';
+      el.appendChild(box);
+    });
+  }
+
+  function renderTeamAudit(events) {
+    var el = document.getElementById('teamAudit');
+    if (!events.length) {
+      el.innerHTML = '<p class="muted">No activity yet.</p>';
+      return;
+    }
+    el.innerHTML = '<table class="map" aria-label="Activity"><thead><tr><th>When</th><th>Action</th><th>Actor</th><th>Detail</th></tr></thead><tbody>' +
+      events.map(function (e) {
+        return '<tr><td title="' + esc(new Date(e.at).toLocaleString()) + '">' + relativeTime(e.at) + '</td>' +
+          '<td>' + esc(e.action) + '</td><td>' + esc(e.actor || '—') + '</td><td>' + esc(e.detail || '—') + '</td></tr>';
+      }).join('') + '</tbody></table>';
+  }
+
+  function copyText(text) {
+    if (!text) return;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text)
+        .then(function () { toast('Link copied', 'success'); })
+        .catch(function () { toast('Copy failed — select and copy manually', 'error'); });
+    } else {
+      toast('Copy not supported — select and copy manually', 'error');
+    }
+  }
+
+  function openInviteMember() {
+    document.getElementById('inviteMemberForm').reset();
+    var r = document.getElementById('inviteMemberResult');
+    r.hidden = true;
+    r.innerHTML = '';
+    openModal('inviteMember');
+  }
+
+  function submitInvite() {
+    var fd = new FormData(document.getElementById('inviteMemberForm'));
+    var body = { email: fd.get('email'), name: fd.get('name') || undefined, role: fd.get('role') };
+    if (!body.email) { toast('Email is required', 'error'); return; }
+
+    withBusy(document.getElementById('inviteMemberSave'), api('/api/team/invites', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }))
+      .then(function (r) {
+        var ok = r.webhook && r.webhook.ok;
+        var note = ok ? 'Webhook sent.' : 'Webhook: ' + ((r.webhook && r.webhook.detail) || 'not configured');
+        var box = document.getElementById('inviteMemberResult');
+        box.hidden = false;
+        box.className = 'invite-result ' + (ok ? 'invite-result--success' : 'invite-result--error');
+        box.innerHTML = '<div>Invite created for <strong>' + esc(r.invite.email) + '</strong> (' + esc(r.invite.role) + '). ' + esc(note) + '</div>' +
+          '<div class="invite-link"><input readonly value="' + esc(r.inviteUrl) + '" aria-label="Invite link" />' +
+          '<button class="btn btn--ghost btn--sm" data-action="copyInvite" data-url="' + esc(r.inviteUrl) + '">Copy</button></div>';
+        toast('Invite created', 'success');
+        loadTeam();
+      })
+      .catch(function (e) { toast(e.message, 'error'); });
+  }
+
+  document.getElementById('newMemberBtn').addEventListener('click', openInviteMember);
+  document.getElementById('inviteMemberSave').addEventListener('click', submitInvite);
+
+  document.getElementById('inviteMemberResult').addEventListener('click', function (e) {
+    var btn = e.target.closest('[data-action="copyInvite"]');
+    if (btn) copyText(btn.dataset.url);
+  });
+
+  document.getElementById('teamMembers').addEventListener('change', function (e) {
+    var sel = e.target.closest('[data-role-for]');
+    if (!sel) return;
+    api('/api/team/users/' + sel.dataset.roleFor, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ role: sel.value }) })
+      .then(function () { toast('Role updated', 'success'); loadTeam(); })
+      .catch(function (err) { toast(err.message, 'error'); loadTeam(); });
+  });
+
+  document.getElementById('teamMembers').addEventListener('click', function (e) {
+    var btn = e.target.closest('[data-action]');
+    if (!btn) return;
+    var id = btn.dataset.id;
+    if (btn.dataset.action === 'toggleUser') {
+      api('/api/team/users/' + id, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: btn.dataset.status }) })
+        .then(function () { toast('Updated', 'success'); loadTeam(); })
+        .catch(function (err) { toast(err.message, 'error'); });
+    } else if (btn.dataset.action === 'removeUser') {
+      confirmDialog('Remove member?', 'They lose access immediately.', 'Remove').then(function (ok) {
+        if (!ok) return;
+        api('/api/team/users/' + id, { method: 'DELETE' })
+          .then(function () { toast('Member removed', 'success'); loadTeam(); })
+          .catch(function (err) { toast(err.message, 'error'); });
+      });
+    }
+  });
+
+  document.getElementById('teamInvites').addEventListener('click', function (e) {
+    var btn = e.target.closest('[data-action]');
+    if (!btn) return;
+    if (btn.dataset.action === 'copyInvite') { copyText(btn.dataset.url); return; }
+    if (btn.dataset.action === 'resendInvite') {
+      withBusy(btn, api('/api/team/invites/' + btn.dataset.id + '/resend', { method: 'POST' }))
+        .then(function (r) {
+          toast(r.webhook && r.webhook.ok ? 'Invite re-sent' : 'Link ready (webhook: ' + ((r.webhook && r.webhook.detail) || 'not configured') + ')', 'success');
+          loadTeam();
+        })
+        .catch(function (err) { toast(err.message, 'error'); });
+    } else if (btn.dataset.action === 'revokeInvite') {
+      confirmDialog('Revoke invite?', 'The invite link will stop working.', 'Revoke').then(function (ok) {
+        if (!ok) return;
+        api('/api/team/invites/' + btn.dataset.id, { method: 'DELETE' })
+          .then(function () { toast('Invite revoked', 'success'); loadTeam(); })
+          .catch(function (err) { toast(err.message, 'error'); });
+      });
+    }
+  });
+
+  document.getElementById('teamWebhookSave').addEventListener('click', function () {
+    var url = document.getElementById('teamWebhookUrl').value.trim();
+    withBusy(this, api('/api/team/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ inviteWebhookUrl: url }) }))
+      .then(function () { toast('Invite delivery saved', 'success'); })
+      .catch(function (e) { toast(e.message, 'error'); });
+  });
+
+  document.getElementById('teamWebhookTest').addEventListener('click', function () {
+    withBusy(this, api('/api/team/settings/test', { method: 'POST' }))
+      .then(function (r) {
+        document.getElementById('teamWebhookStatus').textContent = r.ok ? 'Test delivered.' : 'Test failed — ' + (r.detail || 'unknown');
+        toast(r.ok ? 'Webhook test OK' : 'Webhook test failed', r.ok ? 'success' : 'error');
+      })
+      .catch(function (e) { toast(e.message, 'error'); });
+  });
+
+  document.getElementById('accountBtn').addEventListener('click', function (e) {
+    e.stopPropagation();
+    toggleMenu(this);
+  });
+
+  document.querySelector('#accountWrap .menu').addEventListener('click', function (e) {
+    var btn = e.target.closest('[data-action]');
+    if (!btn) return;
+    closeAllMenus();
+    if (btn.dataset.action === 'logout') {
+      api('/api/auth/logout', { method: 'POST' })
+        .then(function () {
+          authState = { enabled: true, authenticated: false, user: null };
+          showAuthGate('login');
+        })
+        .catch(function (err) { toast(err.message, 'error'); });
+    } else if (btn.dataset.action === 'changePassword') {
+      document.getElementById('changePasswordForm').reset();
+      openModal('changePassword');
+    }
+  });
+
+  document.getElementById('changePasswordSave').addEventListener('click', function () {
+    var fd = new FormData(document.getElementById('changePasswordForm'));
+    var body = { currentPassword: fd.get('currentPassword'), newPassword: fd.get('newPassword') };
+    withBusy(this, api('/api/auth/change-password', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }))
+      .then(function () {
+        closeModal('changePassword');
+        toast('Password updated — please sign in again', 'success');
+        authState = { enabled: true, authenticated: false, user: null };
+        showAuthGate('login');
+      })
+      .catch(function (e) { toast(e.message, 'error'); });
+  });
+
+  document.getElementById('authSubmit').addEventListener('click', submitAuth);
+  document.getElementById('authForm').addEventListener('submit', function (e) {
+    e.preventDefault();
+    submitAuth();
+  });
+
   /* ---- Init ---- */
   $('#newConnectionBtn').addEventListener('click', openWizard);
   $('#emptyCta').addEventListener('click', openWizard);
-  loadCatalog();
-  showView('connections');
-  load();
+  bootstrapAuth();
 })();

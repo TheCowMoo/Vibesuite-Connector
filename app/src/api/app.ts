@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import Fastify, { type FastifyInstance } from 'fastify';
+import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
 import fastifyStatic from '@fastify/static';
 import { webhookRoutes } from './routes/webhook';
 import { healthRoutes } from './routes/health';
@@ -16,20 +16,29 @@ import { inviteRoutes } from './routes/invites';
 import { sessionRoutes } from './routes/sessions';
 import { videoRoutes } from './routes/video';
 import { errorHandler } from './middleware/errorHandler';
+import { registerAuth } from './middleware/requireAuth';
+import { authRoutes } from './routes/auth';
+import { teamRoutes } from './routes/team';
 
 export function buildApp(): FastifyInstance {
   const app = Fastify({ logger: false });
 
   app.setErrorHandler(errorHandler);
 
+  // Deny-by-default API auth (no-op unless AUTH_ENABLED=true).
+  registerAuth(app);
+
   const publicDir = path.resolve(__dirname, '..', '..', 'public');
   void app.register(fastifyStatic, { root: publicDir, prefix: '/static/' });
 
-  // Control panel (single page)
-  app.get('/', async (_req, reply) => {
+  // Control panel (single page). `/invite` serves the same shell so invite
+  // links resolve; the client reads ?token= and shows the accept-invite view.
+  const serveSpa = async (_req: FastifyRequest, reply: FastifyReply): Promise<void> => {
     const html = fs.readFileSync(path.join(publicDir, 'index.html'), 'utf8');
     reply.header('Content-Type', 'text/html; charset=utf-8').send(html);
-  });
+  };
+  app.get('/', serveSpa);
+  app.get('/invite', serveSpa);
 
   void app.register(infoRoutes);
   void app.register(integrationRoutes);
@@ -39,6 +48,8 @@ export function buildApp(): FastifyInstance {
   void app.register(inviteRoutes);
   void app.register(sessionRoutes);
   void app.register(videoRoutes);
+  void app.register(authRoutes);
+  void app.register(teamRoutes);
   void app.register(healthRoutes);
   void app.register(metricsRoutes);
   void app.register(webhookRoutes);

@@ -56,6 +56,12 @@ const EnvSchema = z.object({
   ATTENDANCE_MATCH_MODE: z.enum(['email', 'email_or_name']).default('email'),
   GHL_TAG_ATTENDED: z.string().default('attended'),
   GHL_TAG_NO_SHOW: z.string().default('no-show'),
+  AUTH_ENABLED: z.enum(['true', 'false']).default('false').transform((v) => v === 'true'),
+  AUTH_COOKIE_NAME: z.string().default('vibesuite_session'),
+  SESSION_TTL_DAYS: z.coerce.number().int().positive().default(30),
+  INVITE_TTL_DAYS: z.coerce.number().int().positive().default(7),
+  AUTH_ALLOW_FIRST_RUN_SETUP: z.enum(['true', 'false']).default('true').transform((v) => v === 'true'),
+  TEAM_INVITE_WEBHOOK_URL: z.string().url().optional(),
   LOG_LEVEL: z.string().default('info'),
 });
 
