@@ -21,6 +21,7 @@ import { authRoutes } from './routes/auth';
 import { teamRoutes } from './routes/team';
 import { senderRoutes } from './routes/senders';
 import { campaignRoutes } from './routes/campaigns';
+import { advisorRoutes } from './routes/advisor';
 
 export function buildApp(): FastifyInstance {
   const app = Fastify({ logger: false });
@@ -54,6 +55,7 @@ export function buildApp(): FastifyInstance {
   void app.register(teamRoutes);
   void app.register(senderRoutes);
   void app.register(campaignRoutes);
+  void app.register(advisorRoutes);
   void app.register(healthRoutes);
   void app.register(metricsRoutes);
   void app.register(webhookRoutes);

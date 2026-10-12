@@ -60,5 +60,7 @@ export const REDIS_KEYS = {
   campaignQueue: (id: string, connectionId: string) => `campaign:${id}:queue:${connectionId}`,
   campaignSender: (id: string, connectionId: string) => `campaign:${id}:sender:${connectionId}`,
   campaignDispatched: (id: string, email: string) => `campaign:${id}:dispatch:${email.toLowerCase()}`,
+  advisorAnalysis: () => 'advisor:analysis',
+  advisorApplyLog: () => 'advisor:applyLog',
 } as const;
 

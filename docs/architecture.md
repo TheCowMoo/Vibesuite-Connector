@@ -50,6 +50,8 @@ calendar id, location id, and optional webhook URLs. All runtime keys are namesp
 | `campaign:{id}:queue:{conn}` | list of pending emails assigned to that mailbox |
 | `campaign:{id}:sender:{conn}` | hash `sent` / `failed` for that mailbox inside the campaign |
 | `campaign:{id}:dispatch:{email}` | idempotency guard: a recipient is invited once per campaign (30-day TTL) |
+| `advisor:analysis` | latest Advisor analysis (snapshot + label→id targets + recommendations) |
+| `advisor:applyLog` | append-only audit of every Apply, newest first (200 max) |
 
 ## Senders & campaigns
 
@@ -113,6 +115,34 @@ keeps its `connectionId` and `eventId`. Rates are real percentages of real denom
 tentative)`), never estimates. Bounce/open metrics are intentionally absent until the GHL reminder
 layer exists.
 
+## Advisor
+
+The Advisor tab is advisory-only: `analyzeAdvisor()` builds a **PII-free aggregate snapshot**,
+asks the configured AI provider for recommendations, and stores the result. It never changes
+anything by itself — every change requires the operator to press Apply.
+
+`collectAdvisorSnapshot()` replaces identities with labels: connections become `Mailbox A/B/C` and
+campaigns become `Campaign 1/2/3`. The snapshot carries mailbox load settings, today's counters, a
+14-day daily history and per-campaign funnel aggregates. It deliberately omits addresses, display
+names, domains, campaign/list/session names, event titles and copy, recipient records and any
+credentials. `SNAPSHOT_APPENDIX` publishes that list verbatim in the UI, so an operator can audit
+exactly what the model received. The label → real-id mapping lives in `analysis.targets` on the
+server and is never sent to the provider.
+
+Recommendations come from two sources: the model (ids `ai-*`) and `localRecommendations()` (ids
+`local-*`), a deterministic rule set for cooldowns, paused mailboxes, hour-ceiling stalls, clean
+full days, >10% failure rates and single-mailbox campaigns. The rules keep the tab useful when no
+AI key is configured, and the two sources are merged so a provider outage degrades instead of
+breaking.
+
+Every model-proposed action is passed through `clampAdvisorAction()`, which rejects unknown kinds
+and clamps every number into the same bounds the manual UI enforces (daily cap 1–5000, hourly cap
+1–1000, delay 0–600000 ms, hours 0–23, weekday subset of 0–6, priority 0–10, status
+`active|paused`). An action that fails to clamp is downgraded to advisory-only rather than applied.
+Apply resolves the label back to the real id, mutates the sender profile or campaign, marks the
+recommendation `applied` and appends a line to the append-only `advisor:applyLog`. "Ask a
+follow-up" is grounded on the stored snapshot and is ephemeral — the server keeps no transcript.
+
 ## Security model
 
 - **Webhook authentication**: the only reliable Google push validation is the
@@ -133,8 +163,8 @@ layer exists.
 - **Phase 4**: invitations + segmentation, AI provider layer, knowledge base, video attendance
   (Zoom meetings/webinars), attendance automations dispatched to GHL. ✅
 - **Phase 5**: auth/team login (scrypt, Redis sessions, roles), audit log, sender load profiles,
-  campaigns + distribution engine. 🚧
-
+  campaigns + distribution engine, capacity planner, per-mailbox attribution, AI Advisor. 🚧
+- **Phase 6 (next)**: GHL reminder layer → real delivered/bounced/opened stats.
 ## Reliability & idempotency
 
 - **Burst dedupe**: per-connection `SET NX EX 5` lock prevents concurrent delta fetches.

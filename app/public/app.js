@@ -42,12 +42,14 @@
   function showView(name) {
     if (name === 'team' && authState.enabled && !isAdmin()) name = 'connections';
     if (name === 'senders' && authState.enabled && !isAdmin()) name = 'connections';
+    if (name === 'advisor' && authState.enabled && !isAdmin()) name = 'connections';
     $$('.topnav__link').forEach(function (b) { b.classList.toggle('is-active', b.dataset.view === name); });
     $('#view-connections').hidden = name !== 'connections';
     $('#view-lists').hidden = name !== 'lists';
     $('#view-knowledge').hidden = name !== 'knowledge';
     $('#view-invites').hidden = name !== 'invites';
     $('#view-attendance').hidden = name !== 'attendance';
+    $('#view-advisor').hidden = name !== 'advisor';
     $('#view-campaigns').hidden = name !== 'campaigns';
     $('#view-senders').hidden = name !== 'senders';
     $('#view-team').hidden = name !== 'team';
@@ -57,6 +59,7 @@
     if (name === 'knowledge') loadKnowledge();
     if (name === 'invites') loadInvitesView();
     if (name === 'attendance') loadAttendance();
+    if (name === 'advisor') loadAdvisor();
     if (name === 'campaigns') loadCampaigns();
     if (name === 'senders') loadSenders();
     if (name === 'team') loadTeam();
@@ -97,7 +100,9 @@
     sliders: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg>',
     x: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>',
     send: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4 20-7z"/></svg>',
-    video: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>'
+    video: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>',
+    send: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4 20-7z"/></svg>',
+    spark: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1"/><circle cx="12" cy="12" r="2.5"/></svg>'
   };
   function icon(name) { return ICONS[name] || ''; }
   function menuBtn(action, label, glyph, id, danger) {
@@ -2543,6 +2548,165 @@
         loadCampaigns();
       })
       .catch(function (err) { toast(err.message, 'error'); });
+  });
+
+  /* ---- Advisor ---- */
+  var advisorThread = [];
+
+  function advisorSeverityChip(s) {
+    var map = { critical: 'danger', warning: 'warning', info: 'neutral' };
+    return '<span class="chip chip--' + (map[s] || 'neutral') + '">' + esc(s) + '</span>';
+  }
+
+  function loadAdvisor() {
+    document.getElementById('advisorBody').innerHTML = skeletonCards(2);
+    return api('/api/advisor')
+      .then(function (d) { renderAdvisor(d); })
+      .catch(function (e) {
+        document.getElementById('advisorBody').innerHTML = '<div class="card"><p class="muted">' + esc(e.message) + '</p></div>';
+      });
+  }
+
+  function advisorRecCard(r) {
+    return '<div class="card advisor">' +
+      '<div class="conn__head"><span class="conn__name">' + esc(r.title) + '</span>' + advisorSeverityChip(r.severity) + '</div>' +
+      '<p>' + esc(r.rationale) + '</p>' +
+      (r.impact ? '<p class="muted">' + esc(r.impact) + '</p>' : '') +
+      (r.actionLabel ? '<p class="muted">Planned change: <strong>' + esc(r.actionLabel) + '</strong></p>' : '') +
+      '<div class="conn__actions">' +
+        (r.action ? '<button class="btn btn--primary btn--sm" data-action="advisorApply" data-id="' + esc(r.id) + '">Apply</button>' : '') +
+        '<button class="btn btn--ghost btn--sm" data-action="advisorDismiss" data-id="' + esc(r.id) + '">Dismiss</button>' +
+      '</div></div>';
+  }
+
+  function renderAdvisor(d) {
+    var el = document.getElementById('advisorBody');
+    var a = d && d.analysis;
+
+    if (!a) {
+      el.innerHTML = '<div class="empty"><div class="empty__icon">' + icon('spark') + '</div>' +
+        '<h2 class="empty__title">No analysis yet</h2>' +
+        '<p class="empty__text">Run Analyze to review mailbox capacity and campaign funnels. Only aggregate numbers are used — never recipient data.</p></div>';
+      return;
+    }
+
+    var recs = a.recommendations || [];
+    var open = recs.filter(function (r) { return r.state === 'open'; });
+    var resolved = recs.filter(function (r) { return r.state !== 'open'; });
+
+    var html =
+      '<div class="card">' +
+        '<div class="conn__head"><span class="conn__name">Analysis</span>' +
+          (a.provider ? '<span class="chip chip--success">' + esc(a.provider) + ' · ' + esc(a.model || '') + '</span>' : '<span class="chip chip--neutral">built-in rules</span>') +
+          '<span class="chip chip--neutral">' + esc(relativeTime(a.createdAt)) + '</span></div>' +
+        '<p>' + esc(a.summary) + '</p>' +
+        (a.note ? '<p class="muted">' + esc(a.note) + '</p>' : '') +
+      '</div>';
+
+    html += '<h3 class="detail__sub">Recommendations (' + open.length + ' open)</h3>';
+    html += open.length
+      ? open.map(advisorRecCard).join('')
+      : '<div class="card"><p class="muted">Nothing needs changing right now.</p></div>';
+
+    if (resolved.length) {
+      html += '<h3 class="detail__sub">Resolved</h3><div class="card">' +
+        resolved.map(function (r) {
+          return '<div class="advisor__row"><span class="chip chip--' + (r.state === 'applied' ? 'success' : 'neutral') + '">' + esc(r.state) + '</span>' +
+            '<span>' + esc(r.title) + '</span>' +
+            (r.actionLabel ? '<span class="muted">' + esc(r.actionLabel) + '</span>' : '') + '</div>';
+        }).join('') + '</div>';
+    }
+
+    html += '<h3 class="detail__sub">Ask a follow-up</h3>' +
+      '<div class="card">' +
+        '<div class="advisor__thread" id="advisorThread"></div>' +
+        '<label class="field"><span class="field__label">Question</span>' +
+          '<input id="advisorQuestion" placeholder="e.g. how long until campaign 1 finishes?" /></label>' +
+        '<div class="conn__actions"><button class="btn btn--outline btn--sm" id="advisorAsk">Ask</button></div>' +
+      '</div>';
+
+    html += '<details class="card"><summary>Data appendix — exactly what the model received</summary>' +
+      '<table class="map"><thead><tr><th>Field</th><th>Included</th><th>Note</th></tr></thead><tbody>' +
+      (d.appendix || []).map(function (row) {
+        return '<tr><td>' + esc(row.field) + '</td><td>' + (row.included ? 'yes' : '<strong>no</strong>') + '</td>' +
+          '<td class="muted">' + esc(row.note) + '</td></tr>';
+      }).join('') + '</tbody></table></details>';
+
+    if ((d.log || []).length) {
+      html += '<h3 class="detail__sub">Apply log</h3><div class="card">' +
+        d.log.map(function (e) {
+          return '<div class="advisor__row"><span class="chip chip--' + (e.ok ? 'success' : 'danger') + '">' + (e.ok ? 'applied' : 'failed') + '</span>' +
+            '<span>' + esc(e.description || e.title) + '</span>' +
+            '<span class="muted">' + esc(relativeTime(e.at)) + (e.actor ? ' · ' + esc(e.actor) : '') + '</span></div>';
+        }).join('') + '</div>';
+    }
+
+    el.innerHTML = html;
+    paintAdvisorThread();
+  }
+
+  function paintAdvisorThread() {
+    var el = document.getElementById('advisorThread');
+    if (!el) return;
+    el.innerHTML = advisorThread.map(function (m) {
+      return '<div class="advisor__msg advisor__msg--' + m.role + '">' + esc(m.text) + '</div>';
+    }).join('');
+  }
+
+  function appendAdvisorMessage(role, text) {
+    advisorThread.push({ role: role, text: text });
+    paintAdvisorThread();
+  }
+
+  function askAdvisorQuestion() {
+    var input = document.getElementById('advisorQuestion');
+    if (!input) return;
+    var q = String(input.value || '').trim();
+    if (!q) return;
+    input.value = '';
+    appendAdvisorMessage('you', q);
+
+    var btn = document.getElementById('advisorAsk');
+    withBusy(btn, api('/api/advisor/ask', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ question: q }) }))
+      .then(function (r) { appendAdvisorMessage('advisor', r.answer || '(no answer returned)'); })
+      .catch(function (err) { appendAdvisorMessage('advisor', 'Error: ' + err.message); });
+  }
+
+  $('#advisorAnalyze').addEventListener('click', function () {
+    var btn = this;
+    withBusy(btn, api('/api/advisor/analyze', { method: 'POST' }))
+      .then(function () {
+        advisorThread = [];
+        toast('Analysis ready', 'success');
+        return loadAdvisor();
+      })
+      .catch(function (e) { toast(e.message, 'error'); });
+  });
+
+  $('#advisorBody').addEventListener('click', function (e) {
+    if (e.target.closest('#advisorAsk')) {
+      askAdvisorQuestion();
+      return;
+    }
+
+    var btn = e.target.closest('[data-action]');
+    if (!btn) return;
+    var id = btn.dataset.id;
+
+    if (btn.dataset.action === 'advisorApply') {
+      withBusy(btn, api('/api/advisor/recommendations/' + id + '/apply', { method: 'POST' }))
+        .then(function (r) {
+          toast('Applied: ' + (r.description || 'change saved'), 'success');
+          loadAdvisor();
+          loadCampaigns();
+          loadSenders();
+        })
+        .catch(function (err) { toast(err.message, 'error'); });
+    } else if (btn.dataset.action === 'advisorDismiss') {
+      withBusy(btn, api('/api/advisor/recommendations/' + id + '/dismiss', { method: 'POST' }))
+        .then(function () { toast('Dismissed', 'success'); loadAdvisor(); })
+        .catch(function (err) { toast(err.message, 'error'); });
+    }
   });
 
   /* ---- Init ---- */

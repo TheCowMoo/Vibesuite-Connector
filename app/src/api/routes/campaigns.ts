@@ -17,10 +17,7 @@ import {
 } from '../../domain/campaignStore';
 import { sendCampaignBatch, startCampaign } from '../../domain/campaignDispatch';
 import { getSenderProfile } from '../../domain/senderStore';
-import { buildCampaignStats, normalizeRsvp } from '../../domain/campaignStats';
-import { normalizeEmail } from '../../domain/attendance';
-import { getAttendance } from '../../domain/attendanceStore';
-import { stateStore } from '../../domain/stateStore';
+import { collectCampaignStats } from '../../domain/campaignStatsCollect';
 import { requireRole } from '../middleware/requireAuth';
 
 async function withStats(camp: Campaign): Promise<Record<string, unknown>> {
@@ -127,32 +124,7 @@ export async function campaignRoutes(app: FastifyInstance): Promise<void> {
       return;
     }
 
-    const recipients = await getRecipients(id);
-
-    const rsvpByConnection: Record<string, Record<string, Record<string, string>>> = {};
-    const connectionIds = Array.from(new Set(recipients.map((r) => r.connectionId)));
-    for (const connectionId of connectionIds) {
-      const states = await stateStore.getStates(connectionId);
-      const perEvent: Record<string, Record<string, string>> = {};
-      for (const [eventId, map] of states) perEvent[eventId] = map;
-      rsvpByConnection[connectionId] = perEvent;
-    }
-
-    const attendance = camp.sessionId ? await getAttendance(camp.sessionId) : null;
-    let attendanceByEmail: Record<string, boolean> | undefined;
-    if (attendance) {
-      attendanceByEmail = {};
-      for (const person of attendance.attended) {
-        if (person.email) attendanceByEmail[normalizeEmail(person.email)] = true;
-      }
-      for (const email of attendance.noShow) attendanceByEmail[normalizeEmail(email)] = false;
-    }
-
-    return {
-      stats: buildCampaignStats({ recipients, rsvpByConnection, attendanceByEmail }),
-      sessionId: camp.sessionId ?? null,
-      rsvpStatuses: ['accepted', 'declined', 'tentative', 'needsAction'].map((s) => normalizeRsvp(s)),
-    };
+    return { stats: await collectCampaignStats(camp), sessionId: camp.sessionId ?? null };
   });
 
   app.post('/api/campaigns', guard, async (req, reply) => {

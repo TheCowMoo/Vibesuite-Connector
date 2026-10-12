@@ -68,13 +68,23 @@ export async function getSenderHour(connectionId: string, hour: string): Promise
   return v ? Number(v) || 0 : 0;
 }
 
+/** Oldest-first daily counters, used by the Advisor snapshot. */
+export async function getSenderHistory(connectionId: string, days = 14, at: Date = new Date()): Promise<Array<{ date: string; sent: number; failed: number }>> {
+  const out: Array<{ date: string; sent: number; failed: number }> = [];
+  for (let i = Math.max(1, days) - 1; i >= 0; i -= 1) {
+    const date = new Date(at.getTime() - i * 86400000).toISOString().slice(0, 10);
+    const day = await getSenderDay(connectionId, date);
+    out.push({ date, sent: day.sent, failed: day.failed });
+  }
+  return out;
+}
+
 export async function bumpSenderHour(connectionId: string, hour: string, by = 1): Promise<void> {
   const key = REDIS_KEYS.senderHour(connectionId, hour);
   await redis.multi().incrby(key, by).expire(key, 60 * 60 * 3).exec();
 }
 
 /* ---- state ---- */
-
 export async function getSenderState(connectionId: string): Promise<SenderState> {
   const raw = await redis.get(REDIS_KEYS.senderState(connectionId));
   if (!raw) return { errorStreak: 0 };
