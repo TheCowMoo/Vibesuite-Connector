@@ -41,6 +41,43 @@ calendar id, location id, and optional webhook URLs. All runtime keys are namesp
 | `conn:{id}:map:event:{eventId}` | event -> `{appointmentId, contactId}` |
 | `conn:{id}:map:contact:{email}` | email -> contactId cache (1h TTL) |
 | `oauth:state:{state}` | pending OAuth state -> connectionId (10-min TTL) |
+| `sender:profile:{conn}` | per-mailbox load profile (cap, hourly, delay, ramp, window) |
+| `sender:day:{conn}:{YYYY-MM-DD}` | hash `sent` / `failed` counters for the mailbox (35-day TTL) |
+| `sender:hour:{conn}:{YYYY-MM-DDTHH}` | hourly send counter (3-hour TTL) |
+| `sender:state:{conn}` | health state: `errorStreak`, `cooldownUntil`, `lastSentAt`, `lastError` |
+| `campaign:{id}` | campaign record (audience, event, senders, distribution, status) |
+| `campaign:{id}:recipients` | hash `email -> JSON{connectionId,status,sentAt,eventId,error}` |
+| `campaign:{id}:queue:{conn}` | list of pending emails assigned to that mailbox |
+| `campaign:{id}:sender:{conn}` | hash `sent` / `failed` for that mailbox inside the campaign |
+| `campaign:{id}:dispatch:{email}` | idempotency guard: a recipient is invited once per campaign (30-day TTL) |
+
+## Senders & campaigns
+
+A **Sender** is a connected Google account plus a load profile: `dailyCap`, `hourlyCap`,
+`minDelayMs`, an optional warming **ramp** (`startDailyCap` + `incrementPerDay` + `maxDailyCap`
+from a start date), a **send window** (hours + weekdays + IANA timezone, evaluated with Node's
+built-in `Intl.DateTimeFormat`) and a health state with an automatic **cooldown** after repeated
+failures. Limits are **per mailbox and global** — every campaign drawing on that mailbox shares one
+counter. `dailyCapFor()` always clamps the ramp value to `dailyCap`, so raising the ramp can never
+exceed the hard ceiling.
+
+A **Campaign** freezes an audience (`listId` + optional segment names), an event payload
+(title/description/start/end/timezone and an optional Zoom join link resolved from the linked
+session) and a list of sending mailboxes. `startCampaign()` extracts and de-duplicates recipients,
+drops anyone already invited for that list, then partitions them with `computeAllocation()` —
+a weighted-share split honouring per-sender `quota`, with the rounding remainder handed out
+round-robin and the result assigned with `allocateEmails()` so each mailbox's queue is interleaved
+from the source order rather than a contiguous block.
+
+`sendCampaignBatch()` then sends at most one batch per mailbox, bounded by
+`min(headroom, maxPerSender, queueLength)`. Each recipient is claimed with a `SET NX` key before
+it is included, so a retry can never double-invite. Successes bump the mailbox day/hour counters,
+the campaign counters and the list's invited set; failures mark the recipients, increment the
+sender `errorStreak`, and are re-queued at the front so another mailbox (or the next tick) can pick
+them up. Once `errorStreak` reaches `CAMPAIGN_COOLDOWN_ON_ERRORS` the mailbox enters a
+`CAMPAIGN_COOLDOWN_HOURS` cooldown and is skipped until it expires or an operator hits Resume.
+The campaign flips to `completed` when no mailbox has work left. `planSchedule()` powers the
+capacity planner by walking day by day and summing each mailbox's cap for that date.
 
 ## Security model
 
@@ -59,6 +96,10 @@ calendar id, location id, and optional webhook URLs. All runtime keys are namesp
   observability (metrics). ✅
 - **Phase 3**: OAuth 2.0 multi-tenant, per-connection credentials, connection API + dashboard,
   encrypted credential store. ✅
+- **Phase 4**: invitations + segmentation, AI provider layer, knowledge base, video attendance
+  (Zoom meetings/webinars), attendance automations dispatched to GHL. ✅
+- **Phase 5**: auth/team login (scrypt, Redis sessions, roles), audit log, sender load profiles,
+  campaigns + distribution engine. 🚧
 
 ## Reliability & idempotency
 

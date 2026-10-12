@@ -54,5 +54,11 @@ export const REDIS_KEYS = {
   senderDay: (connectionId: string, date: string) => `sender:day:${connectionId}:${date}`,
   senderHour: (connectionId: string, hour: string) => `sender:hour:${connectionId}:${hour}`,
   senderState: (connectionId: string) => `sender:state:${connectionId}`,
+  campaign: (id: string) => `campaign:${id}`,
+  campaignsIndex: () => 'campaigns:index',
+  campaignRecipients: (id: string) => `campaign:${id}:recipients`,
+  campaignQueue: (id: string, connectionId: string) => `campaign:${id}:queue:${connectionId}`,
+  campaignSender: (id: string, connectionId: string) => `campaign:${id}:sender:${connectionId}`,
+  campaignDispatched: (id: string, email: string) => `campaign:${id}:dispatch:${email.toLowerCase()}`,
 } as const;
 

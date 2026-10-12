@@ -48,6 +48,7 @@
     $('#view-knowledge').hidden = name !== 'knowledge';
     $('#view-invites').hidden = name !== 'invites';
     $('#view-attendance').hidden = name !== 'attendance';
+    $('#view-campaigns').hidden = name !== 'campaigns';
     $('#view-senders').hidden = name !== 'senders';
     $('#view-team').hidden = name !== 'team';
     $('#view-settings').hidden = name !== 'settings';
@@ -56,6 +57,7 @@
     if (name === 'knowledge') loadKnowledge();
     if (name === 'invites') loadInvitesView();
     if (name === 'attendance') loadAttendance();
+    if (name === 'campaigns') loadCampaigns();
     if (name === 'senders') loadSenders();
     if (name === 'team') loadTeam();
   }
@@ -2186,6 +2188,311 @@
         .then(function () { toast(action === 'pause' ? 'Sender paused' : 'Sender resumed', 'success'); loadSenders(); })
         .catch(function (err) { toast(err.message, 'error'); });
     }
+  });
+
+  /* ---- Campaigns ---- */
+  var campaignData = [];
+  var campLists = [];
+  var campSessions = [];
+  var currentCampaignId = null;
+
+  function campStatusChip(status) {
+    var map = { draft: 'neutral', active: 'success', paused: 'warning', completed: 'neutral' };
+    return '<span class="chip chip--' + (map[status] || 'neutral') + '">' + esc(status) + '</span>';
+  }
+
+  function connName(id) {
+    var c = (state.connections || []).filter(function (x) { return x.id === id; })[0];
+    return c ? c.name : String(id).slice(0, 8);
+  }
+
+  function campListName(id) {
+    var l = (campLists || []).filter(function (x) { return x.id === id; })[0];
+    return l ? l.name : 'unknown list';
+  }
+
+  function loadCampaigns() {
+    document.getElementById('campaignsList').innerHTML = skeletonCards(2);
+    return Promise.all([api('/api/campaigns'), api('/api/lists'), api('/api/sessions')])
+      .then(function (r) {
+        campaignData = r[0].campaigns || [];
+        campLists = r[1].lists || [];
+        campSessions = r[2].sessions || [];
+        renderCampaigns(campaignData);
+      })
+      .catch(function (e) {
+        document.getElementById('campaignsList').innerHTML = '<div class="card"><p class="muted">' + esc(e.message) + '</p></div>';
+      });
+  }
+
+  function campaignActions(c) {
+    var out = '';
+    if (c.status === 'draft') {
+      out += '<button class="btn btn--primary btn--sm" data-action="campStart" data-id="' + esc(c.id) + '">Start</button>';
+    } else if (c.status === 'active') {
+      out += '<button class="btn btn--outline btn--sm" data-action="campSend" data-id="' + esc(c.id) + '">Send batch</button>';
+      out += '<button class="btn btn--ghost btn--sm" data-action="campPause" data-id="' + esc(c.id) + '">Pause</button>';
+    } else if (c.status === 'paused') {
+      out += '<button class="btn btn--outline btn--sm" data-action="campSend" data-id="' + esc(c.id) + '">Send batch</button>';
+      out += '<button class="btn btn--ghost btn--sm" data-action="campResume" data-id="' + esc(c.id) + '">Resume</button>';
+    }
+    out += '<button class="btn btn--ghost btn--sm" data-action="campDetail" data-id="' + esc(c.id) + '">Details</button>';
+    out += '<button class="btn btn--ghost btn--sm" data-action="campDelete" data-id="' + esc(c.id) + '">Delete</button>';
+    return out;
+  }
+
+  function renderCampaigns(camps) {
+    var el = document.getElementById('campaignsList');
+    el.innerHTML = '';
+    if (!camps.length) {
+      el.innerHTML = '<div class="empty"><div class="empty__icon">' + icon('calendar') + '</div><h2 class="empty__title">No campaigns yet</h2><p class="empty__text">Create one to spread a list across several mailboxes at a safe pace.</p></div>';
+      return;
+    }
+
+    camps.forEach(function (c) {
+      var counts = c.counts || { total: 0, sent: 0, pending: 0, failed: 0 };
+      var done = counts.total ? Math.round((counts.sent / counts.total) * 100) : 0;
+      var mailboxes = (c.senders || []).filter(function (s) { return s.enabled; }).length;
+
+      var box = document.createElement('div');
+      box.className = 'conn campaign';
+      box.innerHTML =
+        '<div class="conn__main">' +
+          '<div class="conn__head"><span class="conn__name">' + esc(c.name) + '</span>' + campStatusChip(c.status) +
+            '<span class="chip chip--neutral">' + esc(c.distribution.mode) + '</span>' +
+            (counts.failed ? '<span class="chip chip--danger">' + counts.failed + ' failed</span>' : '') + '</div>' +
+          '<div class="conn__meta"><span class="conn__cal">' + icon('calendar') + esc(campListName(c.listId)) + '</span>' +
+            '<span class="conn__cal">' + esc(c.event.start) + '</span></div>' +
+          '<div class="gauge"><div class="gauge__bar"><span style="width:' + done + '%"></span></div>' +
+            '<div class="gauge__label">Sent <strong>' + counts.sent + '</strong> / ' + counts.total +
+              ' · pending ' + counts.pending + ' · ' + mailboxes + ' ' + (mailboxes === 1 ? 'mailbox' : 'mailboxes') + '</div></div>' +
+        '</div>' +
+        '<div class="conn__actions">' + campaignActions(c) + '</div>';
+      el.appendChild(box);
+    });
+  }
+
+  function campLocalInput(d) {
+    return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()) + 'T' + pad2(d.getHours()) + ':' + pad2(d.getMinutes());
+  }
+
+  function renderCampSenderRows() {
+    var el = document.getElementById('campSenders');
+    var conns = state.connections || [];
+    if (!conns.length) {
+      el.innerHTML = '<p class="muted">No connected mailboxes yet — connect a Google account first.</p>';
+      return;
+    }
+    el.innerHTML = conns.map(function (c) {
+      return '<div class="camp-sender" data-conn="' + esc(c.id) + '">' +
+        '<label class="daychk"><input type="checkbox" data-pick checked /><span>' + esc(c.name) + '</span></label>' +
+        '<input type="number" min="0" step="1" value="1" data-share placeholder="share" title="Share weight (used when spread is weighted)" aria-label="Share weight" />' +
+        '<input type="number" min="0" step="1" data-quota placeholder="max" title="Optional cap on invites from this mailbox" aria-label="Quota" />' +
+      '</div>';
+    }).join('');
+  }
+
+  function loadCampaignSegments() {
+    var id = document.getElementById('campList').value;
+    var el = document.getElementById('campSegments');
+    if (!id) {
+      el.innerHTML = '<span class="muted">no list selected</span>';
+      return;
+    }
+    el.innerHTML = '<span class="muted">loading…</span>';
+    api('/api/lists/' + id)
+      .then(function (d) {
+        var segs = (d.list && d.list.result && d.list.result.segments) || [];
+        el.innerHTML = segs.length
+          ? segs.map(function (s) {
+              var n = (s.rows || []).length;
+              return '<label class="daychk"><input type="checkbox" data-seg="' + esc(s.name) + '" /><span>' + esc(s.name) + ' (' + n + ')</span></label>';
+            }).join('')
+          : '<span class="muted">This list has no segments yet — run Segment first.</span>';
+      })
+      .catch(function () {
+        el.innerHTML = '<span class="muted">Could not load segments.</span>';
+      });
+  }
+
+  function openCampaignWizard() {
+    document.getElementById('campList').innerHTML = campLists.length
+      ? campLists.map(function (l) {
+          return '<option value="' + esc(l.id) + '">' + esc(l.name) + (l.hasResult ? '' : ' — no segments yet') + '</option>';
+        }).join('')
+      : '<option value="">No lists yet</option>';
+
+    document.getElementById('campSession').innerHTML = '<option value="">None</option>' +
+      campSessions.map(function (s) {
+        return '<option value="' + esc(s.id) + '">' + esc(s.title || s.externalId) + '</option>';
+      }).join('');
+
+    document.getElementById('campName').value = '';
+    document.getElementById('campSummary').value = '';
+    document.getElementById('campDesc').value = '';
+    document.getElementById('campMode').value = 'even';
+    document.getElementById('campTz').value = (Intl.DateTimeFormat().resolvedOptions().timeZone) || 'UTC';
+
+    var start = new Date(Date.now() + 86400000);
+    start.setHours(10, 0, 0, 0);
+    document.getElementById('campStart').value = campLocalInput(start);
+    document.getElementById('campEnd').value = campLocalInput(new Date(start.getTime() + 3600000));
+
+    renderCampSenderRows();
+    loadCampaignSegments();
+    openModal('newCampaign');
+  }
+
+  function saveCampaign(btn) {
+    var name = document.getElementById('campName').value.trim();
+    var summary = document.getElementById('campSummary').value.trim();
+    var listId = document.getElementById('campList').value;
+    var start = document.getElementById('campStart').value;
+    var end = document.getElementById('campEnd').value;
+
+    if (!name) { toast('Give the campaign a name', 'error'); return; }
+    if (!listId) { toast('Pick an audience list', 'error'); return; }
+    if (!summary) { toast('Add a subject line', 'error'); return; }
+    if (!start || !end) { toast('Set the start and end time', 'error'); return; }
+
+    var senders = [];
+    $$('.camp-sender', document.getElementById('campSenders')).forEach(function (row) {
+      var pick = row.querySelector('[data-pick]');
+      if (!pick || !pick.checked) return;
+      var s = { connectionId: row.dataset.conn, enabled: true, priority: 5 };
+      var share = Number(row.querySelector('[data-share]').value);
+      var quota = Number(row.querySelector('[data-quota]').value);
+      if (Number.isFinite(share) && share > 0) s.share = share;
+      if (Number.isFinite(quota) && quota > 0) s.quota = Math.floor(quota);
+      senders.push(s);
+    });
+    if (!senders.length) { toast('Pick at least one sending mailbox', 'error'); return; }
+
+    var segments = $$('[data-seg]', document.getElementById('campSegments'))
+      .filter(function (c) { return c.checked; })
+      .map(function (c) { return c.dataset.seg; });
+
+    var body = {
+      name: name,
+      status: 'draft',
+      listId: listId,
+      segments: segments,
+      sessionId: document.getElementById('campSession').value || undefined,
+      event: {
+        summary: summary,
+        description: document.getElementById('campDesc').value.trim() || undefined,
+        start: start,
+        end: end,
+        timeZone: document.getElementById('campTz').value.trim() || 'UTC'
+      },
+      senders: senders,
+      distribution: { mode: document.getElementById('campMode').value }
+    };
+
+    withBusy(btn, api('/api/campaigns', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }))
+      .then(function () {
+        closeModal('newCampaign');
+        toast('Campaign created', 'success');
+        loadCampaigns();
+      })
+      .catch(function (e) { toast(e.message, 'error'); });
+  }
+
+  function openCampaignDetail(id) {
+    currentCampaignId = id;
+    document.getElementById('campaignDetailBody').innerHTML = skeletonCards(1);
+    openModal('campaignDetail');
+    return Promise.all([api('/api/campaigns/' + id), api('/api/campaigns/' + id + '/plan')])
+      .then(function (r) { renderCampaignDetail(r[0].campaign, r[1]); })
+      .catch(function (e) {
+        document.getElementById('campaignDetailBody').innerHTML = '<p class="muted">' + esc(e.message) + '</p>';
+      });
+  }
+
+  function renderCampaignDetail(c, plan) {
+    document.getElementById('campaignDetailTitle').textContent = c.name;
+    var counts = c.counts || { total: 0, sent: 0, pending: 0, failed: 0 };
+
+    var planText = plan && plan.totalDays
+      ? 'At the current caps this takes <strong>' + plan.totalDays + '</strong> ' + (plan.totalDays === 1 ? 'day' : 'days') +
+        ' (~' + plan.dailyCapacity + '/day, finishing around ' + esc(String(plan.finishDate)) + ').'
+      : 'No capacity right now — check the Senders tab (paused, capped, or outside the send window).';
+
+    var rows = (c.perSender || []).map(function (p) {
+      return '<tr><td>' + esc(connName(p.connectionId)) + '</td><td>' + p.sent + '</td><td>' + p.queued +
+        '</td><td>' + p.failed + '</td><td>' + (p.enabled ? 'yes' : 'no') + '</td></tr>';
+    }).join('');
+
+    document.getElementById('campaignDetailBody').innerHTML =
+      '<div class="conn__head">' + campStatusChip(c.status) +
+        '<span class="chip chip--neutral">' + esc(c.distribution.mode) + '</span>' +
+        '<span class="chip chip--neutral">' + esc(campListName(c.listId)) + '</span></div>' +
+      '<div class="summary">' +
+        '<div class="summary__item"><span class="summary__value">' + counts.total + '</span><span class="summary__label">recipients</span></div>' +
+        '<div class="summary__item"><span class="summary__value">' + counts.sent + '</span><span class="summary__label">sent</span></div>' +
+        '<div class="summary__item"><span class="summary__value">' + counts.pending + '</span><span class="summary__label">pending</span></div>' +
+        '<div class="summary__item"><span class="summary__value">' + counts.failed + '</span><span class="summary__label">failed</span></div>' +
+      '</div>' +
+      '<p class="muted">' + planText + '</p>' +
+      '<table class="map"><thead><tr><th>Mailbox</th><th>Sent</th><th>Queued</th><th>Failed</th><th>On</th></tr></thead><tbody>' +
+        (rows || '<tr><td colspan="5" class="muted">Not started yet.</td></tr>') + '</tbody></table>';
+  }
+
+  $('#campaignNew').addEventListener('click', openCampaignWizard);
+  $('#campList').addEventListener('change', loadCampaignSegments);
+  $('#campSave').addEventListener('click', function () { saveCampaign(this); });
+
+  $('#campSendNow').addEventListener('click', function () {
+    if (!currentCampaignId) return;
+    var id = currentCampaignId;
+    withBusy(this, api('/api/campaigns/' + id + '/send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ maxPerSender: 200 }) }))
+      .then(function (r) {
+        toast('Sent ' + r.sent + (r.failed ? ', ' + r.failed + ' failed' : ''), r.failed ? 'error' : 'success');
+        openCampaignDetail(id);
+        loadCampaigns();
+      })
+      .catch(function (e) { toast(e.message, 'error'); });
+  });
+
+  $('#campaignsList').addEventListener('click', function (e) {
+    var btn = e.target.closest('[data-action]');
+    if (!btn) return;
+    var id = btn.dataset.id;
+    var action = btn.dataset.action;
+
+    if (action === 'campDetail') { openCampaignDetail(id); return; }
+
+    if (action === 'campDelete') {
+      withBusy(btn, api('/api/campaigns/' + id, { method: 'DELETE' }))
+        .then(function () { toast('Campaign deleted', 'success'); loadCampaigns(); })
+        .catch(function (err) { toast(err.message, 'error'); });
+      return;
+    }
+
+    var routes = {
+      campStart: { path: 'start', msg: 'Campaign started' },
+      campSend: { path: 'send', msg: 'Batch sent' },
+      campPause: { path: 'pause', msg: 'Campaign paused' },
+      campResume: { path: 'resume', msg: 'Campaign resumed' }
+    };
+    var route = routes[action];
+    if (!route) return;
+
+    var opts = { method: 'POST' };
+    if (action === 'campSend') {
+      opts.headers = { 'Content-Type': 'application/json' };
+      opts.body = JSON.stringify({ maxPerSender: 200 });
+    }
+
+    withBusy(btn, api('/api/campaigns/' + id + '/' + route.path, opts))
+      .then(function (r) {
+        var extra = '';
+        if (r && typeof r.sent === 'number') extra = ' — ' + r.sent + ' sent' + (r.failed ? ', ' + r.failed + ' failed' : '');
+        else if (r && typeof r.recipients === 'number') extra = ' — ' + r.recipients + ' recipients queued';
+        toast(route.msg + extra, 'success');
+        loadCampaigns();
+      })
+      .catch(function (err) { toast(err.message, 'error'); });
   });
 
   /* ---- Init ---- */
