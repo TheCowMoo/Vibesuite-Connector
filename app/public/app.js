@@ -2748,7 +2748,212 @@
     }
   });
 
+  /* ---- How it works (single source of truth for the tour too) ---- */
+  var HELP_STEPS = [
+    {
+      title: 'Link a Google account',
+      body: 'Connect the Google account you want to send from. We keep an eye on its calendar, so every reply comes straight back to us.'
+    },
+    {
+      title: 'Add your contacts',
+      body: 'Upload a spreadsheet or paste a list of people, then tell the AI how to group them — for example hot, warm and cold.'
+    },
+    {
+      title: 'Send an invitation',
+      body: 'Choose a time and a contact list. Everyone gets an ordinary Google Calendar invitation, straight from your own account.'
+    },
+    {
+      title: 'Watch who replies',
+      body: 'Yes, No and Maybe come back on their own, and are copied into GoHighLevel with the status and tags you picked.'
+    },
+    {
+      title: 'Send to a big list safely',
+      body: 'A bulk invite shares one contact list across several Google accounts and spreads the sending over days, so it never looks like spam.'
+    },
+    {
+      title: 'Set what each account may send',
+      body: 'Give each account a limit per day and per hour, choose which hours it may send, and warm a brand new account up slowly.'
+    },
+    {
+      title: 'See who turned up',
+      body: 'Link a video call and we match the people who joined against the people you invited, so you know who actually showed up.'
+    },
+    {
+      title: 'Ask the Assistant',
+      body: 'The Assistant looks at your own numbers and suggests small changes. Nothing changes until you press Do it.'
+    },
+    {
+      title: 'Teach the AI your words',
+      body: 'Add notes and documents so anything the AI writes back sounds like you.'
+    },
+    {
+      title: 'Bring your team in',
+      body: 'Invite the people who need access and choose whether they are an owner, an admin, or a member.'
+    }
+  ];
+
+  /* Each tour stop reuses the matching How-it-works text, so the two can never drift. */
+  var TOUR_STEPS = [
+    { help: 0, view: 'connections', target: '#newConnectionBtn', placement: 'bottom' },
+    { help: 1, view: 'lists', target: '#newListBtn', placement: 'bottom' },
+    { help: 2, view: 'invites', target: '#inviteSend', placement: 'top' },
+    { help: 3, view: 'invites', target: '[data-view="invites"]', placement: 'bottom' },
+    { help: 4, view: 'campaigns', target: '#campaignNew', placement: 'bottom' },
+    { help: 5, view: 'senders', target: '#sendersList', placement: 'bottom', adminOnly: true },
+    { help: 6, view: 'attendance', target: '[data-view="attendance"]', placement: 'bottom' },
+    { help: 7, view: 'advisor', target: '#advisorAnalyze', placement: 'bottom', adminOnly: true },
+    { help: 8, view: 'knowledge', target: '#newKnowledgeBtn', placement: 'bottom' },
+    { help: 9, view: 'team', target: '#newMemberBtn', placement: 'bottom', adminOnly: true }
+  ];
+
+  function openHowItWorks() {
+    closeAllMenus();
+    document.getElementById('howItWorksBody').innerHTML = HELP_STEPS.map(function (s, i) {
+      return '<div class="help-step"><span class="help-step__num">' + (i + 1) + '</span><div>' +
+        '<div class="help-step__title">' + esc(s.title) + '</div>' +
+        '<p class="help-step__body">' + esc(s.body) + '</p></div></div>';
+    }).join('');
+    openModal('howItWorks');
+  }
+
+  /* ---- Guided tour ---- */
+  var TOUR_KEY = 'vs.tour.v1';
+  var tourState = { index: 0, steps: [], open: false, view: null, handler: null };
+
+  function tourAlreadySeen() {
+    try { return localStorage.getItem(TOUR_KEY) === 'done'; } catch (e) { return true; }
+  }
+
+  function rememberTour() {
+    try { localStorage.setItem(TOUR_KEY, 'done'); } catch (e) { /* private mode: just do not remember */ }
+  }
+
+  function tourPlace(rect, placement) {
+    var pad = 6;
+    var cut = document.getElementById('tourCut');
+    var card = document.getElementById('tourCard');
+
+    cut.style.left = (rect.left - pad) + 'px';
+    cut.style.top = (rect.top - pad) + 'px';
+    cut.style.width = (rect.width + pad * 2) + 'px';
+    cut.style.height = (rect.height + pad * 2) + 'px';
+
+    var cw = card.offsetWidth || 330;
+    var ch = card.offsetHeight || 190;
+    var vw = window.innerWidth;
+    var vh = window.innerHeight;
+    var gap = 14;
+
+    var top = placement === 'top' ? rect.top - ch - gap : rect.bottom + gap;
+    if (top < 10) top = rect.bottom + gap;
+    if (top + ch > vh - 10) top = Math.max(10, rect.top - ch - gap);
+
+    card.style.top = top + 'px';
+    card.style.left = Math.min(Math.max(10, rect.left + rect.width / 2 - cw / 2), vw - cw - 10) + 'px';
+  }
+
+  function tourPaint() {
+    var step = tourState.steps[tourState.index];
+    if (!step) { tourStop(); return; }
+
+    var help = HELP_STEPS[step.help] || { title: '', body: '' };
+    document.getElementById('tourCount').textContent = 'Step ' + (tourState.index + 1) + ' of ' + tourState.steps.length;
+    document.getElementById('tourTitle').textContent = help.title;
+    document.getElementById('tourBody').textContent = help.body;
+    document.getElementById('tourPrev').disabled = tourState.index === 0;
+    document.getElementById('tourNext').textContent = tourState.index === tourState.steps.length - 1 ? 'Done' : 'Next';
+
+    var el = document.querySelector(step.target);
+    var rect = el ? el.getBoundingClientRect() : null;
+
+    // Nothing to point at — the tab is hidden for this role, or the panel is empty. Move on
+    // quietly instead of floating a tooltip in the middle of nowhere.
+    if (!rect || !rect.width || !rect.height) {
+      if (tourState.index >= tourState.steps.length - 1) { tourStop(); return; }
+      tourState.index += 1;
+      tourAdvance();
+      return;
+    }
+
+    try { el.scrollIntoView({ block: 'center', inline: 'center' }); } catch (e) { /* ignore */ }
+    tourPlace(el.getBoundingClientRect(), step.placement);
+  }
+
+  function tourAdvance() {
+    var step = tourState.steps[tourState.index];
+    if (!step) { tourStop(); return; }
+
+    // Switch tabs before measuring, then measure on the next frame so layout has settled.
+    if (step.view && tourState.view !== step.view) {
+      tourState.view = step.view;
+      showView(step.view);
+    }
+    requestAnimationFrame(function () {
+      if (tourState.open) tourPaint();
+    });
+  }
+
+  function tourGoto(index) {
+    if (index < 0) return;
+    if (index >= tourState.steps.length) { tourStop(); return; }
+    tourState.index = index;
+    tourAdvance();
+  }
+
+  function tourStart(force) {
+    if (!force && tourAlreadySeen()) return;
+
+    closeAllMenus();
+    var privileged = isAdmin() || !authState.enabled;
+    tourState.steps = TOUR_STEPS.filter(function (s) { return !s.adminOnly || privileged; });
+    tourState.index = 0;
+    tourState.view = null;
+    tourState.open = true;
+
+    document.getElementById('tourRoot').hidden = false;
+
+    tourState.handler = function () { if (tourState.open) tourPaint(); };
+    window.addEventListener('resize', tourState.handler);
+    window.addEventListener('scroll', tourState.handler, true);
+
+    tourAdvance();
+  }
+
+  function tourStop() {
+    if (!tourState.open) return;
+    tourState.open = false;
+    document.getElementById('tourRoot').hidden = true;
+
+    if (tourState.handler) {
+      window.removeEventListener('resize', tourState.handler);
+      window.removeEventListener('scroll', tourState.handler, true);
+      tourState.handler = null;
+    }
+    rememberTour();
+  }
+
+  function refreshTourCta() {
+    var cta = document.getElementById('emptyTourCta');
+    if (cta) cta.hidden = tourAlreadySeen();
+  }
+
+  document.addEventListener('keydown', function (e) {
+    if (!tourState.open) return;
+    if (e.key === 'Escape') { tourStop(); return; }
+    if (e.key === 'ArrowRight') { e.preventDefault(); tourGoto(tourState.index + 1); return; }
+    if (e.key === 'ArrowLeft') { e.preventDefault(); tourGoto(tourState.index - 1); }
+  });
+
+  $('#tourNext').addEventListener('click', function () { tourGoto(tourState.index + 1); });
+  $('#tourPrev').addEventListener('click', function () { tourGoto(tourState.index - 1); });
+  $('#tourSkip').addEventListener('click', tourStop);
+  $('#tourStart').addEventListener('click', function () { tourStart(true); });
+  $('#helpHowItWorks').addEventListener('click', openHowItWorks);
+  $('#howItWorksTour').addEventListener('click', function () { closeModal('howItWorks'); tourStart(true); });
+  $('#emptyTourCta').addEventListener('click', function () { tourStart(true); });
+
   /* ---- Init ---- */
+  refreshTourCta();
   $('#newConnectionBtn').addEventListener('click', openWizard);
   $('#emptyCta').addEventListener('click', openWizard);
   bootstrapAuth();

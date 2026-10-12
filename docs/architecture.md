@@ -221,3 +221,24 @@ Two rules keep this safe, and both are load-bearing:
    tagging, so `transform.test.ts`, `dedupe.test.ts` and `campaignStats.test.ts` assert on them
    unchanged — they are the guardrail.
 
+## Built-in guide
+
+Two pieces of in-app help keep the plain wording explainable:
+
+- **How it works** (`#howItWorks`) is a 10-item prose list driven by the `HELP_STEPS` array in
+  `app.js`.
+- **The guided tour** (`#tourRoot`) is a hand-rolled spotlight walkthrough: a fixed overlay whose
+  cutout is positioned to the target's `getBoundingClientRect()`, dimming the rest of the page with
+  a large `box-shadow`. No dependency, no `localStorage` requirement — it works in private mode too
+  (it just won't remember that you finished).
+
+`TOUR_STEPS` holds only `view` + `target` + `placement` and reuses `HELP_STEPS` by index, so the
+tour text and the written guide cannot drift apart. Stops that need a tab call `showView()` and
+re-measure on the next frame via `requestAnimationFrame`. Admin-only stops carry `adminOnly: true`
+and are filtered out for members, matching the nav gating. A stop whose target is missing or
+zero-sized (hidden tab, empty panel) is skipped rather than floating a tooltip at nothing.
+
+`tests/unit/tour.test.ts` reads the shipped `app.js` and `index.html` and asserts that every tour
+target exists in the markup, every tab exists, and every `help` index is real — which is what
+catches a stop pointing at an element that a later rename removed.
+
