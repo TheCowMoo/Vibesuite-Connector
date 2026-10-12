@@ -54,10 +54,10 @@ export function localRecommendations(snapshot: AdvisorSnapshot): Recommendation[
   for (const m of snapshot.mailboxes) {
     if (m.cooling) {
       push({
-        title: `${m.label} is in cooldown`,
+        title: `${m.label} is resting`,
         severity: 'critical',
-        rationale: `${m.label} has an error streak of ${m.errorStreak} and is cooling down, so its queued invites are being redistributed to the other mailboxes.`,
-        impact: 'Verify the mailbox credentials and Google quota before the cooldown expires.',
+        rationale: `${m.label} failed ${m.errorStreak} times in a row, so the system paused it. Its waiting invitations have been moved to your other accounts.`,
+        impact: 'Check that this account still works before it comes back on.',
         action: { kind: 'pause_sender', target: m.label },
       });
       continue;
@@ -67,8 +67,8 @@ export function localRecommendations(snapshot: AdvisorSnapshot): Recommendation[
       push({
         title: `${m.label} is paused`,
         severity: 'warning',
-        rationale: `${m.label} is paused, so every campaign listing it is running on fewer mailboxes.`,
-        impact: 'Resuming restores capacity immediately.',
+        rationale: `${m.label} is turned off, so your bulk invites are running on fewer accounts.`,
+        impact: 'Turning it back on gives you more sending capacity straight away.',
         action: { kind: 'resume_sender', target: m.label },
       });
       continue;
@@ -76,10 +76,10 @@ export function localRecommendations(snapshot: AdvisorSnapshot): Recommendation[
 
     if (m.hourlyCap && m.sentThisHour >= Math.floor(m.hourlyCap * 0.9)) {
       push({
-        title: `${m.label} is close to its hourly ceiling`,
+        title: `${m.label} is close to its limit for this hour`,
         severity: 'warning',
-        rationale: `${m.label} sent ${m.sentThisHour} of its ${m.hourlyCap}/hour allowance, so the scheduler will stall it until the hour rolls over.`,
-        impact: 'A higher hourly cap keeps the batch cadence even.',
+        rationale: `${m.label} has sent ${m.sentThisHour} of the ${m.hourlyCap} allowed this hour, so it will wait until the next hour before sending more.`,
+        impact: 'A higher hourly limit keeps sending steady instead of stopping and starting.',
         action: {
           kind: 'set_sender_hourly_cap',
           target: m.label,
@@ -91,10 +91,10 @@ export function localRecommendations(snapshot: AdvisorSnapshot): Recommendation[
 
     if (m.capToday > 0 && m.sentToday >= Math.floor(m.capToday * 0.95) && m.failedToday === 0) {
       push({
-        title: `${m.label} finished its daily allowance cleanly`,
+        title: `${m.label} had a clean day`,
         severity: 'info',
-        rationale: `${m.label} sent ${m.sentToday} of ${m.capToday} with no failures today — a good reliability signal.`,
-        impact: 'A larger daily cap uses proven capacity without extra risk.',
+        rationale: `${m.label} sent ${m.sentToday} of its ${m.capToday} today and nothing failed. That is a good sign.`,
+        impact: 'Raising its daily limit would send more using capacity you have already shown works.',
         action: { kind: 'set_sender_daily_cap', target: m.label, value: Math.min(2000, Math.round(m.dailyCap * 1.25)) },
       });
       continue;
@@ -102,10 +102,10 @@ export function localRecommendations(snapshot: AdvisorSnapshot): Recommendation[
 
     if (m.failedToday > 0 && m.failedToday >= Math.max(3, Math.round(m.sentToday * 0.1))) {
       push({
-        title: `${m.label} is failing more than 10% of its sends`,
+        title: `More than 1 in 10 sends from ${m.label} are failing`,
         severity: 'critical',
-        rationale: `${m.label} recorded ${m.failedToday} failures against ${m.sentToday} successes today.`,
-        impact: "Adds a deliberate delay so Google's rate limiter can recover.",
+        rationale: `${m.label} had ${m.failedToday} failures against ${m.sentToday} that worked today.`,
+        impact: 'Adds a longer pause so Google stops slowing this account down.',
         action: { kind: 'set_sender_min_delay_ms', target: m.label, value: Math.max(1000, (m.minDelayMs ?? 0) * 2) },
       });
     }
@@ -114,10 +114,10 @@ export function localRecommendations(snapshot: AdvisorSnapshot): Recommendation[
   for (const c of snapshot.campaigns) {
     if (c.status === 'active' && c.queued > 0 && c.mailboxes <= 1) {
       push({
-        title: `${c.label} is running on a single mailbox`,
+        title: `${c.label} is running on a single account`,
         severity: 'warning',
-        rationale: `${c.label} still has ${c.queued} invites queued with only ${c.mailboxes} mailbox assigned.`,
-        impact: 'Adding a second mailbox roughly halves the remaining delivery time.',
+        rationale: `${c.label} still has ${c.queued} invitations waiting and only ${c.mailboxes} account to send them from.`,
+        impact: 'Adding a second account would roughly halve the time left.',
       });
     }
   }
@@ -148,7 +148,7 @@ export function sanitizeRecommendations(raw: unknown, startIndex = 0): Recommend
       rationale: String(item.rationale ?? '').slice(0, 1200),
       impact: item.impact ? String(item.impact).slice(0, 600) : undefined,
       action: clamped.ok ? clamped.action : undefined,
-      actionLabel: clamped.ok ? clamped.description : 'Advisory only',
+      actionLabel: clamped.ok ? clamped.description : 'Information only',
       state: 'open',
     });
   }

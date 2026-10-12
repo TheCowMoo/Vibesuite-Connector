@@ -59,11 +59,11 @@ export function mailboxLabel(index: number): string {
     out = String.fromCharCode(65 + (n % 26)) + out;
     n = Math.floor(n / 26) - 1;
   } while (n >= 0);
-  return `Mailbox ${out}`;
+  return `Account ${out}`;
 }
 
 export function campaignLabel(index: number): string {
-  return `Campaign ${Math.max(0, Math.floor(index)) + 1}`;
+  return `Bulk invite ${Math.max(0, Math.floor(index)) + 1}`;
 }
 
 /**
@@ -71,13 +71,13 @@ export function campaignLabel(index: number): string {
  * Rendered in the Advisor tab next to the analysis.
  */
 export const SNAPSHOT_APPENDIX: Array<{ field: string; included: boolean; note: string }> = [
-  { field: 'Mailbox load settings (cap, hourly, delay, ramp, window, timezone)', included: true, note: 'Required to judge capacity and pacing.' },
-  { field: 'Mailbox counters (sent today, this hour, failures, error streak, cooldown)', included: true, note: 'Aggregate counts only.' },
-  { field: '14-day per-mailbox send/fail history', included: true, note: 'Daily totals; no per-recipient rows.' },
-  { field: 'Campaign funnel totals and rates', included: true, note: 'Aggregated per campaign.' },
-  { field: 'Mailbox identity (address, display name, domain)', included: false, note: 'Replaced by Mailbox A/B/C labels.' },
-  { field: 'Campaign, list and session names; event titles and descriptions', included: false, note: 'Replaced by Campaign 1/2/3 labels; marketing copy is never sent.' },
-  { field: 'Recipient emails, names, phone numbers, per-person RSVP status', included: false, note: 'Never leaves the server.' },
-  { field: 'List contents and segmentation results', included: false, note: 'Never leaves the server.' },
-  { field: 'OAuth tokens, API keys, session tokens', included: false, note: 'Never leaves the server.' },
+  { field: 'How much each account is allowed to send (limits, warm-up, sending hours)', included: true, note: 'Needed to judge how much more you can send.' },
+  { field: "Today's totals per account (sent, this hour, failures, whether it is resting)", included: true, note: 'Totals only — nothing per person.' },
+  { field: 'The last 14 days of daily send and failure totals per account', included: true, note: 'Daily totals; nothing per person.' },
+  { field: 'Bulk invite totals and reply rates', included: true, note: 'Totals per bulk invite.' },
+  { field: 'Account identity (email address, display name, domain)', included: false, note: 'Replaced with "Account A", "Account B", and so on.' },
+  { field: 'Bulk invite, contact list and video call names; event titles and text', included: false, note: 'Replaced with "Bulk invite 1", "Bulk invite 2"; your own wording is never sent.' },
+  { field: "People's emails, names, phone numbers, or individual replies", included: false, note: 'Never leaves your server.' },
+  { field: 'What is inside your contact lists and how they were grouped', included: false, note: 'Never leaves your server.' },
+  { field: 'Passwords, API keys, and login tokens', included: false, note: 'Never leaves your server.' },
 ];

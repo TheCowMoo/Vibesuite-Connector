@@ -70,9 +70,9 @@
 
   /* ---- Status helpers ---- */
   var STATUS = {
-    active: { label: 'Active', cls: 'chip--success' },
-    pending_google: { label: 'Awaiting Google', cls: 'chip--warning' },
-    disconnected: { label: 'Disconnected', cls: 'chip--neutral' }
+    active: { label: 'Working', cls: 'chip--success' },
+    pending_google: { label: 'Waiting for Google', cls: 'chip--warning' },
+    disconnected: { label: 'Not connected', cls: 'chip--neutral' }
   };
   function statusChip(status) {
     var s = STATUS[status] || { label: status, cls: 'chip--neutral' };
@@ -255,12 +255,12 @@
   /* ---- Detail ---- */
   function mappingTable() {
     var rows = [
-      ['accepted', 'confirmed', 'rsvp-yes', 'Confirmed email automation', 'success'],
-      ['tentative', 'tentative', 'rsvp-maybe', 'Tentative nurture automation', 'warning'],
-      ['declined', 'cancelled', 'rsvp-no + DND', 'Stop communication', 'danger'],
-      ['needsAction', 'pending', 'rsvp-pending', 'No change', 'neutral']
+      ['accepted', 'confirmed', 'rsvp-yes', 'Send the confirmation email', 'success'],
+      ['tentative', 'tentative', 'rsvp-maybe', 'Send the follow-up email', 'warning'],
+      ['declined', 'cancelled', 'rsvp-no + DND', 'Stop all messages', 'danger'],
+      ['needsAction', 'pending', 'rsvp-pending', 'Nothing changes', 'neutral']
     ];
-    return '<table class="map"><thead><tr><th>Google RSVP</th><th>GHL status</th><th>Tags</th><th>Trigger</th></tr></thead><tbody>' +
+    return '<table class="map"><thead><tr><th>They replied</th><th>GoHighLevel status</th><th>Tags</th><th>What happens next</th></tr></thead><tbody>' +
       rows.map(function (r) {
         return '<tr><td><span class="dot dot--' + r[4] + '"></span>' + esc(r[0]) + '</td><td>' + esc(r[1]) + '</td><td>' + esc(r[2]) + '</td><td>' + esc(r[3]) + '</td></tr>';
       }).join('') + '</tbody></table>';
@@ -286,7 +286,7 @@
     $('#detailBody').innerHTML =
       '<div class="detail__head">' + esc(c.name) + ' ' + statusChip(c.status) + '</div>' +
       '<table class="kv">' + rows.map(function (r) { return '<tr><th>' + esc(r[0]) + '</th><td>' + esc(r[1]) + '</td></tr>'; }).join('') + '</table>' +
-      '<h3 class="detail__sub">RSVP → GHL mapping</h3>' + mappingTable();
+      '<h3 class="detail__sub">What a reply does in GoHighLevel</h3>' + mappingTable();
     openModal('detail');
   }
 
@@ -569,7 +569,7 @@
     el.textContent = 'Loading…';
     api('/api/connections/' + id + '/snapshot')
       .then(function (d) {
-        el.textContent = d.snapshot ? JSON.stringify(d.snapshot, null, 2) : 'No sample yet — sync an RSVP change to capture one.';
+        el.textContent = d.snapshot ? JSON.stringify(d.snapshot, null, 2) : 'Nothing yet — change a reply in Google Calendar and an example will appear here.';
       })
       .catch(function () { el.textContent = 'No sample available.'; });
   }
@@ -599,7 +599,7 @@
     closeAllMenus();
     if (action === 'bootstrap') {
       withBusy(btn, api('/api/connections/' + id + '/bootstrap', { method: 'POST' }))
-        .then(function () { toast('Bootstrap started', 'success'); return load(); })
+        .then(function () { toast('Setup started', 'success'); return load(); })
         .catch(function (err) { toast(err.message, 'error'); });
     } else if (action === 'detail') {
       openDetail(id);
@@ -697,7 +697,7 @@
     var prev = sel.value;
     sel.innerHTML = '';
     if (!inviteLists.length) {
-      sel.innerHTML = '<option value="">No segmented lists yet</option>';
+      sel.innerHTML = '<option value="">No contact lists ready yet</option>';
       sel.disabled = true;
       return;
     }
@@ -757,7 +757,7 @@
     var listId = document.getElementById('inviteList').value;
     var el = document.getElementById('inviteRecipients');
     if (!listId) {
-      el.innerHTML = '<span class="muted">Select a list to preview recipients.</span>';
+      el.innerHTML = '<span class="muted">Pick a contact list to see who will be invited.</span>';
       inviteRecipientCount = 0;
       updateInviteSegmentCounts(null);
       syncInviteValidity();
@@ -767,11 +767,11 @@
       .then(function (d) {
         inviteRecipientCount = d.emails.length;
         updateInviteSegmentCounts(d.perSegment);
-        var html = pill('recipients', d.emails.length, d.emails.length ? 'ok' : 'danger');
+        var html = pill('people', d.emails.length, d.emails.length ? 'ok' : 'danger');
         if (d.duplicatesRemoved) html += pill('duplicates', d.duplicatesRemoved, 'neutral');
         if (d.invalid && d.invalid.length) html += pill('invalid', d.invalid.length, 'warn');
         if (d.alreadyInvited && d.alreadyInvited.length) html += pill('already invited', d.alreadyInvited.length, 'warn');
-        if (!d.emails.length) html += ' <span class="muted" style="font-size:0.85rem">No new recipients to invite.</span>';
+        if (!d.emails.length) html += ' <span class="muted" style="font-size:0.85rem">Nobody new to invite.</span>';
         el.innerHTML = html;
         syncInviteValidity();
       })
@@ -793,7 +793,7 @@
     var start = document.getElementById('inviteStart').value;
     var end = document.getElementById('inviteEnd').value;
     var tz = document.getElementById('inviteTimezone').value.trim();
-    if (!start || !end) { el.className = 'invite-event-preview'; el.textContent = 'Set a start and end time.'; return; }
+    if (!start || !end) { el.className = 'invite-event-preview'; el.textContent = 'Add a start and end time.'; return; }
     var min = Math.round((new Date(end) - new Date(start)) / 60000);
     if (min <= 0) { el.className = 'invite-event-preview is-invalid'; el.textContent = 'End must be after start.'; return; }
     var fmt = new Intl.DateTimeFormat(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' });
@@ -823,13 +823,13 @@
     var btn = document.getElementById('inviteSend');
     var reasons = [];
     if (!document.getElementById('inviteConnection').value) reasons.push('a calendar connection');
-    if (!document.getElementById('inviteList').value) reasons.push('a segmented list');
+    if (!document.getElementById('inviteList').value) reasons.push('a contact list');
     if (!document.getElementById('inviteSummary').value.trim()) reasons.push('an event title');
     var start = document.getElementById('inviteStart').value;
     var end = document.getElementById('inviteEnd').value;
     if (!start || !end) reasons.push('start and end times');
     else if (new Date(end) <= new Date(start)) reasons.push('an end after start');
-    if (!inviteRecipientCount) reasons.push('recipients');
+    if (!inviteRecipientCount) reasons.push('people to invite');
     btn.disabled = reasons.length > 0;
     btn.title = reasons.length ? ('Send is disabled — choose ' + reasons.join(', ')) : 'Send invites';
   }
@@ -841,7 +841,7 @@
     var last = invites.length ? relativeTime(invites[0].createdAt) : '—';
     el.innerHTML =
       '<div class="summary__item"><span class="summary__value">' + sent + '</span><span class="summary__label">invites sent</span></div>' +
-      '<div class="summary__item"><span class="summary__value">' + reached + '</span><span class="summary__label">recipients reached</span></div>' +
+      '<div class="summary__item"><span class="summary__value">' + reached + '</span><span class="summary__label">people reached</span></div>' +
       '<div class="summary__item"><span class="summary__value">' + last + '</span><span class="summary__label">last sent</span></div>';
   }
 
@@ -867,7 +867,7 @@
     if (!inviteConnections.length) {
       problem = { title: 'No active connections', text: 'You need at least one active Google Calendar connection to send invites from.', cta: 'Go to Connections', view: 'connections' };
     } else if (!inviteLists.length) {
-      problem = { title: 'No segmented lists', text: 'Upload a list and run Segment first, then come back here to invite it.', cta: 'Go to Lists', view: 'lists' };
+      problem = { title: 'No contact lists ready', text: 'Upload your contacts and sort them into groups first, then come back here to invite them.', cta: 'Go to Contact lists', view: 'lists' };
     }
     if (problem) {
       pre.hidden = false;
@@ -892,7 +892,7 @@
     var el = document.getElementById('inviteHistory');
     renderInviteSummaryStrip(invites);
     if (!invites.length) {
-      el.innerHTML = '<div class="empty"><div class="empty__icon">' + icon('send') + '</div><h2 class="empty__title">No invites yet</h2><p class="empty__text">Send your first invite and it will show up here.</p></div>';
+      el.innerHTML = '<div class="empty"><div class="empty__icon">' + icon('send') + '</div><h2 class="empty__title">No invitations yet</h2><p class="empty__text">Send your first invitation and it will show up here.</p></div>';
       return;
     }
     var rows = invites.map(function (inv) {
@@ -909,7 +909,7 @@
         '<td>' + links + ' <button class="btn btn--ghost btn--sm" data-action="deleteInvite" data-id="' + esc(inv.id) + '" aria-label="Delete invite record">Delete</button></td>' +
         '</tr>';
     }).join('');
-    el.innerHTML = '<table class="map" aria-label="Invite history"><thead><tr><th>Event</th><th>Calendar</th><th>Recipients</th><th>Status</th><th>Sent</th><th></th></tr></thead><tbody>' + rows + '</tbody></table>';
+    el.innerHTML = '<table class="map" aria-label="Invite history"><thead><tr><th>What</th><th>Google account</th><th>People</th><th>Status</th><th>Sent</th><th></th></tr></thead><tbody>' + rows + '</tbody></table>';
   }
 
   function goToInvite(listId) {
@@ -926,7 +926,7 @@
     var id = this.value;
     if (!id) {
       document.getElementById('inviteSegments').innerHTML = '<p class="muted">Choose a list to see its segments.</p>';
-      document.getElementById('inviteRecipients').textContent = 'Select a list to preview recipients.';
+      document.getElementById('inviteRecipients').textContent = 'Pick a contact list to see who will be invited.';
       return;
     }
     api('/api/lists/' + id).then(function (d) {
@@ -958,15 +958,15 @@
     var summary = document.getElementById('inviteSummary').value.trim();
     var start = document.getElementById('inviteStart').value;
     var end = document.getElementById('inviteEnd').value;
-    if (!connId) { toast('Choose a calendar connection', 'error'); return; }
-    if (!listId) { toast('Choose a segmented list', 'error'); return; }
+    if (!connId) { toast('Choose a Google account first', 'error'); return; }
+    if (!listId) { toast('Choose a contact list', 'error'); return; }
     if (!summary) { toast('Event title is required', 'error'); return; }
-    if (!start || !end) { toast('Set a start and end time', 'error'); return; }
+    if (!start || !end) { toast('Add a start and end time', 'error'); return; }
     if (new Date(end) <= new Date(start)) { toast('End must be after start', 'error'); return; }
 
     api('/api/invites/preview', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ listId: listId, segments: selectedInviteSegments() }) })
       .then(function (p) {
-        if (!p.emails.length) { toast('No recipients to invite (already invited or invalid)', 'error'); return; }
+        if (!p.emails.length) { toast('Nobody left to invite — they have all been invited already, or the emails are not valid', 'error'); return; }
         return confirmDialog('Send invites?', 'This emails a real calendar invite to ' + p.emails.length + ' recipient(s) via Google Calendar. It cannot be undone.', 'Send')
           .then(function (ok) {
             if (!ok) return;
@@ -986,9 +986,9 @@
             return withBusy(document.getElementById('inviteSend'), api('/api/invites', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }))
               .then(function (r) {
                 if (r.ok) {
-                  toast('Invites sent (' + r.sent + ' recipients)', 'success');
+                  toast('Invitations sent (' + r.sent + ' people)', 'success');
                 } else {
-                  var reason = (r.invite && r.invite.error) ? r.invite.error : 'some recipients failed';
+                  var reason = (r.invite && r.invite.error) ? r.invite.error : "some didn't go through";
                   toast('Invite failed: ' + reason + ' (' + r.sent + '/' + (r.sent + r.failed) + ' sent)', 'error');
                 }
                 renderInviteResult(r);
@@ -1070,7 +1070,7 @@
     var el = document.getElementById('sessionsList');
     el.innerHTML = '';
     if (!sessions.length) {
-      el.innerHTML = '<div class="empty"><div class="empty__icon">' + icon('video') + '</div><h2 class="empty__title">No sessions yet</h2><p class="empty__text">Create a session to cross-reference attendance against your invite list.</p><button class="btn btn--accent" id="emptySessionsCta">New session</button></div>';
+      el.innerHTML = '<div class="empty"><div class="empty__icon">' + icon('video') + '</div><h2 class="empty__title">No video calls yet</h2><p class="empty__text">Add a video call to see who showed up to it.</p><button class="btn btn--accent" id="emptySessionsCta">New video call</button></div>';
       document.getElementById('emptySessionsCta').addEventListener('click', openNewSession);
       return;
     }
@@ -1158,7 +1158,7 @@
 
   function attendanceTable(people) {
     if (!people.length) return '<p class="muted">None</p>';
-    return '<table class="map"><thead><tr><th>Email</th><th>Name</th><th>Status</th><th>Duration</th><th>Attentiveness</th><th>Guest</th></tr></thead><tbody>' +
+    return '<table class="map"><thead><tr><th>Email</th><th>Name</th><th>Status</th><th>Duration</th><th>Focus</th><th>Guest</th></tr></thead><tbody>' +
       people.map(function (p) {
         var min = p.durationSec !== undefined ? Math.round(p.durationSec / 60) + ' min' : '—';
         var att = p.attentivenessScore !== undefined ? String(p.attentivenessScore) : '—';
@@ -1170,7 +1170,7 @@
   function dispatchSession() {
     if (!currentSessionId) return;
     withBusy(document.getElementById('sessionDispatch'), api('/api/sessions/' + currentSessionId + '/dispatch', { method: 'POST' }))
-      .then(function (r) { toast('Pushed to GHL (' + r.dispatched + ' records)', 'success'); })
+      .then(function (r) { toast('Sent to GHL (' + r.dispatched + ' records)', 'success'); })
       .catch(function (e) { toast(e.message, 'error'); });
   }
 
@@ -1330,7 +1330,7 @@
   function brandingCard() {
     return '<div class="card"><h3 class="card__title">Branding</h3>' +
       '<div class="brand-swatch"><img src="/static/logo.png" alt="Vibesuite logo" class="brand-swatch__logo" /></div>' +
-      '<p class="muted">Vibesuite — Google Calendar RSVP to GoHighLevel sync.</p></div>';
+      '<p class="muted">Vibesuite — turns Google Calendar replies into GoHighLevel activity.</p></div>';
   }
   function securityCard(info) {
     var ok = !!info.encryptionAtRest;
@@ -1352,20 +1352,20 @@
     var el = $('#listsList');
     el.innerHTML = '';
     if (!lists.length) {
-      el.innerHTML = '<div class="empty"><div class="empty__icon">' + icon('list') + '</div><h2 class="empty__title">No lists yet</h2><p class="empty__text">Upload a list and let the AI segment it into groups.</p><button class="btn btn--accent" id="emptyListsCta">New list</button></div>';
+      el.innerHTML = '<div class="empty"><div class="empty__icon">' + icon('list') + '</div><h2 class="empty__title">No contact lists yet</h2><p class="empty__text">Upload your contacts and let the AI sort them into groups.</p><button class="btn btn--accent" id="emptyListsCta">New contact list</button></div>';
       $('#emptyListsCta').addEventListener('click', function () { $('#newListForm').reset(); openModal('newList'); });
       return;
     }
     el.innerHTML = '<div class="summary">' +
       '<div class="summary__item"><span class="summary__value">' + lists.length + '</span><span class="summary__label">lists</span></div>' +
-      '<div class="summary__item"><span class="summary__value">' + lists.filter(function (l) { return l.hasResult; }).length + '</span><span class="summary__label">segmented</span></div>' +
+      '<div class="summary__item"><span class="summary__value">' + lists.filter(function (l) { return l.hasResult; }).length + '</span><span class="summary__label">sorted</span></div>' +
       '</div>';
     lists.forEach(function (l) {
       var box = document.createElement('div');
       box.className = 'conn';
       box.innerHTML =
         '<div class="conn__main">' +
-          '<div class="conn__head"><span class="conn__name">' + esc(l.name) + '</span>' + (l.hasResult ? '<span class="chip chip--success">Segmented</span>' : '<span class="chip chip--neutral">Pending</span>') + '</div>' +
+          '<div class="conn__head"><span class="conn__name">' + esc(l.name) + '</span>' + (l.hasResult ? '<span class="chip chip--success">Sorted</span>' : '<span class="chip chip--neutral">Not sorted yet</span>') + '</div>' +
           '<div class="conn__meta"><span>' + esc(l.criteria || 'No criteria') + '</span></div>' +
         '</div>' +
         '<div class="conn__actions">' +
@@ -1381,7 +1381,7 @@
   function segmentList(id) {
     var btn = $('#listsList [data-action="segment"][data-id="' + id + '"]');
     withBusy(btn, api('/api/lists/' + id + '/segment', { method: 'POST' }))
-      .then(function () { toast('Segmentation complete', 'success'); loadLists(); viewListResult(id); })
+      .then(function () { toast('Sorted into groups', 'success'); loadLists(); viewListResult(id); })
       .catch(function (e) { toast(e.message, 'error'); });
   }
 
@@ -1433,7 +1433,7 @@
     var el = $('#knowledgeList');
     el.innerHTML = '';
     if (!docs.length) {
-      el.innerHTML = '<div class="empty"><div class="empty__icon">' + icon('book') + '</div><h2 class="empty__title">No documents yet</h2><p class="empty__text">Add context the AI can use when segmenting lists.</p><button class="btn btn--accent" id="emptyKnowledgeCta">Add document</button></div>';
+      el.innerHTML = '<div class="empty"><div class="empty__icon">' + icon('book') + '</div><h2 class="empty__title">No documents yet</h2><p class="empty__text">Add notes the AI can read before it writes for you.</p><button class="btn btn--accent" id="emptyKnowledgeCta">Add document</button></div>';
       $('#emptyKnowledgeCta').addEventListener('click', function () { $('#newKnowledgeForm').reset(); openModal('newKnowledge'); });
       return;
     }
@@ -1878,7 +1878,7 @@
       el.innerHTML = '<p class="muted">No activity yet.</p>';
       return;
     }
-    el.innerHTML = '<table class="map" aria-label="Activity"><thead><tr><th>When</th><th>Action</th><th>Actor</th><th>Detail</th></tr></thead><tbody>' +
+    el.innerHTML = '<table class="map" aria-label="Activity"><thead><tr><th>When</th><th>What</th><th>Who</th><th>Detail</th></tr></thead><tbody>' +
       events.map(function (e) {
         return '<tr><td title="' + esc(new Date(e.at).toLocaleString()) + '">' + relativeTime(e.at) + '</td>' +
           '<td>' + esc(e.action) + '</td><td>' + esc(e.actor || '—') + '</td><td>' + esc(e.detail || '—') + '</td></tr>';
@@ -2066,7 +2066,7 @@
     var el = document.getElementById('sendersList');
     el.innerHTML = '';
     if (!senders.length) {
-      el.innerHTML = '<div class="empty"><div class="empty__icon">' + icon('send') + '</div><h2 class="empty__title">No senders yet</h2><p class="empty__text">Connect a Google account and it will appear here with its own load controls.</p></div>';
+      el.innerHTML = '<div class="empty"><div class="empty__icon">' + icon('send') + '</div><h2 class="empty__title">No sending accounts yet</h2><p class="empty__text">Link a Google account and it will show up here so you can set its limits.</p></div>';
       return;
     }
 
@@ -2074,10 +2074,10 @@
       var p = s.profile;
       var t = s.today;
 
-      var chips = p.enabled ? '<span class="chip chip--success">active</span>' : '<span class="chip chip--neutral">paused</span>';
-      if (t.cooling) chips += '<span class="chip chip--danger">cooling down</span>';
-      if (p.enabled && !t.inWindow) chips += '<span class="chip chip--warning">outside window</span>';
-      if (p.mode === 'ramp' && t.rampDayIndex) chips += '<span class="chip chip--neutral">ramp day ' + t.rampDayIndex + '</span>';
+      var chips = p.enabled ? '<span class="chip chip--success">sending</span>' : '<span class="chip chip--neutral">paused</span>';
+      if (t.cooling) chips += '<span class="chip chip--danger">resting</span>';
+      if (p.enabled && !t.inWindow) chips += '<span class="chip chip--warning">outside sending hours</span>';
+      if (p.mode === 'ramp' && t.rampDayIndex) chips += '<span class="chip chip--neutral">warm-up day ' + t.rampDayIndex + '</span>';
 
       var pct = t.capToday > 0 ? Math.min(100, Math.round((t.sentToday / t.capToday) * 100)) : 0;
       var hourly = p.hourlyCap ? ' / ' + p.hourlyCap : '';
@@ -2089,29 +2089,29 @@
           '<div class="conn__head"><span class="conn__name">' + esc(s.name) + '</span>' + chips + '</div>' +
           '<div class="conn__meta"><span class="conn__cal">' + icon('send') + esc(s.calendarId) + '</span></div>' +
           '<div class="gauge"><div class="gauge__bar"><span style="width:' + pct + '%"></span></div>' +
-            '<div class="gauge__label">Sent today <strong>' + t.sentToday + '</strong> / ' + t.capToday +
-              ' · headroom ' + t.headroom + ' · this hour ' + t.sentThisHour + hourly +
-              (t.failedToday ? ' · failed ' + t.failedToday : '') + '</div></div>' +
+            '<div class="gauge__label">Sent today <strong>' + t.sentToday + '</strong> of ' + t.capToday +
+              ' · ' + t.headroom + ' still available · ' + t.sentThisHour + ' this hour' + hourly +
+              (t.failedToday ? ' · ' + t.failedToday + " didn't go through" : '') + '</div></div>' +
           '<div class="sender__grid">' +
-            '<label class="field"><span class="field__label">Mode</span><select data-f="mode">' +
-              '<option value="flat"' + (p.mode === 'flat' ? ' selected' : '') + '>Flat</option>' +
-              '<option value="ramp"' + (p.mode === 'ramp' ? ' selected' : '') + '>Ramp</option></select></label>' +
-            '<label class="field"><span class="field__label">Daily cap</span><input type="number" min="1" max="5000" data-f="dailyCap" value="' + p.dailyCap + '" /></label>' +
-            '<label class="field"><span class="field__label">Hourly cap</span><input type="number" min="1" max="1000" data-f="hourlyCap" value="' + (p.hourlyCap || '') + '" /></label>' +
-            '<label class="field"><span class="field__label">Min delay (ms)</span><input type="number" min="0" max="600000" data-f="minDelayMs" value="' + (p.minDelayMs === undefined ? '' : p.minDelayMs) + '" /></label>' +
+            '<label class="field"><span class="field__label">How it sends</span><select data-f="mode">' +
+              '<option value="flat"' + (p.mode === 'flat' ? ' selected' : '') + '>Steady</option>' +
+              '<option value="ramp"' + (p.mode === 'ramp' ? ' selected' : '') + '>Warm up slowly</option></select></label>' +
+            '<label class="field"><span class="field__label">Max per day</span><input type="number" min="1" max="5000" data-f="dailyCap" value="' + p.dailyCap + '" /></label>' +
+            '<label class="field"><span class="field__label">Max per hour</span><input type="number" min="1" max="1000" data-f="hourlyCap" value="' + (p.hourlyCap || '') + '" /></label>' +
+            '<label class="field"><span class="field__label">Pause between batches (ms)</span><input type="number" min="0" max="600000" data-f="minDelayMs" value="' + (p.minDelayMs === undefined ? '' : p.minDelayMs) + '" /></label>' +
           '</div>' +
           '<div class="sender__ramp"' + (p.mode === 'ramp' ? '' : ' hidden') + '>' +
             '<div class="sender__grid">' +
-              '<label class="field"><span class="field__label">Ramp start / day</span><input type="number" min="1" max="5000" data-f="rampStart" value="' + (p.ramp ? p.ramp.startDailyCap : 50) + '" /></label>' +
-              '<label class="field"><span class="field__label">+ per day</span><input type="number" min="0" max="5000" data-f="rampInc" value="' + (p.ramp ? p.ramp.incrementPerDay : 50) + '" /></label>' +
-              '<label class="field"><span class="field__label">Ramp max</span><input type="number" min="1" max="5000" data-f="rampMax" value="' + (p.ramp ? p.ramp.maxDailyCap : 800) + '" /></label>' +
-              '<label class="field"><span class="field__label">Ramp start date</span><input type="date" data-f="rampStartDate" value="' + (p.ramp ? p.ramp.startDate : new Date().toISOString().slice(0, 10)) + '" /></label>' +
+              '<label class="field"><span class="field__label">Start with (per day)</span><input type="number" min="1" max="5000" data-f="rampStart" value="' + (p.ramp ? p.ramp.startDailyCap : 50) + '" /></label>' +
+              '<label class="field"><span class="field__label">Add each day</span><input type="number" min="0" max="5000" data-f="rampInc" value="' + (p.ramp ? p.ramp.incrementPerDay : 50) + '" /></label>' +
+              '<label class="field"><span class="field__label">Up to (per day)</span><input type="number" min="1" max="5000" data-f="rampMax" value="' + (p.ramp ? p.ramp.maxDailyCap : 800) + '" /></label>' +
+              '<label class="field"><span class="field__label">Warm-up started on</span><input type="date" data-f="rampStartDate" value="' + (p.ramp ? p.ramp.startDate : new Date().toISOString().slice(0, 10)) + '" /></label>' +
             '</div>' +
           '</div>' +
           '<div class="sender__grid">' +
-            '<label class="field"><span class="field__label">Window from (hr)</span><input type="number" min="0" max="23" data-f="winStart" value="' + p.window.startHour + '" /></label>' +
-            '<label class="field"><span class="field__label">Window to (hr)</span><input type="number" min="0" max="23" data-f="winEnd" value="' + p.window.endHour + '" /></label>' +
-            '<label class="field"><span class="field__label">Timezone</span><input data-f="winTz" list="tzList" value="' + esc(p.window.timeZone) + '" /></label>' +
+            '<label class="field"><span class="field__label">Send from (hour)</span><input type="number" min="0" max="23" data-f="winStart" value="' + p.window.startHour + '" /></label>' +
+            '<label class="field"><span class="field__label">Send until (hour)</span><input type="number" min="0" max="23" data-f="winEnd" value="' + p.window.endHour + '" /></label>' +
+            '<label class="field"><span class="field__label">Time zone</span><input data-f="winTz" list="tzList" value="' + esc(p.window.timeZone) + '" /></label>' +
             '<div class="field"><span class="field__label">Days</span><div class="daychks">' + daysCheckboxes(p.window.days || []) + '</div></div>' +
           '</div>' +
         '</div>' +
@@ -2186,20 +2186,24 @@
 
     if (btn.dataset.action === 'saveSender' && card) {
       withBusy(btn, api('/api/senders/' + id, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(readSenderCard(card)) }))
-        .then(function () { toast('Sender settings saved', 'success'); loadSenders(); })
+        .then(function () { toast('Saved', 'success'); loadSenders(); })
         .catch(function (err) { toast(err.message, 'error'); });
     } else if (btn.dataset.action === 'sendNowSender') {
       withBusy(btn, api('/api/senders/' + id + '/send-now', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ maxPerSender: 200 }) }))
         .then(function (r) {
-          var note = r.reason ? ' (' + r.reason + ')' : '';
-          toast('Sent ' + r.sent + (r.failed ? ', ' + r.failed + ' failed' : '') + note, r.sent ? 'success' : 'error');
+          if (r.sent) {
+            toast('Sent ' + r.sent + (r.failed ? '. ' + r.failed + " didn't go through" : '') +
+              (r.reason ? ' — ' + reasonLabel(r.reason) : ''), 'success');
+          } else {
+            toast('Nothing sent — ' + (reasonLabel(r.reason) || 'nothing was waiting'), 'error');
+          }
           loadSenders();
         })
         .catch(function (err) { toast(err.message, 'error'); });
     } else if (btn.dataset.action === 'toggleSender') {
       var action = btn.dataset.enabled === '1' ? 'pause' : 'resume';
       withBusy(btn, api('/api/senders/' + id + '/' + action, { method: 'POST' }))
-        .then(function () { toast(action === 'pause' ? 'Sender paused' : 'Sender resumed', 'success'); loadSenders(); })
+        .then(function () { toast(action === 'pause' ? 'That account is paused' : 'That account is sending again', 'success'); loadSenders(); })
         .catch(function (err) { toast(err.message, 'error'); });
     }
   });
@@ -2211,8 +2215,42 @@
   var currentCampaignId = null;
 
   function campStatusChip(status) {
-    var map = { draft: 'neutral', active: 'success', paused: 'warning', completed: 'neutral' };
-    return '<span class="chip chip--' + (map[status] || 'neutral') + '">' + esc(status) + '</span>';
+    var tone = { draft: 'neutral', active: 'success', paused: 'warning', completed: 'neutral' };
+    var words = { draft: 'Not started', active: 'Sending', paused: 'Paused', completed: 'Finished' };
+    return '<span class="chip chip--' + (tone[status] || 'neutral') + '">' + esc(words[status] || status) + '</span>';
+  }
+
+  function spreadLabel(mode) {
+    return mode === 'weighted' ? 'using your shares' : 'split evenly';
+  }
+
+  var MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  var DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+  function prettyDate(value) {
+    var t = Date.parse(String(value || ''));
+    if (!t) return String(value || '');
+    var d = new Date(t);
+    var out = DAYS[d.getDay()] + ' ' + d.getDate() + ' ' + MONTHS[d.getMonth()];
+    if (d.getHours() || d.getMinutes()) out += ', ' + pad2(d.getHours()) + ':' + pad2(d.getMinutes());
+    return out;
+  }
+
+  /* Plain words for the short status codes the server sends back. */
+  var REASON_LABELS = {
+    'paused': 'this account is paused',
+    'cooling down': 'this account is resting',
+    'outside send window': 'outside sending hours',
+    'daily cap reached': 'already at the daily limit',
+    'hourly cap reached': 'already at the limit for this hour',
+    'inter-batch delay': 'waiting for the pause between batches',
+    'nothing queued': 'nothing waiting to send',
+    'connection missing': 'that Google account is no longer linked'
+  };
+
+  function reasonLabel(reason) {
+    if (!reason) return '';
+    return REASON_LABELS[reason] || reason;
   }
 
   function connName(id) {
@@ -2242,12 +2280,12 @@
   function campaignActions(c) {
     var out = '';
     if (c.status === 'draft') {
-      out += '<button class="btn btn--primary btn--sm" data-action="campStart" data-id="' + esc(c.id) + '">Start</button>';
+      out += '<button class="btn btn--primary btn--sm" data-action="campStart" data-id="' + esc(c.id) + '">Begin sending</button>';
     } else if (c.status === 'active') {
-      out += '<button class="btn btn--outline btn--sm" data-action="campSend" data-id="' + esc(c.id) + '">Send batch</button>';
+      out += '<button class="btn btn--outline btn--sm" data-action="campSend" data-id="' + esc(c.id) + '">Send the next batch</button>';
       out += '<button class="btn btn--ghost btn--sm" data-action="campPause" data-id="' + esc(c.id) + '">Pause</button>';
     } else if (c.status === 'paused') {
-      out += '<button class="btn btn--outline btn--sm" data-action="campSend" data-id="' + esc(c.id) + '">Send batch</button>';
+      out += '<button class="btn btn--outline btn--sm" data-action="campSend" data-id="' + esc(c.id) + '">Send the next batch</button>';
       out += '<button class="btn btn--ghost btn--sm" data-action="campResume" data-id="' + esc(c.id) + '">Resume</button>';
     }
     out += '<button class="btn btn--ghost btn--sm" data-action="campDetail" data-id="' + esc(c.id) + '">Details</button>';
@@ -2259,7 +2297,7 @@
     var el = document.getElementById('campaignsList');
     el.innerHTML = '';
     if (!camps.length) {
-      el.innerHTML = '<div class="empty"><div class="empty__icon">' + icon('calendar') + '</div><h2 class="empty__title">No campaigns yet</h2><p class="empty__text">Create one to spread a list across several mailboxes at a safe pace.</p></div>';
+      el.innerHTML = '<div class="empty"><div class="empty__icon">' + icon('calendar') + '</div><h2 class="empty__title">No bulk invites yet</h2><p class="empty__text">Create one to share a contact list across several Google accounts at a safe pace.</p></div>';
       return;
     }
 
@@ -2273,13 +2311,13 @@
       box.innerHTML =
         '<div class="conn__main">' +
           '<div class="conn__head"><span class="conn__name">' + esc(c.name) + '</span>' + campStatusChip(c.status) +
-            '<span class="chip chip--neutral">' + esc(c.distribution.mode) + '</span>' +
-            (counts.failed ? '<span class="chip chip--danger">' + counts.failed + ' failed</span>' : '') + '</div>' +
+            '<span class="chip chip--neutral">' + esc(spreadLabel(c.distribution.mode)) + '</span>' +
+            (counts.failed ? '<span class="chip chip--danger">' + counts.failed + " didn't go through</span>" : '') + '</div>' +
           '<div class="conn__meta"><span class="conn__cal">' + icon('calendar') + esc(campListName(c.listId)) + '</span>' +
-            '<span class="conn__cal">' + esc(c.event.start) + '</span></div>' +
+            '<span class="conn__cal">' + esc(prettyDate(c.event.start)) + '</span></div>' +
           '<div class="gauge"><div class="gauge__bar"><span style="width:' + done + '%"></span></div>' +
-            '<div class="gauge__label">Sent <strong>' + counts.sent + '</strong> / ' + counts.total +
-              ' · pending ' + counts.pending + ' · ' + mailboxes + ' ' + (mailboxes === 1 ? 'mailbox' : 'mailboxes') + '</div></div>' +
+            '<div class="gauge__label">Sent <strong>' + counts.sent + '</strong> of ' + counts.total +
+              ' · ' + counts.pending + ' still waiting · ' + mailboxes + ' ' + (mailboxes === 1 ? 'account' : 'accounts') + '</div></div>' +
         '</div>' +
         '<div class="conn__actions">' + campaignActions(c) + '</div>';
       el.appendChild(box);
@@ -2294,14 +2332,14 @@
     var el = document.getElementById('campSenders');
     var conns = state.connections || [];
     if (!conns.length) {
-      el.innerHTML = '<p class="muted">No connected mailboxes yet — connect a Google account first.</p>';
+      el.innerHTML = '<p class="muted">No Google accounts linked yet — link one first.</p>';
       return;
     }
     el.innerHTML = conns.map(function (c) {
       return '<div class="camp-sender" data-conn="' + esc(c.id) + '">' +
         '<label class="daychk"><input type="checkbox" data-pick checked /><span>' + esc(c.name) + '</span></label>' +
         '<input type="number" min="0" step="1" value="1" data-share placeholder="share" title="Share weight (used when spread is weighted)" aria-label="Share weight" />' +
-        '<input type="number" min="0" step="1" data-quota placeholder="max" title="Optional cap on invites from this mailbox" aria-label="Quota" />' +
+        '<input type="number" min="0" step="1" data-quota placeholder="max" title="Optional maximum from this account" aria-label="Maximum from this account" />' +
       '</div>';
     }).join('');
   }
@@ -2364,10 +2402,10 @@
     var start = document.getElementById('campStart').value;
     var end = document.getElementById('campEnd').value;
 
-    if (!name) { toast('Give the campaign a name', 'error'); return; }
-    if (!listId) { toast('Pick an audience list', 'error'); return; }
+    if (!name) { toast('Give this bulk invite a name', 'error'); return; }
+    if (!listId) { toast('Pick a contact list', 'error'); return; }
     if (!summary) { toast('Add a subject line', 'error'); return; }
-    if (!start || !end) { toast('Set the start and end time', 'error'); return; }
+    if (!start || !end) { toast('Add a start and end time', 'error'); return; }
 
     var senders = [];
     $$('.camp-sender', document.getElementById('campSenders')).forEach(function (row) {
@@ -2380,7 +2418,7 @@
       if (Number.isFinite(quota) && quota > 0) s.quota = Math.floor(quota);
       senders.push(s);
     });
-    if (!senders.length) { toast('Pick at least one sending mailbox', 'error'); return; }
+    if (!senders.length) { toast('Pick at least one sending account', 'error'); return; }
 
     var segments = $$('[data-seg]', document.getElementById('campSegments'))
       .filter(function (c) { return c.checked; })
@@ -2406,7 +2444,7 @@
     withBusy(btn, api('/api/campaigns', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }))
       .then(function () {
         closeModal('newCampaign');
-        toast('Campaign created', 'success');
+        toast('Bulk invite created', 'success');
         loadCampaigns();
       })
       .catch(function (e) { toast(e.message, 'error'); });
@@ -2432,9 +2470,9 @@
     var counts = c.counts || { total: 0, sent: 0, pending: 0, failed: 0 };
 
     var planText = plan && plan.totalDays
-      ? 'At the current caps this takes <strong>' + plan.totalDays + '</strong> ' + (plan.totalDays === 1 ? 'day' : 'days') +
-        ' (~' + plan.dailyCapacity + '/day, finishing around ' + esc(String(plan.finishDate)) + ').'
-      : 'No capacity right now — check the Senders tab (paused, capped, or outside the send window).';
+      ? 'At this pace it will finish in about <strong>' + plan.totalDays + '</strong> ' + (plan.totalDays === 1 ? 'day' : 'days') +
+        ' — around ' + plan.dailyCapacity + ' a day, done by ' + esc(prettyDate(plan.finishDate)) + '.'
+      : 'Nothing can send right now — check the <strong>Sending accounts</strong> tab. An account may be paused, resting, or outside its sending hours.';
 
     var rows = (c.perSender || []).map(function (p) {
       return '<tr><td>' + esc(connName(p.connectionId)) + '</td><td>' + p.sent + '</td><td>' + p.queued +
@@ -2443,18 +2481,18 @@
 
     document.getElementById('campaignDetailBody').innerHTML =
       '<div class="conn__head">' + campStatusChip(c.status) +
-        '<span class="chip chip--neutral">' + esc(c.distribution.mode) + '</span>' +
+        '<span class="chip chip--neutral">' + esc(spreadLabel(c.distribution.mode)) + '</span>' +
         '<span class="chip chip--neutral">' + esc(campListName(c.listId)) + '</span></div>' +
       '<div class="summary">' +
-        '<div class="summary__item"><span class="summary__value">' + counts.total + '</span><span class="summary__label">recipients</span></div>' +
+        '<div class="summary__item"><span class="summary__value">' + counts.total + '</span><span class="summary__label">people</span></div>' +
         '<div class="summary__item"><span class="summary__value">' + counts.sent + '</span><span class="summary__label">sent</span></div>' +
-        '<div class="summary__item"><span class="summary__value">' + counts.pending + '</span><span class="summary__label">pending</span></div>' +
-        '<div class="summary__item"><span class="summary__value">' + counts.failed + '</span><span class="summary__label">failed</span></div>' +
+        '<div class="summary__item"><span class="summary__value">' + counts.pending + '</span><span class="summary__label">still waiting</span></div>' +
+        '<div class="summary__item"><span class="summary__value">' + counts.failed + '</span><span class="summary__label">didn\'t go through</span></div>' +
       '</div>' +
       '<p class="muted">' + planText + '</p>' +
-      '<h3 class="detail__sub">Progress by mailbox</h3>' +
-      '<table class="map"><thead><tr><th>Mailbox</th><th>Sent</th><th>Queued</th><th>Failed</th><th>On</th></tr></thead><tbody>' +
-        (rows || '<tr><td colspan="5" class="muted">Not started yet.</td></tr>') + '</tbody></table>' +
+      '<h3 class="detail__sub">Progress by account</h3>' +
+      '<table class="map"><thead><tr><th>Account</th><th>Sent</th><th>Waiting</th><th>Couldn\'t send</th><th>On</th></tr></thead><tbody>' +
+        (rows || '<tr><td colspan="5" class="muted">Nothing sent yet.</td></tr>') + '</tbody></table>' +
       campaignStatsHtml(stats);
   }
 
@@ -2463,32 +2501,32 @@
     var f = stats.funnel;
     var withAtt = !!stats.hasAttendance;
 
-    var html = '<h3 class="detail__sub">Funnel</h3>' +
+    var html = '<h3 class="detail__sub">What happened</h3>' +
       '<div class="summary">' +
         '<div class="summary__item"><span class="summary__value">' + f.sent + '</span><span class="summary__label">invited (' + f.rsvpRate + '% replied)</span></div>' +
-        '<div class="summary__item"><span class="summary__value">' + f.accepted + '</span><span class="summary__label">accepted (' + f.acceptanceRate + '% of sent)</span></div>' +
-        '<div class="summary__item"><span class="summary__value">' + f.declined + '</span><span class="summary__label">declined</span></div>' +
-        '<div class="summary__item"><span class="summary__value">' + f.tentative + '</span><span class="summary__label">tentative</span></div>' +
+        '<div class="summary__item"><span class="summary__value">' + f.accepted + '</span><span class="summary__label">said yes (' + f.acceptanceRate + '% of sent)</span></div>' +
+        '<div class="summary__item"><span class="summary__value">' + f.declined + '</span><span class="summary__label">said no</span></div>' +
+        '<div class="summary__item"><span class="summary__value">' + f.tentative + '</span><span class="summary__label">maybe</span></div>' +
         '<div class="summary__item"><span class="summary__value">' + f.noResponse + '</span><span class="summary__label">no reply</span></div>' +
       '</div>';
 
     if (withAtt) {
       html += '<div class="summary">' +
-        '<div class="summary__item"><span class="summary__value">' + f.attended + '</span><span class="summary__label">attended (' + f.attendanceRate + '% of yes)</span></div>' +
-        '<div class="summary__item"><span class="summary__value">' + f.noShow + '</span><span class="summary__label">no-show</span></div>' +
+        '<div class="summary__item"><span class="summary__value">' + f.attended + '</span><span class="summary__label">showed up (' + f.attendanceRate + '% of yes)</span></div>' +
+        '<div class="summary__item"><span class="summary__value">' + f.noShow + '</span><span class="summary__label">didn\'t show</span></div>' +
       '</div>';
     } else {
-      html += '<p class="muted">Attendance appears once the linked session has been synced in the Attendance tab.</p>';
+      html += '<p class="muted">Who showed up appears once the linked video call has been synced in the <strong>Who attended</strong> tab.</p>';
     }
 
-    var head = '<tr><th>Mailbox</th><th>Sent</th><th>Yes</th><th>No</th><th>Maybe</th><th>No reply</th>' + (withAtt ? '<th>Attended</th>' : '') + '</tr>';
+    var head = '<tr><th>Account</th><th>Sent</th><th>Yes</th><th>No</th><th>Maybe</th><th>No reply</th>' + (withAtt ? '<th>Showed up</th>' : '') + '</tr>';
     var body = (stats.perSender || []).map(function (x) {
       return '<tr><td>' + esc(connName(x.connectionId)) + '</td><td>' + x.sent + '</td><td>' + x.accepted +
         '</td><td>' + x.declined + '</td><td>' + x.tentative + '</td><td>' + x.noResponse + '</td>' +
         (withAtt ? '<td>' + x.attended + '</td>' : '') + '</tr>';
     }).join('');
 
-    return html + '<h3 class="detail__sub">Results by sending mailbox</h3>' +
+    return html + '<h3 class="detail__sub">What happened, per sending account</h3>' +
       '<table class="map"><thead>' + head + '</thead><tbody>' +
       (body || '<tr><td colspan="' + (withAtt ? 7 : 6) + '" class="muted">Nothing sent yet.</td></tr>') + '</tbody></table>';
   }
@@ -2502,7 +2540,7 @@
     var id = currentCampaignId;
     withBusy(this, api('/api/campaigns/' + id + '/send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ maxPerSender: 200 }) }))
       .then(function (r) {
-        toast('Sent ' + r.sent + (r.failed ? ', ' + r.failed + ' failed' : ''), r.failed ? 'error' : 'success');
+        toast('Sent ' + r.sent + (r.failed ? '. ' + r.failed + " didn't go through" : ''), r.failed ? 'error' : 'success');
         openCampaignDetail(id);
         loadCampaigns();
       })
@@ -2519,16 +2557,16 @@
 
     if (action === 'campDelete') {
       withBusy(btn, api('/api/campaigns/' + id, { method: 'DELETE' }))
-        .then(function () { toast('Campaign deleted', 'success'); loadCampaigns(); })
+        .then(function () { toast('Bulk invite deleted', 'success'); loadCampaigns(); })
         .catch(function (err) { toast(err.message, 'error'); });
       return;
     }
 
     var routes = {
-      campStart: { path: 'start', msg: 'Campaign started' },
+      campStart: { path: 'start', msg: 'Started sending' },
       campSend: { path: 'send', msg: 'Batch sent' },
-      campPause: { path: 'pause', msg: 'Campaign paused' },
-      campResume: { path: 'resume', msg: 'Campaign resumed' }
+      campPause: { path: 'pause', msg: 'Paused' },
+      campResume: { path: 'resume', msg: 'Sending again' }
     };
     var route = routes[action];
     if (!route) return;
@@ -2542,8 +2580,8 @@
     withBusy(btn, api('/api/campaigns/' + id + '/' + route.path, opts))
       .then(function (r) {
         var extra = '';
-        if (r && typeof r.sent === 'number') extra = ' — ' + r.sent + ' sent' + (r.failed ? ', ' + r.failed + ' failed' : '');
-        else if (r && typeof r.recipients === 'number') extra = ' — ' + r.recipients + ' recipients queued';
+        if (r && typeof r.sent === 'number') extra = ' — ' + r.sent + ' sent' + (r.failed ? '. ' + r.failed + " didn't go through" : '');
+        else if (r && typeof r.recipients === 'number') extra = ' — ' + r.recipients + ' people added to the queue';
         toast(route.msg + extra, 'success');
         loadCampaigns();
       })
@@ -2555,7 +2593,8 @@
 
   function advisorSeverityChip(s) {
     var map = { critical: 'danger', warning: 'warning', info: 'neutral' };
-    return '<span class="chip chip--' + (map[s] || 'neutral') + '">' + esc(s) + '</span>';
+    var words = { critical: 'important', warning: 'worth a look', info: 'for your info' };
+    return '<span class="chip chip--' + (map[s] || 'neutral') + '">' + esc(words[s] || s) + '</span>';
   }
 
   function loadAdvisor() {
@@ -2572,10 +2611,10 @@
       '<div class="conn__head"><span class="conn__name">' + esc(r.title) + '</span>' + advisorSeverityChip(r.severity) + '</div>' +
       '<p>' + esc(r.rationale) + '</p>' +
       (r.impact ? '<p class="muted">' + esc(r.impact) + '</p>' : '') +
-      (r.actionLabel ? '<p class="muted">Planned change: <strong>' + esc(r.actionLabel) + '</strong></p>' : '') +
+      (r.actionLabel ? '<p class="muted">What this will change: <strong>' + esc(r.actionLabel) + '</strong></p>' : '') +
       '<div class="conn__actions">' +
-        (r.action ? '<button class="btn btn--primary btn--sm" data-action="advisorApply" data-id="' + esc(r.id) + '">Apply</button>' : '') +
-        '<button class="btn btn--ghost btn--sm" data-action="advisorDismiss" data-id="' + esc(r.id) + '">Dismiss</button>' +
+        (r.action ? '<button class="btn btn--primary btn--sm" data-action="advisorApply" data-id="' + esc(r.id) + '">Do it</button>' : '') +
+        '<button class="btn btn--ghost btn--sm" data-action="advisorDismiss" data-id="' + esc(r.id) + '">Ignore</button>' +
       '</div></div>';
   }
 
@@ -2585,8 +2624,8 @@
 
     if (!a) {
       el.innerHTML = '<div class="empty"><div class="empty__icon">' + icon('spark') + '</div>' +
-        '<h2 class="empty__title">No analysis yet</h2>' +
-        '<p class="empty__text">Run Analyze to review mailbox capacity and campaign funnels. Only aggregate numbers are used — never recipient data.</p></div>';
+        '<h2 class="empty__title">Nothing checked yet</h2>' +
+        '<p class="empty__text">Press Check my setup to look over your accounts and your results. Only totals are used — never contact details.</p></div>';
       return;
     }
 
@@ -2596,28 +2635,28 @@
 
     var html =
       '<div class="card">' +
-        '<div class="conn__head"><span class="conn__name">Analysis</span>' +
-          (a.provider ? '<span class="chip chip--success">' + esc(a.provider) + ' · ' + esc(a.model || '') + '</span>' : '<span class="chip chip--neutral">built-in rules</span>') +
+        '<div class="conn__head"><span class="conn__name">What I found</span>' +
+          (a.provider ? '<span class="chip chip--success">' + esc(a.provider) + ' · ' + esc(a.model || '') + '</span>' : '<span class="chip chip--neutral">built-in checks</span>') +
           '<span class="chip chip--neutral">' + esc(relativeTime(a.createdAt)) + '</span></div>' +
         '<p>' + esc(a.summary) + '</p>' +
         (a.note ? '<p class="muted">' + esc(a.note) + '</p>' : '') +
       '</div>';
 
-    html += '<h3 class="detail__sub">Recommendations (' + open.length + ' open)</h3>';
+    html += '<h3 class="detail__sub">Suggestions (' + open.length + ' open)</h3>';
     html += open.length
       ? open.map(advisorRecCard).join('')
       : '<div class="card"><p class="muted">Nothing needs changing right now.</p></div>';
 
     if (resolved.length) {
-      html += '<h3 class="detail__sub">Resolved</h3><div class="card">' +
+      html += '<h3 class="detail__sub">Done</h3><div class="card">' +
         resolved.map(function (r) {
-          return '<div class="advisor__row"><span class="chip chip--' + (r.state === 'applied' ? 'success' : 'neutral') + '">' + esc(r.state) + '</span>' +
+          return '<div class="advisor__row"><span class="chip chip--' + (r.state === 'applied' ? 'success' : 'neutral') + '">' + (r.state === 'applied' ? 'done' : 'ignored') + '</span>' +
             '<span>' + esc(r.title) + '</span>' +
             (r.actionLabel ? '<span class="muted">' + esc(r.actionLabel) + '</span>' : '') + '</div>';
         }).join('') + '</div>';
     }
 
-    html += '<h3 class="detail__sub">Ask a follow-up</h3>' +
+    html += '<h3 class="detail__sub">Ask a question</h3>' +
       '<div class="card">' +
         '<div class="advisor__thread" id="advisorThread"></div>' +
         '<label class="field"><span class="field__label">Question</span>' +
@@ -2625,17 +2664,17 @@
         '<div class="conn__actions"><button class="btn btn--outline btn--sm" id="advisorAsk">Ask</button></div>' +
       '</div>';
 
-    html += '<details class="card"><summary>Data appendix — exactly what the model received</summary>' +
-      '<table class="map"><thead><tr><th>Field</th><th>Included</th><th>Note</th></tr></thead><tbody>' +
+    html += '<details class="card"><summary>What we sent the AI</summary>' +
+      '<table class="map"><thead><tr><th>Item</th><th>Sent?</th><th>Note</th></tr></thead><tbody>' +
       (d.appendix || []).map(function (row) {
         return '<tr><td>' + esc(row.field) + '</td><td>' + (row.included ? 'yes' : '<strong>no</strong>') + '</td>' +
           '<td class="muted">' + esc(row.note) + '</td></tr>';
       }).join('') + '</tbody></table></details>';
 
     if ((d.log || []).length) {
-      html += '<h3 class="detail__sub">Apply log</h3><div class="card">' +
+      html += '<h3 class="detail__sub">Changes you\'ve applied</h3><div class="card">' +
         d.log.map(function (e) {
-          return '<div class="advisor__row"><span class="chip chip--' + (e.ok ? 'success' : 'danger') + '">' + (e.ok ? 'applied' : 'failed') + '</span>' +
+          return '<div class="advisor__row"><span class="chip chip--' + (e.ok ? 'success' : 'danger') + '">' + (e.ok ? 'done' : 'failed') + '</span>' +
             '<span>' + esc(e.description || e.title) + '</span>' +
             '<span class="muted">' + esc(relativeTime(e.at)) + (e.actor ? ' · ' + esc(e.actor) : '') + '</span></div>';
         }).join('') + '</div>';
@@ -2677,7 +2716,7 @@
     withBusy(btn, api('/api/advisor/analyze', { method: 'POST' }))
       .then(function () {
         advisorThread = [];
-        toast('Analysis ready', 'success');
+        toast('Done — here is what I found', 'success');
         return loadAdvisor();
       })
       .catch(function (e) { toast(e.message, 'error'); });
@@ -2696,7 +2735,7 @@
     if (btn.dataset.action === 'advisorApply') {
       withBusy(btn, api('/api/advisor/recommendations/' + id + '/apply', { method: 'POST' }))
         .then(function (r) {
-          toast('Applied: ' + (r.description || 'change saved'), 'success');
+          toast('Done: ' + (r.description || 'change saved'), 'success');
           loadAdvisor();
           loadCampaigns();
           loadSenders();

@@ -8,7 +8,7 @@ import type { AdvisorSnapshot, CampaignSnapshot, MailboxSnapshot } from '../../s
 
 function mailbox(over: Partial<MailboxSnapshot> = {}): MailboxSnapshot {
   return {
-    label: 'Mailbox A',
+    label: 'Account A',
     enabled: true,
     mode: 'flat',
     dailyCap: 800,
@@ -28,7 +28,7 @@ function mailbox(over: Partial<MailboxSnapshot> = {}): MailboxSnapshot {
 
 function campaign(over: Partial<CampaignSnapshot> = {}): CampaignSnapshot {
   return {
-    label: 'Campaign 1',
+    label: 'Bulk invite 1',
     status: 'active',
     spread: 'even',
     mailboxes: 2,
@@ -68,8 +68,8 @@ function snapshot(mailboxes: MailboxSnapshot[], campaigns: CampaignSnapshot[] = 
 
 describe('buildAdvisorPrompt', () => {
   it('speaks in labels and never in identities', () => {
-    const prompt = buildAdvisorPrompt(snapshot([mailbox({ label: 'Mailbox A' })]));
-    expect(prompt).toContain('Mailbox A');
+    const prompt = buildAdvisorPrompt(snapshot([mailbox({ label: 'Account A' })]));
+    expect(prompt).toContain('Account A');
     expect(prompt).toContain('set_sender_daily_cap');
     expect(prompt).not.toContain('conn-123');
     expect(prompt).not.toContain('@');
@@ -100,7 +100,7 @@ describe('localRecommendations', () => {
 
   it('warns when the hourly ceiling is nearly reached', () => {
     const recs = localRecommendations(snapshot([mailbox({ hourlyCap: 100, sentThisHour: 95, capToday: 800, sentToday: 95 })]));
-    expect(recs[0].title).toContain('hourly ceiling');
+    expect(recs[0].title).toContain('close to its limit');
     const action = recs[0].action;
     expect(action?.kind).toBe('set_sender_hourly_cap');
     expect((action?.value as number) > 100).toBe(true);
@@ -139,7 +139,7 @@ describe('sanitizeRecommendations', () => {
           title: 'Push mailbox A hard',
           severity: 'CRITICAL',
           rationale: 'because',
-          action: { kind: 'set_sender_daily_cap', target: 'Mailbox A', value: 999999 },
+          action: { kind: 'set_sender_daily_cap', target: 'Account A', value: 999999 },
         },
       ],
     });
@@ -151,10 +151,10 @@ describe('sanitizeRecommendations', () => {
 
   it('downgrades an unknown action to advisory-only', () => {
     const recs = sanitizeRecommendations({
-      recommendations: [{ title: 'Do something odd', action: { kind: 'wipe_everything', target: 'Mailbox A' } }],
+      recommendations: [{ title: 'Do something odd', action: { kind: 'wipe_everything', target: 'Account A' } }],
     });
     expect(recs[0].action).toBeUndefined();
-    expect(recs[0].actionLabel).toBe('Advisory only');
+    expect(recs[0].actionLabel).toBe('Information only');
     expect(recs[0].severity).toBe('info');
   });
 

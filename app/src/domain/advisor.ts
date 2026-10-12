@@ -134,8 +134,8 @@ export async function analyzeAdvisor(): Promise<AdvisorAnalysis> {
   const local = localRecommendations(snapshot);
 
   const settings = await getAiSettings();
-  let summary = 'Built-in rules only — add an AI provider in Settings for a written read of the data.';
-  let note: string | undefined = 'No AI provider configured, so these are the built-in rules.';
+  let summary = 'These come from the built-in checks. Add an AI provider in Settings to get a written read of the numbers.';
+  let note: string | undefined = 'No AI provider is set up, so these come from the built-in checks.';
   let provider: string | null = null;
   let model: string | null = null;
   let aiRecs: Recommendation[] = [];
@@ -151,7 +151,7 @@ export async function analyzeAdvisor(): Promise<AdvisorAnalysis> {
       note = undefined;
     } catch (err) {
       const message = (err as Error).message;
-      note = `The AI provider call failed (${message}), so these are the built-in rules.`;
+      note = `The AI provider did not answer (${message}), so these come from the built-in checks.`;
       logger.error({ err: message }, 'advisor analysis failed');
     }
   }
@@ -207,7 +207,7 @@ async function applySenderAction(action: AdvisorAction, connectionId: string): P
       profile.enabled = true;
       break;
     default:
-      throw new Error(`"${action.kind}" cannot be applied to a mailbox`);
+      throw new Error('that change cannot be applied to a sending account');
   }
 
   await saveSenderProfile(profile);
@@ -215,7 +215,7 @@ async function applySenderAction(action: AdvisorAction, connectionId: string): P
 
 async function applyCampaignAction(action: AdvisorAction, campaignId: string): Promise<void> {
   const camp = await getCampaign(campaignId);
-  if (!camp) throw new Error('campaign no longer exists');
+  if (!camp) throw new Error('that bulk invite no longer exists');
 
   if (action.kind === 'set_campaign_status') {
     camp.status = action.status === 'active' ? 'active' : 'paused';
@@ -223,7 +223,7 @@ async function applyCampaignAction(action: AdvisorAction, campaignId: string): P
     const value = action.value as number;
     camp.senders = camp.senders.map((s) => ({ ...s, priority: value }));
   } else {
-    throw new Error(`"${action.kind}" cannot be applied to a campaign`);
+    throw new Error('that change cannot be applied to a bulk invite');
   }
 
   await saveCampaign(camp);
@@ -235,19 +235,19 @@ export async function applyRecommendation(
   actor?: string,
 ): Promise<{ ok: boolean; error?: string; recommendation?: Recommendation; description?: string }> {
   const analysis = await getAnalysis();
-  if (!analysis) return { ok: false, error: 'run an analysis first' };
+  if (!analysis) return { ok: false, error: 'press Check my setup first' };
 
   const rec = analysis.recommendations.find((r) => r.id === id);
-  if (!rec) return { ok: false, error: 'recommendation not found' };
-  if (rec.state !== 'open') return { ok: false, error: `this recommendation was already ${rec.state}` };
-  if (!rec.action) return { ok: false, error: 'this recommendation is advisory only' };
+  if (!rec) return { ok: false, error: 'that suggestion is no longer there' };
+  if (rec.state !== 'open') return { ok: false, error: `you already ${rec.state === 'applied' ? 'did' : 'ignored'} this one` };
+  if (!rec.action) return { ok: false, error: 'this one is information only — there is nothing to change' };
 
   const clamped = clampAdvisorAction(rec.action);
   if (!clamped.ok) return { ok: false, error: clamped.error };
 
   const label = clamped.action.target as string;
   const target = resolveTarget(analysis.targets, label);
-  if (!target) return { ok: false, error: `unknown target "${label}"` };
+  if (!target) return { ok: false, error: `that no longer exists (${label})` };
 
   try {
     if (target.connectionId) await applySenderAction(clamped.action, target.connectionId);
@@ -285,10 +285,10 @@ export async function dismissRecommendation(
   id: string,
 ): Promise<{ ok: boolean; error?: string; recommendation?: Recommendation }> {
   const analysis = await getAnalysis();
-  if (!analysis) return { ok: false, error: 'run an analysis first' };
+  if (!analysis) return { ok: false, error: 'press Check my setup first' };
 
   const rec = analysis.recommendations.find((r) => r.id === id);
-  if (!rec) return { ok: false, error: 'recommendation not found' };
+  if (!rec) return { ok: false, error: 'that suggestion is no longer there' };
 
   rec.state = 'dismissed';
   await saveAnalysis(analysis);
@@ -298,10 +298,10 @@ export async function dismissRecommendation(
 /** Ephemeral follow-up thread: grounded on the stored snapshot, never persisted. */
 export async function askAdvisor(question: string): Promise<{ answer: string }> {
   const clean = String(question ?? '').trim().slice(0, 1000);
-  if (!clean) throw new Error('ask a question');
+  if (!clean) throw new Error('type a question first');
 
   const settings = await getAiSettings();
-  if (!settings || !settings.apiKey) throw new Error('add an AI provider in Settings to ask follow-up questions');
+  if (!settings || !settings.apiKey) throw new Error('add an AI provider in Settings to ask questions');
 
   const stored = await getAnalysis();
   const snapshot = stored ? stored.snapshot : (await collectAdvisorSnapshot()).snapshot;

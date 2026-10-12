@@ -183,3 +183,41 @@ follow-up" is grounded on the stored snapshot and is ephemeral — the server ke
   - `app-worker` `/metrics` on `METRICS_PORT` — sync runs, RSVP dispatches by status, duplicates,
     GHL errors, watch renewals.
 
+
+## Words we use in the UI
+
+The interface deliberately uses plain words rather than the engineering vocabulary. The data model,
+API routes and Redis keys keep their original names, so use this table when reading code or logs:
+
+| The UI says | Code says |
+|---|---|
+| Google accounts | `connection`, `/api/connections`, `conn:{id}:*` |
+| Contact lists | `list`, `/api/lists`, `list:{id}` |
+| Documents | `knowledge`, `/api/knowledge` |
+| Invitations | `invite`, `/api/invites`, `list:{id}:invited` |
+| Who attended | `session`, `attendance`, `/api/sessions`, `attendance:{sessionId}` |
+| Bulk invites | `campaign`, `/api/campaigns`, `campaign:{id}` |
+| Sending accounts | `sender`, `/api/senders`, `sender:*` |
+| Assistant | `advisor`, `/api/advisor`, `advisor:analysis` |
+| People | `team`, `users`, `/api/team` |
+| "max per day" | `dailyCap` |
+| "max per hour" | `hourlyCap` |
+| "pause between batches" | `minDelayMs` |
+| "warm up slowly" | `mode: 'ramp'` |
+| "sending hours" | `window` |
+| "resting" | cooldown (`cooling`, `cooldownUntil`) |
+| "still available" | headroom |
+| "what happened" | funnel |
+| "per sending account" | per-sender attribution |
+
+Two rules keep this safe, and both are load-bearing:
+
+1. **Display strings only.** Renaming what a label says must never rename the thing. API payloads,
+   Redis keys and stored JSON keep their original field names.
+2. **Never rename a wire value.** `accepted`, `declined`, `tentative`, `needsAction`, `rsvp-yes`,
+   `partial`, `confirmed` and `cancelled` are Google and GoHighLevel contract values. The UI maps
+   them to "yes / no / maybe / no reply" at render time (`campaignStats.ts`, plus `STATUS` and
+   `REASON_LABELS` in `app.js`). Renaming one of these values would silently break RSVP sync or GHL
+   tagging, so `transform.test.ts`, `dedupe.test.ts` and `campaignStats.test.ts` assert on them
+   unchanged — they are the guardrail.
+
