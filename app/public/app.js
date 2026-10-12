@@ -1068,7 +1068,7 @@
         '<div class="conn__main">' +
           '<div class="conn__head"><span class="conn__name">' + esc(s.title) + '</span>' + sessionChip(s.status) + '</div>' +
           '<div class="conn__meta">' +
-            '<span class="conn__cal">' + icon('video') + esc(providerLabel(s.provider)) + ' · ' + esc(s.externalId) + '</span>' +
+            '<span class="conn__cal">' + icon('video') + esc(providerLabel(s.provider)) + ' ' + esc(s.sessionType || 'meeting') + ' · ' + esc(s.externalId) + '</span>' +
             badge(new Date(s.startTime).toLocaleString()) +
           '</div>' +
           (s.error ? '<div class="muted" style="font-size:0.8rem">' + esc(s.error) + '</div>' : '') +
@@ -1101,7 +1101,7 @@
     document.getElementById('sessionDetailTitle').textContent = session.title || 'Session';
     var head = '<div class="detail__head">' + esc(session.title) + ' ' + sessionChip(session.status) + '</div>' +
       '<table class="kv">' +
-      '<tr><th>Provider</th><td>' + esc(providerLabel(session.provider)) + '</td></tr>' +
+      '<tr><th>Provider</th><td>' + esc(providerLabel(session.provider)) + ' · ' + esc(session.sessionType || 'meeting') + '</td></tr>' +
       '<tr><th>Meeting ID</th><td>' + esc(session.externalId) + '</td></tr>' +
       '<tr><th>Start</th><td>' + new Date(session.startTime).toLocaleString() + '</td></tr>' +
       '<tr><th>End</th><td>' + new Date(session.endTime).toLocaleString() + '</td></tr>' +
@@ -1110,21 +1110,47 @@
 
     var body = head;
     if (!attendance) {
-      body += '<p class="muted">No attendance synced yet.</p>';
+      body += '<p class="muted">No attendance synced yet — click "Sync now".</p>';
     } else {
+      body += '<div class="summary" style="margin:0.5rem 0 1rem">' +
+        '<div class="summary__item"><span class="summary__value">' + attendance.invitedCount + '</span><span class="summary__label">invited</span></div>' +
+        '<div class="summary__item"><span class="summary__value">' + attendance.attendedCount + '</span><span class="summary__label">attended</span></div>' +
+        '<div class="summary__item"><span class="summary__value">' + attendance.noShowCount + '</span><span class="summary__label">no-show</span></div>' +
+        '<div class="summary__item"><span class="summary__value">' + Math.round((attendance.attendanceRate || 0) * 100) + '%</span><span class="summary__label">attendance</span></div>' +
+        '<div class="summary__item"><span class="summary__value">' + (attendance.registrantCount || 0) + '</span><span class="summary__label">registrants</span></div>' +
+        '<div class="summary__item"><span class="summary__value">' + ((attendance.polls || []).length) + '</span><span class="summary__label">polls</span></div>' +
+        '<div class="summary__item"><span class="summary__value">' + ((attendance.qa || []).length) + '</span><span class="summary__label">Q&amp;A</span></div>' +
+        '</div>';
+
+      var stats = attendance.sessionStats || {};
+      var statKeys = Object.keys(stats);
+      if (statKeys.length) {
+        body += '<h3 class="detail__sub">Session stats</h3><table class="map"><tbody>' +
+          statKeys.map(function (k) { return '<tr><th>' + esc(k) + '</th><td>' + esc(stats[k]) + '</td></tr>'; }).join('') +
+          '</tbody></table>';
+      }
+
       body += '<h3 class="detail__sub">Attended (' + attendance.attendedCount + ')</h3>' + attendanceTable(attendance.attended);
+
       body += '<h3 class="detail__sub">No-show (' + attendance.noShowCount + ')</h3>' +
         (attendance.noShow.length ? '<table class="map"><tbody>' + attendance.noShow.map(function (e) { return '<tr><td>' + esc(e) + '</td></tr>'; }).join('') + '</tbody></table>' : '<p class="muted">None</p>');
+
+      if ((attendance.absentees || []).length) {
+        body += '<h3 class="detail__sub">Absentees (' + attendance.absentees.length + ')</h3><table class="map"><tbody>' +
+          attendance.absentees.map(function (e) { return '<tr><td>' + esc(e) + '</td></tr>'; }).join('') + '</tbody></table>';
+      }
     }
     document.getElementById('sessionDetailBody').innerHTML = body;
   }
 
   function attendanceTable(people) {
     if (!people.length) return '<p class="muted">None</p>';
-    return '<table class="map"><thead><tr><th>Email</th><th>Name</th><th>Status</th><th>Duration</th></tr></thead><tbody>' +
+    return '<table class="map"><thead><tr><th>Email</th><th>Name</th><th>Status</th><th>Duration</th><th>Attentiveness</th><th>Guest</th></tr></thead><tbody>' +
       people.map(function (p) {
         var min = p.durationSec !== undefined ? Math.round(p.durationSec / 60) + ' min' : '—';
-        return '<tr><td>' + esc(p.email || '—') + '</td><td>' + esc(p.name || '—') + '</td><td>' + esc(p.status) + '</td><td>' + min + '</td></tr>';
+        var att = p.attentivenessScore !== undefined ? String(p.attentivenessScore) : '—';
+        var guest = p.isGuest === undefined ? '—' : (p.isGuest ? 'yes' : 'no');
+        return '<tr><td>' + esc(p.email || '—') + '</td><td>' + esc(p.name || '—') + '</td><td>' + esc(p.status) + '</td><td>' + min + '</td><td>' + att + '</td><td>' + guest + '</td></tr>';
       }).join('') + '</tbody></table>';
   }
 
@@ -1166,6 +1192,7 @@
     var fd = new FormData(document.getElementById('newSessionForm'));
     var body = {
       provider: fd.get('provider'),
+      sessionType: fd.get('sessionType'),
       externalId: fd.get('externalId'),
       title: fd.get('title'),
       startTime: fd.get('startTime'),

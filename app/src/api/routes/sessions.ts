@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { createSession, getSession, listSessions, deleteSession } from '../../domain/sessionStore';
 import { getAttendance } from '../../domain/attendanceStore';
 import { syncSession, dispatchSession } from '../../workers/attendance';
-import type { VideoProvider } from '../../video/types';
+import type { SessionType, VideoProvider } from '../../video/types';
 
 export async function sessionRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/sessions', async () => {
@@ -12,6 +12,7 @@ export async function sessionRoutes(app: FastifyInstance): Promise<void> {
   app.post('/api/sessions', async (req, reply) => {
     const b = req.body as {
       provider: VideoProvider;
+      sessionType?: SessionType;
       externalId: string;
       title: string;
       startTime: string;

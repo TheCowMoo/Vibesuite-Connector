@@ -1,10 +1,10 @@
-import type { AttendeeRecord, VideoProvider, VideoProviderImpl } from './types';
+import type { ProviderFetchResult, VideoProvider, VideoProviderImpl } from './types';
 import { zoomProvider } from './zoom';
 
 function notImplemented(key: VideoProvider): VideoProviderImpl {
   return {
     key,
-    async listAttendees(): Promise<AttendeeRecord[]> {
+    async fetch(): Promise<ProviderFetchResult> {
       throw new Error(`${key} attendance is not implemented yet`);
     },
     async test() {

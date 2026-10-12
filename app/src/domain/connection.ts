@@ -22,7 +22,10 @@ export type ConditionField =
   | 'sessionTitle'
   | 'sessionId'
   | 'joinedAt'
-  | 'leftAt';
+  | 'leftAt'
+  // Allows any provider-extracted stat to be used as a condition without
+  // widening this union by hand (keeps autocomplete for the literals above).
+  | (string & {});
 export type ConditionOperator =
   | 'equals'
   | 'not_equals'

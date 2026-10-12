@@ -1,4 +1,4 @@
-import type { AttendeeRecord } from '../video/types';
+import type { AttendeeRecord, PollResult, QaEntry } from '../video/types';
 
 export type AttendanceStatus = 'attended' | 'no_show' | 'partial';
 
@@ -9,17 +9,32 @@ export interface AttendancePerson {
   joinedAt?: string;
   leftAt?: string;
   durationSec?: number;
+  attentivenessScore?: number;
+  isGuest?: boolean;
+  registrantId?: string;
+  userId?: string;
+  participantId?: string;
+  customerKey?: string;
+  raw?: Record<string, unknown>;
 }
 
 export interface AttendanceReport {
   sessionId: string;
   provider: string;
+  sessionTitle?: string;
+  sessionType?: string;
   invitedCount: number;
   attendedCount: number;
   noShowCount: number;
   attended: AttendancePerson[];
   noShow: string[];
   attendedNotInvited: AttendancePerson[];
+  absentees: string[];
+  registrantCount: number;
+  attendanceRate: number;
+  sessionStats: Record<string, string>;
+  polls: PollResult[];
+  qa: QaEntry[];
   generatedAt: number;
 }
 
@@ -30,8 +45,15 @@ export function normalizeEmail(email: string): string {
 export interface BuildReportParams {
   sessionId: string;
   provider: string;
+  sessionTitle?: string;
+  sessionType?: string;
   invitedEmails: string[];
   attendees: AttendeeRecord[];
+  absentees?: string[];
+  registrantCount?: number;
+  sessionStats?: Record<string, string>;
+  polls?: PollResult[];
+  qa?: QaEntry[];
   minSeconds?: number;
 }
 
@@ -61,6 +83,13 @@ export function buildReport(params: BuildReportParams): AttendanceReport {
     joinedAt: rec.joinedAt,
     leftAt: rec.leftAt,
     durationSec: rec.durationSec,
+    attentivenessScore: rec.attentivenessScore,
+    isGuest: rec.isGuest,
+    registrantId: rec.registrantId,
+    userId: rec.userId,
+    participantId: rec.participantId,
+    customerKey: rec.customerKey,
+    raw: rec.raw,
   });
 
   const attended: AttendancePerson[] = [];
@@ -83,15 +112,26 @@ export function buildReport(params: BuildReportParams): AttendanceReport {
     if (!matched.has(email)) noShow.push(email);
   }
 
+  const invitedCount = invited.size;
+  const attendedCount = attended.length;
+
   return {
     sessionId,
     provider,
-    invitedCount: invited.size,
-    attendedCount: attended.length,
+    sessionTitle: params.sessionTitle,
+    sessionType: params.sessionType,
+    invitedCount,
+    attendedCount,
     noShowCount: noShow.length,
     attended,
     noShow,
     attendedNotInvited,
+    absentees: params.absentees ?? [],
+    registrantCount: params.registrantCount ?? 0,
+    attendanceRate: invitedCount > 0 ? attendedCount / invitedCount : 0,
+    sessionStats: params.sessionStats ?? {},
+    polls: params.polls ?? [],
+    qa: params.qa ?? [],
     generatedAt: Date.now(),
   };
 }

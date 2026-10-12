@@ -1,51 +1,11 @@
 import type { AutomationRule, Condition } from './connection';
 
 export interface ConditionContext {
-  // Calendar RSVP
-  responseStatus?: string;
-  email?: string;
-  eventSummary?: string;
-  eventId?: string;
-  calendarId?: string;
-  // Video attendance
-  attendanceStatus?: string;
-  attendanceMinutes?: string;
-  provider?: string;
-  sessionTitle?: string;
-  sessionId?: string;
-  joinedAt?: string;
-  leftAt?: string;
+  [key: string]: string | undefined;
 }
 
-function fieldValue(ctx: ConditionContext, field: Condition['field']): string {
-  switch (field) {
-    case 'responseStatus':
-      return ctx.responseStatus ?? '';
-    case 'email':
-      return ctx.email ?? '';
-    case 'eventSummary':
-      return ctx.eventSummary ?? '';
-    case 'eventId':
-      return ctx.eventId ?? '';
-    case 'calendarId':
-      return ctx.calendarId ?? '';
-    case 'attendanceStatus':
-      return ctx.attendanceStatus ?? '';
-    case 'attendanceMinutes':
-      return ctx.attendanceMinutes ?? '';
-    case 'provider':
-      return ctx.provider ?? '';
-    case 'sessionTitle':
-      return ctx.sessionTitle ?? '';
-    case 'sessionId':
-      return ctx.sessionId ?? '';
-    case 'joinedAt':
-      return ctx.joinedAt ?? '';
-    case 'leftAt':
-      return ctx.leftAt ?? '';
-    default:
-      return '';
-  }
+function fieldValue(ctx: ConditionContext, field: string): string {
+  return ctx[field] ?? '';
 }
 
 function num(v: string): number {

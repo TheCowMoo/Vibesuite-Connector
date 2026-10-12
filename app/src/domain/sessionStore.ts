@@ -1,13 +1,14 @@
 import { randomUUID } from 'node:crypto';
 import { redis } from '../queue/connection';
 import { REDIS_KEYS } from '../config/constants';
-import type { VideoProvider } from '../video/types';
+import type { SessionType, VideoProvider } from '../video/types';
 
 export type SessionStatus = 'pending' | 'synced' | 'failed';
 
 export interface SessionRecord {
   id: string;
   provider: VideoProvider;
+  sessionType?: SessionType;
   externalId: string;
   joinUrl?: string;
   title: string;

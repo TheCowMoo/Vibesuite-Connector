@@ -72,4 +72,50 @@ describe('buildReport', () => {
     expect(r.attendedNotInvited).toHaveLength(1);
     expect(r.attendedNotInvited[0].name).toBe('Anonymous');
   });
+
+  it('computes attendanceRate and carries absentees / registrants / sessionStats / polls / qa', () => {
+    const r = buildReport({
+      ...base,
+      sessionType: 'webinar',
+      sessionTitle: 'Q3 Webinar',
+      invitedEmails: ['a@x.com', 'b@x.com', 'c@x.com', 'd@x.com'],
+      attendees: [
+        { email: 'a@x.com', durationSec: 600 },
+        { email: 'b@x.com', durationSec: 120 },
+      ],
+      absentees: ['c@x.com', 'd@x.com'],
+      registrantCount: 4,
+      sessionStats: { topic: 'Q3 Webinar', total_minutes: '120', participants_count: '2' },
+      polls: [{ id: 'p1' }],
+      qa: [{ question: 'Q?' }],
+    });
+    expect(r.attendanceRate).toBe(0.5);
+    expect(r.registrantCount).toBe(4);
+    expect(r.absentees).toEqual(['c@x.com', 'd@x.com']);
+    expect(r.sessionStats.topic).toBe('Q3 Webinar');
+    expect(r.polls).toHaveLength(1);
+    expect(r.qa).toHaveLength(1);
+    expect(r.sessionType).toBe('webinar');
+  });
+
+  it('carries per-attendee engagement stats', () => {
+    const r = buildReport({
+      ...base,
+      invitedEmails: ['a@x.com'],
+      attendees: [
+        { email: 'a@x.com', durationSec: 300, attentivenessScore: 88, isGuest: false, registrantId: 'reg1', userId: 'u1' },
+      ],
+    });
+    const p = r.attended[0];
+    expect(p.attentivenessScore).toBe(88);
+    expect(p.isGuest).toBe(false);
+    expect(p.registrantId).toBe('reg1');
+    expect(p.userId).toBe('u1');
+  });
+
+  it('reports a zero attendance rate with no invitees', () => {
+    const r = buildReport({ ...base, invitedEmails: [], attendees: [{ email: 'a@x.com', durationSec: 60 }] });
+    expect(r.attendanceRate).toBe(0);
+    expect(r.attendedNotInvited).toHaveLength(1);
+  });
 });

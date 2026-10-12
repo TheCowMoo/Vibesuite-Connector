@@ -14,23 +14,62 @@ import { postWebhook } from '../ghl/webhooks';
 import { matchingRules, type ConditionContext } from '../domain/condition';
 import { tryClaimAttendanceDispatch, releaseAttendanceDispatch } from '../domain/attendanceDispatch';
 
-function buildContext(session: SessionRecord, p: AttendancePerson): ConditionContext {
-  return {
-    email: p.email ?? '',
-    attendanceStatus: p.status,
-    attendanceMinutes: p.durationSec !== undefined ? String(Math.round(p.durationSec / 60)) : '',
-    provider: session.provider,
-    sessionTitle: session.title,
-    sessionId: session.id,
-    joinedAt: p.joinedAt ?? '',
-    leftAt: p.leftAt ?? '',
-  };
+function buildContext(session: SessionRecord, p: AttendancePerson, report: AttendanceReport): ConditionContext {
+  const ctx: ConditionContext = {};
+
+  // Per attendee
+  ctx.email = p.email ?? '';
+  ctx.name = p.name ?? '';
+  ctx.attendanceStatus = p.status;
+  ctx.attendanceMinutes = p.durationSec !== undefined ? String(Math.round(p.durationSec / 60)) : '';
+  ctx.durationSec = p.durationSec !== undefined ? String(p.durationSec) : '';
+  ctx.joinedAt = p.joinedAt ?? '';
+  ctx.leftAt = p.leftAt ?? '';
+  ctx.attentivenessScore = p.attentivenessScore !== undefined ? String(p.attentivenessScore) : '';
+  ctx.isGuest = p.isGuest === undefined ? '' : String(p.isGuest);
+  ctx.registrantId = p.registrantId ?? '';
+  ctx.userId = p.userId ?? '';
+  ctx.participantId = p.participantId ?? '';
+  ctx.customerKey = p.customerKey ?? '';
+
+  // Session
+  ctx.provider = session.provider;
+  ctx.sessionId = session.id;
+  ctx.sessionType = session.sessionType ?? 'meeting';
+  ctx.sessionTitle = session.title;
+  ctx.sessionStart = session.startTime;
+  ctx.sessionEnd = session.endTime;
+
+  const stats = report.sessionStats ?? {};
+  ctx.sessionDurationMin = stats.duration ?? '';
+  ctx.sessionTotalMinutes = stats.total_minutes ?? '';
+  ctx.sessionParticipantsCount = stats.participants_count ?? '';
+  ctx.sessionHostEmail = stats.host_email ?? '';
+  ctx.sessionDept = stats.dept ?? '';
+
+  // Report rollups
+  ctx.invitedCount = String(report.invitedCount);
+  ctx.attendedCount = String(report.attendedCount);
+  ctx.noShowCount = String(report.noShowCount);
+  ctx.registrantCount = String(report.registrantCount ?? 0);
+  ctx.absenteeCount = String((report.absentees || []).length);
+  ctx.attendanceRate = String(Math.round((report.attendanceRate ?? 0) * 100));
+  ctx.pollCount = String((report.polls || []).length);
+  ctx.qaCount = String((report.qa || []).length);
+
+  // Passthrough for anything else the provider reported.
+  for (const k of Object.keys(stats)) {
+    if (ctx[`stat_${k}`] === undefined) ctx[`stat_${k}`] = stats[k];
+  }
+
+  return ctx;
 }
 
 function buildPayload(session: SessionRecord, p: AttendancePerson, report: AttendanceReport): Record<string, unknown> {
   return {
     sessionId: session.id,
     provider: session.provider,
+    sessionType: session.sessionType ?? 'meeting',
     title: session.title,
     email: p.email ?? null,
     name: p.name ?? null,
@@ -38,9 +77,18 @@ function buildPayload(session: SessionRecord, p: AttendancePerson, report: Atten
     joinedAt: p.joinedAt ?? null,
     leftAt: p.leftAt ?? null,
     durationSec: p.durationSec ?? null,
+    attentivenessScore: p.attentivenessScore ?? null,
+    isGuest: p.isGuest ?? null,
+    registrantId: p.registrantId ?? null,
     invitedCount: report.invitedCount,
     attendedCount: report.attendedCount,
     noShowCount: report.noShowCount,
+    registrantCount: report.registrantCount ?? 0,
+    absenteeCount: (report.absentees || []).length,
+    attendanceRate: Math.round((report.attendanceRate ?? 0) * 100),
+    pollCount: (report.polls || []).length,
+    qaCount: (report.qa || []).length,
+    sessionStats: report.sessionStats ?? {},
     timestamp: new Date().toISOString(),
   };
 }
@@ -64,14 +112,21 @@ export async function syncSession(sessionId: string): Promise<AttendanceReport> 
 
   try {
     const provider = getProvider(session.provider);
-    const attendees = await provider.listAttendees(session.externalId);
+    const fetched = await provider.fetch(session.externalId, session.sessionType ?? 'meeting');
 
     const invited = await resolveInvitedEmails(session);
     const report = buildReport({
       sessionId,
       provider: session.provider,
+      sessionTitle: session.title,
+      sessionType: session.sessionType ?? 'meeting',
       invitedEmails: invited,
-      attendees,
+      attendees: fetched.attendees,
+      absentees: fetched.absentees,
+      registrantCount: fetched.registrants,
+      sessionStats: fetched.sessionStats,
+      polls: fetched.polls,
+      qa: fetched.qa,
       minSeconds: env.ATTENDANCE_MIN_SECONDS,
     });
 
@@ -123,7 +178,7 @@ export async function dispatchSession(sessionId: string): Promise<{ dispatched: 
     if (!claimed) continue;
 
     try {
-      const ctx = buildContext(session, person);
+      const ctx = buildContext(session, person, report);
 
       if (mode === 'api' || mode === 'both') {
         if (email) {
