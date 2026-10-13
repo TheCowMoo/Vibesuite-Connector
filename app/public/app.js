@@ -1748,8 +1748,8 @@
     var privileged = isAdmin() || !authState.enabled;
     $$('.topnav__link[data-role="admin"]').forEach(function (b) { b.hidden = !privileged; });
     loadCatalog();
-    showView('connections');
     load();
+    showView('campaigns');
   }
 
   function showAuthGate(mode) {
@@ -2212,6 +2212,7 @@
   var campaignData = [];
   var campLists = [];
   var campSessions = [];
+  var campConnections = [];
   var currentCampaignId = null;
 
   function campStatusChip(status) {
@@ -2265,11 +2266,12 @@
 
   function loadCampaigns() {
     document.getElementById('campaignsList').innerHTML = skeletonCards(2);
-    return Promise.all([api('/api/campaigns'), api('/api/lists'), api('/api/sessions')])
+    return Promise.all([api('/api/campaigns'), api('/api/lists'), api('/api/sessions'), api('/api/connections')])
       .then(function (r) {
         campaignData = r[0].campaigns || [];
         campLists = r[1].lists || [];
         campSessions = r[2].sessions || [];
+        campConnections = r[3].connections || [];
         renderCampaigns(campaignData);
       })
       .catch(function (e) {
@@ -2293,11 +2295,40 @@
     return out;
   }
 
+  /**
+   * What stops a campaign existing at all, in the order the operator has to fix it. The
+   * campaigns tab is the landing view, so this is often the first thing a new install sees —
+   * it has to name what is missing and offer a way to go and fix it.
+   */
+  function campaignPrereq() {
+    var conns = campConnections.length ? campConnections : (state.connections || []);
+    var usable = conns.filter(function (c) { return c.status === 'active'; });
+    if (!usable.length) {
+      return { title: 'No Google accounts linked yet', text: 'A campaign sends from your own Google accounts. Link one first, then come back and create the campaign.', cta: 'Go to Google accounts', view: 'connections' };
+    }
+    var ready = campLists.filter(function (l) { return l.hasResult; });
+    if (!ready.length) {
+      return { title: 'No contact lists ready yet', text: 'Upload your contacts and let the AI sort them into groups. A campaign picks its audience from a sorted list.', cta: 'Go to Contact lists', view: 'lists' };
+    }
+    return null;
+  }
+
   function renderCampaigns(camps) {
     var el = document.getElementById('campaignsList');
     el.innerHTML = '';
+
+    var blocker = campaignPrereq();
+    if (blocker) {
+      el.innerHTML = '<div class="empty"><div class="empty__icon">' + icon('alert') + '</div>' +
+        '<h2 class="empty__title">' + esc(blocker.title) + '</h2>' +
+        '<p class="empty__text">' + esc(blocker.text) + '</p>' +
+        '<button class="btn btn--accent" id="campaignPrereqCta">' + esc(blocker.cta) + '</button></div>';
+      document.getElementById('campaignPrereqCta').onclick = function () { showView(blocker.view); };
+      return;
+    }
+
     if (!camps.length) {
-      el.innerHTML = '<div class="empty"><div class="empty__icon">' + icon('calendar') + '</div><h2 class="empty__title">No bulk invites yet</h2><p class="empty__text">Create one to share a contact list across several Google accounts at a safe pace.</p></div>';
+      el.innerHTML = '<div class="empty"><div class="empty__icon">' + icon('calendar') + '</div><h2 class="empty__title">No campaigns yet</h2><p class="empty__text">Create one to share a contact list across several Google accounts at a safe pace.</p></div>';
       return;
     }
 
@@ -2330,7 +2361,7 @@
 
   function renderCampSenderRows() {
     var el = document.getElementById('campSenders');
-    var conns = state.connections || [];
+    var conns = campConnections.length ? campConnections : (state.connections || []);
     if (!conns.length) {
       el.innerHTML = '<p class="muted">No Google accounts linked yet — link one first.</p>';
       return;
@@ -2402,7 +2433,7 @@
     var start = document.getElementById('campStart').value;
     var end = document.getElementById('campEnd').value;
 
-    if (!name) { toast('Give this bulk invite a name', 'error'); return; }
+    if (!name) { toast('Give this campaign a name', 'error'); return; }
     if (!listId) { toast('Pick a contact list', 'error'); return; }
     if (!summary) { toast('Add a subject line', 'error'); return; }
     if (!start || !end) { toast('Add a start and end time', 'error'); return; }
@@ -2444,7 +2475,7 @@
     withBusy(btn, api('/api/campaigns', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }))
       .then(function () {
         closeModal('newCampaign');
-        toast('Bulk invite created', 'success');
+        toast('Campaign created', 'success');
         loadCampaigns();
       })
       .catch(function (e) { toast(e.message, 'error'); });
@@ -2557,7 +2588,7 @@
 
     if (action === 'campDelete') {
       withBusy(btn, api('/api/campaigns/' + id, { method: 'DELETE' }))
-        .then(function () { toast('Bulk invite deleted', 'success'); loadCampaigns(); })
+        .then(function () { toast('Campaign deleted', 'success'); loadCampaigns(); })
         .catch(function (err) { toast(err.message, 'error'); });
       return;
     }
@@ -2751,6 +2782,10 @@
   /* ---- How it works (single source of truth for the tour too) ---- */
   var HELP_STEPS = [
     {
+      title: 'Start here: a campaign',
+      body: 'A campaign is one event, the people to invite, and the accounts that send it, all in one place. Everything else here feeds into it.'
+    },
+    {
       title: 'Link a Google account',
       body: 'Connect the Google account you want to send from. We keep an eye on its calendar, so every reply comes straight back to us.'
     },
@@ -2759,32 +2794,32 @@
       body: 'Upload a spreadsheet or paste a list of people, then tell the AI how to group them — for example hot, warm and cold.'
     },
     {
-      title: 'Send an invitation',
-      body: 'Choose a time and a contact list. Everyone gets an ordinary Google Calendar invitation, straight from your own account.'
+      title: 'Set what each account may send',
+      body: 'Give each account a limit per day and per hour, choose which hours it may send, and warm a brand new account up slowly.'
+    },
+    {
+      title: 'Send to a big list safely',
+      body: 'A campaign shares one contact list across several accounts and spreads the sending over days, so it never looks like spam.'
     },
     {
       title: 'Watch who replies',
       body: 'Yes, No and Maybe come back on their own, and are copied into GoHighLevel with the status and tags you picked.'
     },
     {
-      title: 'Send to a big list safely',
-      body: 'A bulk invite shares one contact list across several Google accounts and spreads the sending over days, so it never looks like spam.'
-    },
-    {
-      title: 'Set what each account may send',
-      body: 'Give each account a limit per day and per hour, choose which hours it may send, and warm a brand new account up slowly.'
-    },
-    {
       title: 'See who turned up',
       body: 'Link a video call and we match the people who joined against the people you invited, so you know who actually showed up.'
     },
     {
-      title: 'Ask the Assistant',
-      body: 'The Assistant looks at your own numbers and suggests small changes. Nothing changes until you press Do it.'
+      title: 'Send a one-off invitation',
+      body: 'For a single event you can skip the campaign and invite one contact list from one account straight away.'
     },
     {
       title: 'Teach the AI your words',
       body: 'Add notes and documents so anything the AI writes back sounds like you.'
+    },
+    {
+      title: 'Ask the Assistant',
+      body: 'The Assistant looks at your own numbers and suggests small changes. Nothing changes until you press Do it.'
     },
     {
       title: 'Bring your team in',
@@ -2794,16 +2829,17 @@
 
   /* Each tour stop reuses the matching How-it-works text, so the two can never drift. */
   var TOUR_STEPS = [
-    { help: 0, view: 'connections', target: '#newConnectionBtn', placement: 'bottom' },
-    { help: 1, view: 'lists', target: '#newListBtn', placement: 'bottom' },
-    { help: 2, view: 'invites', target: '#inviteSend', placement: 'top' },
-    { help: 3, view: 'invites', target: '[data-view="invites"]', placement: 'bottom' },
-    { help: 4, view: 'campaigns', target: '#campaignNew', placement: 'bottom' },
-    { help: 5, view: 'senders', target: '#sendersList', placement: 'bottom', adminOnly: true },
+    { help: 0, view: 'campaigns', target: '#campaignNew', placement: 'bottom' },
+    { help: 1, view: 'connections', target: '#newConnectionBtn', placement: 'bottom' },
+    { help: 2, view: 'lists', target: '#newListBtn', placement: 'bottom' },
+    { help: 3, view: 'senders', target: '#sendersList', placement: 'bottom', adminOnly: true },
+    { help: 4, view: 'campaigns', target: '[data-view="campaigns"]', placement: 'bottom' },
+    { help: 5, view: 'invites', target: '[data-view="invites"]', placement: 'bottom' },
     { help: 6, view: 'attendance', target: '[data-view="attendance"]', placement: 'bottom' },
-    { help: 7, view: 'advisor', target: '#advisorAnalyze', placement: 'bottom', adminOnly: true },
+    { help: 7, view: 'invites', target: '#inviteSend', placement: 'top' },
     { help: 8, view: 'knowledge', target: '#newKnowledgeBtn', placement: 'bottom' },
-    { help: 9, view: 'team', target: '#newMemberBtn', placement: 'bottom', adminOnly: true }
+    { help: 9, view: 'advisor', target: '#advisorAnalyze', placement: 'bottom', adminOnly: true },
+    { help: 10, view: 'team', target: '#newMemberBtn', placement: 'bottom', adminOnly: true }
   ];
 
   function openHowItWorks() {

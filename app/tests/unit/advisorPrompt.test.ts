@@ -28,7 +28,7 @@ function mailbox(over: Partial<MailboxSnapshot> = {}): MailboxSnapshot {
 
 function campaign(over: Partial<CampaignSnapshot> = {}): CampaignSnapshot {
   return {
-    label: 'Bulk invite 1',
+    label: 'Campaign 1',
     status: 'active',
     spread: 'even',
     mailboxes: 2,

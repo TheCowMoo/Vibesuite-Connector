@@ -67,7 +67,7 @@ export function clampAdvisorAction(input: AdvisorAction | undefined): ClampResul
   if (!isAdvisorActionKind(kind)) return { ok: false, error: `That change is not one the assistant is allowed to make (${kind}).` };
 
   const target = typeof input?.target === 'string' ? input.target.trim() : '';
-  if (!target) return { ok: false, error: 'that suggestion does not say which account or bulk invite it means' };
+  if (!target) return { ok: false, error: 'that suggestion does not say which account or campaign it means' };
 
   switch (kind) {
     case 'set_sender_daily_cap': {
@@ -114,7 +114,7 @@ export function clampAdvisorAction(input: AdvisorAction | undefined): ClampResul
 
     case 'set_campaign_status': {
       const status = String(input?.status ?? '');
-      if (status !== 'active' && status !== 'paused') return { ok: false, error: 'a bulk invite can only be turned on or paused' };
+      if (status !== 'active' && status !== 'paused') return { ok: false, error: 'a campaign can only be turned on or paused' };
       return { ok: true, action: { kind, target, status }, description: `${target}: status → ${status}` };
     }
 

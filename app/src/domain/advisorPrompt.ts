@@ -67,7 +67,7 @@ export function localRecommendations(snapshot: AdvisorSnapshot): Recommendation[
       push({
         title: `${m.label} is paused`,
         severity: 'warning',
-        rationale: `${m.label} is turned off, so your bulk invites are running on fewer accounts.`,
+        rationale: `${m.label} is turned off, so your campaigns are running on fewer accounts.`,
         impact: 'Turning it back on gives you more sending capacity straight away.',
         action: { kind: 'resume_sender', target: m.label },
       });

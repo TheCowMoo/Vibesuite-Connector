@@ -127,7 +127,7 @@ export async function getAdvisorState(): Promise<AdvisorState> {
 
 /**
  * Snapshot -> AI (when configured) + built-in rules -> stored analysis.
- * The model never sees identities, only Mailbox A/B/C and Campaign 1/2/3 labels.
+ * The model never sees identities, only Account A/B/C and Campaign 1/2/3 labels.
  */
 export async function analyzeAdvisor(): Promise<AdvisorAnalysis> {
   const { snapshot, targets } = await collectAdvisorSnapshot();
@@ -215,7 +215,7 @@ async function applySenderAction(action: AdvisorAction, connectionId: string): P
 
 async function applyCampaignAction(action: AdvisorAction, campaignId: string): Promise<void> {
   const camp = await getCampaign(campaignId);
-  if (!camp) throw new Error('that bulk invite no longer exists');
+  if (!camp) throw new Error('that campaign no longer exists');
 
   if (action.kind === 'set_campaign_status') {
     camp.status = action.status === 'active' ? 'active' : 'paused';
@@ -223,7 +223,7 @@ async function applyCampaignAction(action: AdvisorAction, campaignId: string): P
     const value = action.value as number;
     camp.senders = camp.senders.map((s) => ({ ...s, priority: value }));
   } else {
-    throw new Error('that change cannot be applied to a bulk invite');
+    throw new Error('that change cannot be applied to a campaign');
   }
 
   await saveCampaign(camp);

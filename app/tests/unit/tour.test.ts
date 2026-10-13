@@ -90,4 +90,31 @@ describe('guided tour wiring', () => {
       ).toBe(true);
     }
   });
+
+  /*
+   * Campaigns is the landing view by deliberate decision: it is the only object that binds an
+   * event, an audience and a set of sending accounts together. These three assertions are what
+   * stop a later nav reshuffle from quietly demoting it back to just another tab.
+   */
+  it('keeps Campaigns as the first tab', () => {
+    const firstTab = indexHtml.match(/class="topnav__link[^"]*"\s+data-view="([^"]+)"/);
+    expect(firstTab?.[1]).toBe('campaigns');
+  });
+
+  it('keeps Campaigns as the landing view', () => {
+    const active = indexHtml.match(/class="topnav__link is-active"\s+data-view="([^"]+)"/);
+    expect(active?.[1]).toBe('campaigns');
+
+    // Exactly one section is open at load, and it is the campaigns one.
+    const open = [...indexHtml.matchAll(/<section id="view-([a-z]+)" class="view"( hidden)?>/g)]
+      .filter((m) => !m[2])
+      .map((m) => m[1]);
+    expect(open).toEqual(['campaigns']);
+
+    expect(appJs).toContain("showView('campaigns')");
+  });
+
+  it('opens the tour on the landing view', () => {
+    expect(steps[0]?.view).toBe('campaigns');
+  });
 });

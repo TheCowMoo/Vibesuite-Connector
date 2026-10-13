@@ -121,7 +121,7 @@ The Advisor tab is advisory-only: `analyzeAdvisor()` builds a **PII-free aggrega
 asks the configured AI provider for recommendations, and stores the result. It never changes
 anything by itself — every change requires the operator to press Apply.
 
-`collectAdvisorSnapshot()` replaces identities with labels: connections become `Mailbox A/B/C` and
+`collectAdvisorSnapshot()` replaces identities with labels: connections become `Account A/B/C` and
 campaigns become `Campaign 1/2/3`. The snapshot carries mailbox load settings, today's counters, a
 14-day daily history and per-campaign funnel aggregates. It deliberately omits addresses, display
 names, domains, campaign/list/session names, event titles and copy, recipient records and any
@@ -184,6 +184,28 @@ follow-up" is grounded on the stored snapshot and is ephemeral — the server ke
     GHL errors, watch renewals.
 
 
+## Where the app starts
+
+`Campaigns` is the **landing view** (`startPanel()` calls `load()` then `showView('campaigns')`) and
+the first nav tab, because it is the only object that binds an event, an audience, a set of sending
+accounts and an optional video call together — and the only one that owns per-recipient state
+(`campaign:{id}:recipients`).
+
+It **references** rather than owns everything around it, which matters when reading the code:
+
+- A **connection** is shared. Its `sender:profile` caps are global, so every campaign drawing on
+  that mailbox shares one counter; a campaign's `quota`/`share` only split *within that campaign*
+  (`allocateBatch()` then arbitrates one mailbox's allowance across campaigns).
+- A **contact list** records everyone it has ever invited in `list:{id}:invited`, shared with the
+  one-off Invitations path. A person is therefore invited **once per contact list** across all
+  campaigns — not once per campaign.
+- `startCampaign()` reads the list's segmentation, so deleting a list leaves a campaign that cannot
+  start; deleting a session only drops the join link.
+
+Because the tab is reachable before anything exists, `campaignPrereq()` renders a card naming the
+missing piece (no active account, then no sorted list) with a button through to the right tab. It
+deliberately leaves `#campaignNew` visible, because that is the tour's opening target.
+
 ## Words we use in the UI
 
 The interface deliberately uses plain words rather than the engineering vocabulary. The data model,
@@ -196,7 +218,7 @@ API routes and Redis keys keep their original names, so use this table when read
 | Documents | `knowledge`, `/api/knowledge` |
 | Invitations | `invite`, `/api/invites`, `list:{id}:invited` |
 | Who attended | `session`, `attendance`, `/api/sessions`, `attendance:{sessionId}` |
-| Bulk invites | `campaign`, `/api/campaigns`, `campaign:{id}` |
+| Campaigns | `campaign`, `/api/campaigns`, `campaign:{id}` |
 | Sending accounts | `sender`, `/api/senders`, `sender:*` |
 | Assistant | `advisor`, `/api/advisor`, `advisor:analysis` |
 | People | `team`, `users`, `/api/team` |
@@ -225,7 +247,7 @@ Two rules keep this safe, and both are load-bearing:
 
 Two pieces of in-app help keep the plain wording explainable:
 
-- **How it works** (`#howItWorks`) is a 10-item prose list driven by the `HELP_STEPS` array in
+- **How it works** (`#howItWorks`) is an 11-item prose list driven by the `HELP_STEPS` array in
   `app.js`.
 - **The guided tour** (`#tourRoot`) is a hand-rolled spotlight walkthrough: a fixed overlay whose
   cutout is positioned to the target's `getBoundingClientRect()`, dimming the rest of the page with
@@ -233,8 +255,9 @@ Two pieces of in-app help keep the plain wording explainable:
   (it just won't remember that you finished).
 
 `TOUR_STEPS` holds only `view` + `target` + `placement` and reuses `HELP_STEPS` by index, so the
-tour text and the written guide cannot drift apart. Stops that need a tab call `showView()` and
-re-measure on the next frame via `requestAnimationFrame`. Admin-only stops carry `adminOnly: true`
+tour text and the written guide cannot drift apart. The tour opens on **Campaigns** — the landing
+view — and walks the prerequisites after it. Stops that need a tab call `showView()` and re-measure
+on the next frame via `requestAnimationFrame`. Admin-only stops carry `adminOnly: true`
 and are filtered out for members, matching the nav gating. A stop whose target is missing or
 zero-sized (hidden tab, empty panel) is skipped rather than floating a tooltip at nothing.
 
