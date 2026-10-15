@@ -43,7 +43,7 @@
     if (name === 'team' && authState.enabled && !isAdmin()) name = 'connections';
     if (name === 'senders' && authState.enabled && !isAdmin()) name = 'connections';
     if (name === 'advisor' && authState.enabled && !isAdmin()) name = 'connections';
-    $$('.topnav__link').forEach(function (b) { b.classList.toggle('is-active', b.dataset.view === name); });
+    $$('.rail__link').forEach(function (b) { b.classList.toggle('is-active', b.dataset.view === name); });
     $('#view-connections').hidden = name !== 'connections';
     $('#view-lists').hidden = name !== 'lists';
     $('#view-knowledge').hidden = name !== 'knowledge';
@@ -64,7 +64,7 @@
     if (name === 'senders') loadSenders();
     if (name === 'team') loadTeam();
   }
-  $$('.topnav__link').forEach(function (btn) {
+  $$('.rail__link').forEach(function (btn) {
     btn.addEventListener('click', function () { showView(btn.dataset.view); });
   });
 
@@ -1746,7 +1746,7 @@
       document.getElementById('accountBtn').textContent = initials(authState.user.name || authState.user.email);
     }
     var privileged = isAdmin() || !authState.enabled;
-    $$('.topnav__link[data-role="admin"]').forEach(function (b) { b.hidden = !privileged; });
+    $$('.rail__link[data-role="admin"]').forEach(function (b) { b.hidden = !privileged; });
     loadCatalog();
     load();
     showView('campaigns');
@@ -2833,9 +2833,9 @@
     { help: 1, view: 'connections', target: '#newConnectionBtn', placement: 'bottom' },
     { help: 2, view: 'lists', target: '#newListBtn', placement: 'bottom' },
     { help: 3, view: 'senders', target: '#sendersList', placement: 'bottom', adminOnly: true },
-    { help: 4, view: 'campaigns', target: '[data-view="campaigns"]', placement: 'bottom' },
-    { help: 5, view: 'invites', target: '[data-view="invites"]', placement: 'bottom' },
-    { help: 6, view: 'attendance', target: '[data-view="attendance"]', placement: 'bottom' },
+    { help: 4, view: 'campaigns', target: '[data-view="campaigns"]', placement: 'right' },
+    { help: 5, view: 'invites', target: '[data-view="invites"]', placement: 'right' },
+    { help: 6, view: 'attendance', target: '[data-view="attendance"]', placement: 'right' },
     { help: 7, view: 'invites', target: '#inviteSend', placement: 'top' },
     { help: 8, view: 'knowledge', target: '#newKnowledgeBtn', placement: 'bottom' },
     { help: 9, view: 'advisor', target: '#advisorAnalyze', placement: 'bottom', adminOnly: true },
@@ -2879,6 +2879,21 @@
     var vw = window.innerWidth;
     var vh = window.innerHeight;
     var gap = 14;
+
+    // The rail is vertical, so most stops want the card beside the target, not below it. Below the
+    // mobile breakpoint the rail lies flat along the top, so "beside" becomes "below" again.
+    if (placement === 'right' && vw <= 900) placement = 'bottom';
+
+    if (placement === 'right' || placement === 'left') {
+      var side = placement === 'right' ? rect.right + gap : rect.left - cw - gap;
+      // Flip to the other side rather than letting the card run off the edge.
+      if (side + cw > vw - 10) side = rect.left - cw - gap;
+      if (side < 10) side = rect.right + gap;
+
+      card.style.left = Math.min(Math.max(10, side), Math.max(10, vw - cw - 10)) + 'px';
+      card.style.top = Math.min(Math.max(10, rect.top + rect.height / 2 - ch / 2), Math.max(10, vh - ch - 10)) + 'px';
+      return;
+    }
 
     var top = placement === 'top' ? rect.top - ch - gap : rect.bottom + gap;
     if (top < 10) top = rect.bottom + gap;

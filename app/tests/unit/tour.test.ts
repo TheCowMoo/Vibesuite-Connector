@@ -15,6 +15,7 @@ interface TourStep {
   help: number;
   view: string;
   target: string;
+  placement: string;
 }
 
 function parseTourSteps(): TourStep[] {
@@ -22,10 +23,10 @@ function parseTourSteps(): TourStep[] {
   if (!block) return [];
 
   const out: TourStep[] = [];
-  const re = /\{\s*help:\s*(\d+),\s*view:\s*'([^']+)',\s*target:\s*'([^']+)'/g;
+  const re = /\{\s*help:\s*(\d+),\s*view:\s*'([^']+)',\s*target:\s*'([^']+)',\s*placement:\s*'([^']+)'/g;
   let m: RegExpExecArray | null;
   while ((m = re.exec(block[1])) !== null) {
-    out.push({ help: Number(m[1]), view: m[2], target: m[3] });
+    out.push({ help: Number(m[1]), view: m[2], target: m[3], placement: m[4] });
   }
   return out;
 }
@@ -97,12 +98,12 @@ describe('guided tour wiring', () => {
    * stop a later nav reshuffle from quietly demoting it back to just another tab.
    */
   it('keeps Campaigns as the first tab', () => {
-    const firstTab = indexHtml.match(/class="topnav__link[^"]*"\s+data-view="([^"]+)"/);
+    const firstTab = indexHtml.match(/class="rail__link[^"]*"\s+data-view="([^"]+)"/);
     expect(firstTab?.[1]).toBe('campaigns');
   });
 
   it('keeps Campaigns as the landing view', () => {
-    const active = indexHtml.match(/class="topnav__link is-active"\s+data-view="([^"]+)"/);
+    const active = indexHtml.match(/class="rail__link is-active"\s+data-view="([^"]+)"/);
     expect(active?.[1]).toBe('campaigns');
 
     // Exactly one section is open at load, and it is the campaigns one.
@@ -116,5 +117,38 @@ describe('guided tour wiring', () => {
 
   it('opens the tour on the landing view', () => {
     expect(steps[0]?.view).toBe('campaigns');
+  });
+
+  it('keeps every section reachable from the rail', () => {
+    const views = [...indexHtml.matchAll(/class="rail__link[^"]*" data-view="([^"]+)"/g)].map((m) => m[1]);
+    expect(views).toEqual([
+      'campaigns',
+      'invites',
+      'connections',
+      'lists',
+      'senders',
+      'knowledge',
+      'attendance',
+      'advisor',
+      'team',
+      'settings',
+    ]);
+  });
+
+  it('keeps the rail groups open, because the tour points at their children', () => {
+    const groups = [...indexHtml.matchAll(/class="rail__group">([^<]+)</g)].map((m) => m[1]);
+    expect(groups).toEqual(['Set up', 'Insights', 'Workspace']);
+
+    // A collapsing group would make its children zero-sized, and tourPaint() treats that as
+    // "nothing to point at" — so the stop would vanish silently instead of failing loudly.
+    expect(indexHtml).not.toContain('<details');
+  });
+
+  it('points rail stops beside the target, not below it', () => {
+    const railStops = steps.filter((s) => s.target.startsWith('[data-view='));
+    expect(railStops.length).toBeGreaterThan(0);
+    for (const step of railStops) {
+      expect(step.placement, `${step.target} is in the vertical rail`).toBe('right');
+    }
   });
 });

@@ -33,6 +33,9 @@
   --shadow-sm: 0 1px 2px rgba(13, 22, 61, 0.05);
   --shadow-md: 0 16px 40px rgba(13, 22, 61, 0.18);
   --font: 'Roboto', 'Open Sans', system-ui, -apple-system, sans-serif;
+
+  --topbar-h: 56px;
+  --rail-w: 224px;
 }
 
 * { box-sizing: border-box; }
@@ -56,8 +59,8 @@ p { margin: 0 0 1rem; }
 .hint { color: var(--ink-muted); font-size: 0.85rem; margin-bottom: 1rem; }
 .spacer { flex: 1; }
 
-/* ---- Top nav ---- */
-.topnav {
+/* ---- App shell: slim top bar + left rail ---- */
+.topbar {
   background: var(--navy);
   color: var(--white);
   position: sticky;
@@ -65,43 +68,76 @@ p { margin: 0 0 1rem; }
   z-index: 20;
   box-shadow: var(--shadow-sm);
 }
-.topnav__inner {
-  max-width: 1200px;
-  margin: 0 auto;
+.topbar__inner {
   display: flex;
   align-items: center;
   gap: 1.5rem;
-  padding: 0 1.5rem;
-  height: 60px;
+  padding: 0 1.25rem;
+  height: var(--topbar-h);
 }
 .brand { display: flex; align-items: center; }
 .brand__logo { height: 28px; width: auto; display: block; }
-.topnav__nav { display: flex; gap: 0.25rem; }
-.topnav__link {
+.topbar__right { margin-left: auto; display: flex; align-items: center; gap: 0.75rem; }
+
+.shell {
+  display: grid;
+  grid-template-columns: var(--rail-w) minmax(0, 1fr);
+  min-height: calc(100vh - var(--topbar-h));
+}
+
+/* ---- Left rail ---- */
+.rail {
+  background: var(--navy);
+  color: var(--white);
+}
+/* The rail column stretches to the full row height so its navy never leaves a gap; the inner
+   nav sticks instead, so it stays put while a long page scrolls. */
+.rail__nav {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  position: sticky;
+  top: var(--topbar-h);
+  max-height: calc(100vh - var(--topbar-h));
+  overflow-y: auto;
+  padding: 0.85rem 0.75rem 1.5rem;
+}
+.rail__group {
+  padding: 0.95rem 0.7rem 0.4rem;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.45);
+}
+.rail__link {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  text-align: left;
   background: none;
   border: none;
   color: rgba(255, 255, 255, 0.75);
   font: inherit;
   font-weight: 500;
-  font-size: 0.95rem;
-  padding: 0.5rem 0.9rem;
+  font-size: 0.9rem;
+  padding: 0.5rem 0.7rem;
   cursor: pointer;
   border-radius: 6px;
   position: relative;
 }
-.topnav__link:hover { color: #fff; background: rgba(255, 255, 255, 0.06); }
-.topnav__link.is-active { color: var(--yellow); }
-.topnav__link.is-active::after {
+.rail__link:hover { color: #fff; background: rgba(255, 255, 255, 0.06); }
+.rail__link.is-active { color: var(--yellow); background: rgba(255, 255, 255, 0.09); }
+.rail__link.is-active::after {
   content: '';
   position: absolute;
-  left: 0.9rem;
-  right: 0.9rem;
-  bottom: 0.15rem;
-  height: 2px;
+  left: 0;
+  top: 0.45rem;
+  bottom: 0.45rem;
+  width: 3px;
   background: var(--yellow);
-  border-radius: 2px;
+  border-radius: 0 2px 2px 0;
 }
-.topnav__right { margin-left: auto; display: flex; align-items: center; gap: 0.75rem; }
 .avatar {
   width: 32px; height: 32px; border-radius: 50%;
   background: var(--yellow);
@@ -548,14 +584,14 @@ fieldset.field legend { margin-bottom: 0.4rem; }
 .tour__foot { display: flex; align-items: center; gap: 0.4rem; margin-top: 0.9rem; }
 
 /* ---- Help button + How it works ---- */
-.topnav__help {
+.topbar__help {
   width: 32px; height: 32px; border-radius: 50%;
   display: inline-flex; align-items: center; justify-content: center;
   border: 1px solid rgba(255, 255, 255, 0.3); background: transparent;
   color: var(--white); font: inherit; font-weight: 700; font-size: 0.95rem;
   cursor: pointer; padding: 0;
 }
-.topnav__help:hover { background: rgba(255, 255, 255, 0.14); }
+.topbar__help:hover { background: rgba(255, 255, 255, 0.14); }
 
 .help-step { display: flex; gap: 0.75rem; padding: 0.65rem 0; border-bottom: 1px solid var(--line); }
 .help-step:last-child { border-bottom: 0; }
@@ -586,7 +622,7 @@ fieldset.field legend { margin-bottom: 0.4rem; }
 }
 @media (max-width: 560px) {
   .stats { grid-template-columns: 1fr; }
-  .topnav__inner { gap: 0.75rem; padding: 0 1rem; }
+  .topbar__inner { gap: 0.75rem; padding: 0 1rem; }
   .conn { flex-direction: column; align-items: stretch; }
   .conn__actions { justify-content: flex-start; }
   .page-head { align-items: flex-start; flex-direction: column; }
@@ -598,7 +634,6 @@ fieldset.field legend { margin-bottom: 0.4rem; }
 .ico svg { width: 1em; height: 1em; display: block; }
 .nav-ico { display: inline-flex; align-items: center; justify-content: center; margin-right: 0.45rem; }
 .nav-ico svg { width: 16px; height: 16px; display: block; }
-.topnav__link { display: inline-flex; align-items: center; }
 .icon-btn:focus-visible, .menu__item:focus-visible, .dropzone:focus-visible, .toast__close:focus-visible {
   outline: 2px solid var(--yellow); outline-offset: 2px;
 }
@@ -733,13 +768,29 @@ select:focus { outline: none; border-color: var(--royal); box-shadow: 0 0 0 3px 
 .summary__value { font-weight: 700; color: var(--navy); font-variant-numeric: tabular-nums; }
 .summary__label { color: var(--ink-muted); font-size: 0.82rem; }
 
-/* ---- Nav overflow on mobile ---- */
-.topnav__nav { overflow-x: auto; scrollbar-width: none; }
-.topnav__nav::-webkit-scrollbar { display: none; }
+/* ---- Rail collapses to a horizontal strip on narrow screens ---- */
+@media (max-width: 900px) {
+  .shell { grid-template-columns: 1fr; min-height: 0; }
+  .rail__nav {
+    flex-direction: row;
+    gap: 0.15rem;
+    max-height: none;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding: 0.4rem 0.75rem;
+    scrollbar-width: none;
+  }
+  .rail__nav::-webkit-scrollbar { display: none; }
+  .rail__group { display: none; }
+  .rail__link { width: auto; white-space: nowrap; }
+  .rail__link.is-active::after {
+    left: 0.7rem; right: 0.7rem; top: auto; bottom: 0.15rem;
+    width: auto; height: 2px; border-radius: 2px;
+  }
+}
 
 @media (max-width: 560px) {
-  .topnav__inner { height: 54px; }
-  .topnav__link { padding: 0.45rem 0.6rem; font-size: 0.85rem; }
-  .topnav__link .nav-ico { margin-right: 0; }
+  .rail__link { padding: 0.45rem 0.55rem; font-size: 0.85rem; }
+  .rail__link .nav-ico { margin-right: 0; }
   .modal { max-height: 100vh; border-radius: 0; }
 }

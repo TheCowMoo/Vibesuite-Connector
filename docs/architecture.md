@@ -206,6 +206,19 @@ Because the tab is reachable before anything exists, `campaignPrereq()` renders 
 missing piece (no active account, then no sorted list) with a button through to the right tab. It
 deliberately leaves `#campaignNew` visible, because that is the tour's opening target.
 
+### The shell
+
+Navigation lives in a **left rail** (`.rail`, `--rail-w: 224px`) grouped by plain labels: Campaigns
+and Invitations first, then *Set up* (Google accounts, Contact lists, Sending accounts, Documents),
+*Insights* (Who attended, Assistant) and *Workspace* (People, Settings). A slim `.topbar` carries
+only the brand and the help/account menus. Below 900px the rail flattens into a horizontal scrolling
+strip and the group labels hide.
+
+The groups are **labels, not disclosure widgets**, and that is load-bearing: the guided tour targets
+rail buttons by `[data-view]`, and a collapsed group would make its children zero-sized — which
+`tourPaint()` reads as "nothing to point at" and skips silently. Keep the groups open and every stop
+stays real.
+
 ## Words we use in the UI
 
 The interface deliberately uses plain words rather than the engineering vocabulary. The data model,
@@ -256,10 +269,12 @@ Two pieces of in-app help keep the plain wording explainable:
 
 `TOUR_STEPS` holds only `view` + `target` + `placement` and reuses `HELP_STEPS` by index, so the
 tour text and the written guide cannot drift apart. The tour opens on **Campaigns** — the landing
-view — and walks the prerequisites after it. Stops that need a tab call `showView()` and re-measure
-on the next frame via `requestAnimationFrame`. Admin-only stops carry `adminOnly: true`
-and are filtered out for members, matching the nav gating. A stop whose target is missing or
-zero-sized (hidden tab, empty panel) is skipped rather than floating a tooltip at nothing.
+view — and walks the prerequisites after it. `placement` follows the shell: rail stops use `'right'`
+so the card sits beside the item, page-content stops use `'top'`/`'bottom'`. `tourPlace()` degrades
+a `'right'` stop to `'bottom'` below 900px, where the rail lies flat. Stops that need a tab call
+`showView()` and re-measure on the next frame via `requestAnimationFrame`. Admin-only stops carry
+`adminOnly: true` and are filtered out for members, matching the rail gating. A stop whose target is
+missing or zero-sized (closed group, empty panel) is skipped rather than floating a tooltip at nothing.
 
 `tests/unit/tour.test.ts` reads the shipped `app.js` and `index.html` and asserts that every tour
 target exists in the markup, every tab exists, and every `help` index is real — which is what
