@@ -6,7 +6,8 @@ import { getAllKnowledge } from '../../domain/knowledgeStore';
 import { retrieveContext } from '../../domain/retrieval';
 import { generateJson } from '../../lib/ai';
 import { createInviteEvent } from '../../google/events';
-import { extractRecipients, chunk, hasTimeZoneOffset } from '../../domain/invite';
+import { chunk, hasTimeZoneOffset } from '../../domain/invite';
+import { buildAudience, describeEmptyAudience } from '../../domain/audience';
 import { createInviteRecord, listInvites, deleteInvite, getInvitedEmails, markInvited } from '../../domain/inviteStore';
 import { withRetry, sleep } from '../../lib/backoff';
 import { env } from '../../config/env';
@@ -65,17 +66,14 @@ export async function inviteRoutes(app: FastifyInstance): Promise<void> {
       return;
     }
 
-    const plan = extractRecipients(rec.result, b.segments);
-    const invited = await getInvitedEmails(b.listId);
-    const alreadyInvited = plan.emails.filter((e) => invited.has(e));
-    const emails = plan.emails.filter((e) => !invited.has(e));
+    const audience = buildAudience(rec.result, b.segments, await getInvitedEmails(b.listId));
 
     return {
-      emails,
-      perSegment: plan.perSegment,
-      duplicatesRemoved: plan.duplicatesRemoved,
-      invalid: plan.invalid,
-      alreadyInvited,
+      emails: audience.emails,
+      perSegment: audience.perSegment,
+      duplicatesRemoved: audience.duplicatesRemoved,
+      invalid: audience.invalid,
+      alreadyInvited: audience.alreadyInvited,
     };
   });
 
@@ -147,12 +145,12 @@ export async function inviteRoutes(app: FastifyInstance): Promise<void> {
       return;
     }
 
-    const plan = extractRecipients(list.result, b.segments);
     const invited = b.force ? new Set<string>() : await getInvitedEmails(b.listId);
-    const emails = plan.emails.filter((e) => !invited.has(e));
+    const audience = buildAudience(list.result, b.segments, invited);
+    const emails = audience.emails;
 
     if (!emails.length) {
-      reply.code(400).send({ error: 'no recipients to invite (all already invited or no valid emails). Use force to resend.' });
+      reply.code(400).send({ error: `${describeEmptyAudience(audience)} — use force to resend if you meant to.` });
       return;
     }
 
@@ -182,7 +180,7 @@ export async function inviteRoutes(app: FastifyInstance): Promise<void> {
     const record = await createInviteRecord({
       listId: b.listId,
       listName: list.name,
-      segments: b.segments && b.segments.length ? b.segments : plan.perSegment.map((s) => s.name),
+      segments: b.segments && b.segments.length ? b.segments : audience.perSegment.map((s) => s.name),
       connectionId: conn.id,
       connectionName: conn.name,
       summary: ev.summary,
@@ -201,9 +199,9 @@ export async function inviteRoutes(app: FastifyInstance): Promise<void> {
       sent: sentEmails.length,
       failed: emails.length - sentEmails.length,
       skipped: {
-        duplicatesRemoved: plan.duplicatesRemoved,
-        invalid: plan.invalid.length,
-        alreadyInvited: plan.emails.length - emails.length,
+        duplicatesRemoved: audience.duplicatesRemoved,
+        invalid: audience.invalid.length,
+        alreadyInvited: audience.alreadyInvited.length,
       },
     };
   });

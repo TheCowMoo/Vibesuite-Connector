@@ -2380,6 +2380,7 @@
     var el = document.getElementById('campSegments');
     if (!id) {
       el.innerHTML = '<span class="muted">no list selected</span>';
+      refreshCampAudience();
       return;
     }
     el.innerHTML = '<span class="muted">loading…</span>';
@@ -2392,10 +2393,57 @@
               return '<label class="daychk"><input type="checkbox" data-seg="' + esc(s.name) + '" /><span>' + esc(s.name) + ' (' + n + ')</span></label>';
             }).join('')
           : '<span class="muted">This list has no segments yet — run Segment first.</span>';
+        $$('#campSegments input[data-seg]').forEach(function (cb) {
+          cb.addEventListener('change', refreshCampAudience);
+        });
+        refreshCampAudience();
       })
       .catch(function () {
         el.innerHTML = '<span class="muted">Could not load segments.</span>';
+        refreshCampAudience();
       });
+  }
+
+  function selectedCampaignSegments() {
+    var out = [];
+    $$('#campSegments input[data-seg]').forEach(function (cb) { if (cb.checked) out.push(cb.dataset.seg); });
+    return out;
+  }
+
+  /**
+   * Show what a campaign would actually reach, before it is created.
+   *
+   * A campaign draws its audience from `list:{id}:invited`, which is shared with the one-off
+   * Invitations tab — so a list that has already been used comes back partly, or entirely, empty.
+   * Saying so here is the difference between a clear answer and a bare "no recipients" error after
+   * you press Begin sending.
+   *
+   * Reuses /api/invites/preview on purpose: it runs the same buildAudience() the campaign start
+   * does, so the numbers shown and the numbers frozen cannot disagree.
+   */
+  function refreshCampAudience() {
+    var el = document.getElementById('campAudience');
+    if (!el) return;
+    var listId = document.getElementById('campList').value;
+    if (!listId) {
+      el.innerHTML = '<span class="muted">Pick a contact list to see who will be invited.</span>';
+      return;
+    }
+    api('/api/invites/preview', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ listId: listId, segments: selectedCampaignSegments() }) })
+      .then(function (d) {
+        var html = pill('people', d.emails.length, d.emails.length ? 'ok' : 'danger');
+        if (d.duplicatesRemoved) html += pill('duplicates', d.duplicatesRemoved, 'neutral');
+        if (d.invalid && d.invalid.length) html += pill('invalid', d.invalid.length, 'warn');
+        if (d.alreadyInvited && d.alreadyInvited.length) html += pill('already invited', d.alreadyInvited.length, 'warn');
+        if (!d.emails.length) {
+          html += ' <span class="muted" style="font-size:0.85rem">' +
+            (d.alreadyInvited && d.alreadyInvited.length
+              ? 'Everyone on this list has already been invited.'
+              : 'Nobody new to invite on this list.') + '</span>';
+        }
+        el.innerHTML = html;
+      })
+      .catch(function (e) { el.textContent = 'Could not check this list: ' + e.message; });
   }
 
   function openCampaignWizard() {
@@ -2496,14 +2544,40 @@
       });
   }
 
+  /**
+   * What to tell the operator about a campaign's pace. A draft has nothing frozen and no queue yet,
+   * so it needs its own wording — the "check Sending accounts" line is only true once a campaign is
+   * actually running. Before this, every not-yet-started campaign was told to go and debug its
+   * sending accounts, which was the wrong diagnosis entirely.
+   */
+  function campaignPlanText(c, plan) {
+    var total = plan && plan.total ? plan.total : 0;
+    var days = plan && plan.totalDays ? plan.totalDays : 0;
+    var dayWord = days === 1 ? 'day' : 'days';
+
+    if (c.status === 'draft') {
+      if (!total) {
+        return 'Not started yet, and this list has nobody new to invite. Everyone on it may already have been invited, or it has not been sorted into groups yet.';
+      }
+      if (!days) {
+        return 'Not started yet. <strong>' + total + '</strong> are ready to invite, but nothing can send at the moment — check the <strong>Sending accounts</strong> tab.';
+      }
+      return 'Not started yet. <strong>' + total + '</strong> ' + (total === 1 ? 'person' : 'people') +
+        ' are ready to invite — about <strong>' + days + '</strong> ' + dayWord + ', done by ' + esc(prettyDate(plan.finishDate)) + '.';
+    }
+
+    if (days) {
+      return 'At this pace it will finish in about <strong>' + days + '</strong> ' + dayWord +
+        ' — around ' + plan.dailyCapacity + ' a day, done by ' + esc(prettyDate(plan.finishDate)) + '.';
+    }
+    return 'Nothing can send right now — check the <strong>Sending accounts</strong> tab. An account may be paused, resting, or outside its sending hours.';
+  }
+
   function renderCampaignDetail(c, plan, stats) {
     document.getElementById('campaignDetailTitle').textContent = c.name;
     var counts = c.counts || { total: 0, sent: 0, pending: 0, failed: 0 };
 
-    var planText = plan && plan.totalDays
-      ? 'At this pace it will finish in about <strong>' + plan.totalDays + '</strong> ' + (plan.totalDays === 1 ? 'day' : 'days') +
-        ' — around ' + plan.dailyCapacity + ' a day, done by ' + esc(prettyDate(plan.finishDate)) + '.'
-      : 'Nothing can send right now — check the <strong>Sending accounts</strong> tab. An account may be paused, resting, or outside its sending hours.';
+    var planText = campaignPlanText(c, plan);
 
     var rows = (c.perSender || []).map(function (p) {
       return '<tr><td>' + esc(connName(p.connectionId)) + '</td><td>' + p.sent + '</td><td>' + p.queued +
@@ -2612,7 +2686,10 @@
       .then(function (r) {
         var extra = '';
         if (r && typeof r.sent === 'number') extra = ' — ' + r.sent + ' sent' + (r.failed ? '. ' + r.failed + " didn't go through" : '');
-        else if (r && typeof r.recipients === 'number') extra = ' — ' + r.recipients + ' people added to the queue';
+        else if (r && typeof r.recipients === 'number') {
+          extra = ' — ' + r.recipients + ' people added to the queue';
+          if (r.alreadyInvited) extra += ' (' + r.alreadyInvited + ' were already invited)';
+        }
         toast(route.msg + extra, 'success');
         loadCampaigns();
       })

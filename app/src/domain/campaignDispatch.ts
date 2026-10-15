@@ -4,7 +4,8 @@ import { inc } from '../lib/metrics';
 import { createInviteEvent } from '../google/events';
 import { getConnection } from './connectionStore';
 import { getList } from './listStore';
-import { extractRecipients, chunk } from './invite';
+import { chunk } from './invite';
+import { buildAudience, describeEmptyAudience } from './audience';
 import { getInvitedEmails, markInvited } from './inviteStore';
 import { getSession } from './sessionStore';
 import {
@@ -55,17 +56,20 @@ async function resolveJoinUrl(camp: Campaign): Promise<string | undefined> {
 }
 
 /** Freeze the audience, drop anyone already invited for that list, partition across senders. */
-export async function startCampaign(id: string): Promise<{ recipients: number; perSender: Record<string, number> }> {
+export async function startCampaign(
+  id: string,
+): Promise<{ recipients: number; perSender: Record<string, number>; alreadyInvited: number; invalid: number }> {
   const camp = await getCampaign(id);
   if (!camp) throw new Error('campaign not found');
 
   const list = await getList(camp.listId);
   if (!list || !list.result) throw new Error('list has no segmentation result — run Segment first');
 
-  const plan = extractRecipients(list.result, camp.segments);
-  const alreadyInvited = await getInvitedEmails(camp.listId);
-  const emails = plan.emails.filter((e) => !alreadyInvited.has(e));
-  if (!emails.length) throw new Error('no recipients to send to (empty, invalid, or already invited)');
+  // The same helper the invite composer previews with, so what the operator was shown before
+  // pressing Begin sending is exactly what gets frozen here.
+  const audience = buildAudience(list.result, camp.segments, await getInvitedEmails(camp.listId));
+  const emails = audience.emails;
+  if (!emails.length) throw new Error(describeEmptyAudience(audience));
 
   const connectionIds = camp.senders.map((s) => s.connectionId);
   await clearCampaignQueues(id, connectionIds);
@@ -89,7 +93,7 @@ export async function startCampaign(id: string): Promise<{ recipients: number; p
   camp.completedAt = undefined;
   await saveCampaign(camp);
 
-  return { recipients: records.length, perSender };
+  return { recipients: records.length, perSender, alreadyInvited: audience.alreadyInvited.length, invalid: audience.invalid.length };
 }
 
 export interface SenderBatchResult {

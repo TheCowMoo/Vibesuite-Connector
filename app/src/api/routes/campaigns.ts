@@ -17,6 +17,9 @@ import {
 } from '../../domain/campaignStore';
 import { sendCampaignBatch, startCampaign } from '../../domain/campaignDispatch';
 import { getSenderProfile } from '../../domain/senderStore';
+import { getList } from '../../domain/listStore';
+import { getInvitedEmails } from '../../domain/inviteStore';
+import { buildAudience } from '../../domain/audience';
 import { collectCampaignStats } from '../../domain/campaignStatsCollect';
 import { requireRole } from '../middleware/requireAuth';
 
@@ -96,7 +99,18 @@ export async function campaignRoutes(app: FastifyInstance): Promise<void> {
 
     const q = req.query as { total?: string; startDate?: string };
     const counts = await countRecipients(id);
-    const total = counts.total > 0 ? counts.total : Math.max(0, Number(q.total ?? 0) || 0);
+
+    // A draft has nothing frozen yet, so count the live audience. Without this the planner walks
+    // zero days, and the UI cannot say how long a send will take before it has started — which is
+    // the only moment the estimate is actually useful.
+    let total = counts.total;
+    if (total === 0) {
+      const list = await getList(camp.listId);
+      if (list && list.result) {
+        total = buildAudience(list.result, camp.segments, await getInvitedEmails(camp.listId)).emails.length;
+      }
+    }
+    if (total === 0) total = Math.max(0, Number(q.total ?? 0) || 0);
     const startDate = q.startDate && /^\d{4}-\d{2}-\d{2}$/.test(q.startDate) ? q.startDate : todayISO();
 
     const senders = await Promise.all(

@@ -219,6 +219,24 @@ rail buttons by `[data-view]`, and a collapsed group would make its children zer
 `tourPaint()` reads as "nothing to point at" and skips silently. Keep the groups open and every stop
 stays real.
 
+### Audience: who actually gets invited
+
+`buildAudience()` (`domain/audience.ts`) is the one place the recipient list is decided.
+`extractRecipients()` produces the candidates; `list:{id}:invited` is subtracted to give `emails`,
+and the overlap comes back as `alreadyInvited`. Because that set is shared with the one-off
+Invitations tab, **a person is invited once per contact list, not once per campaign** — so a second
+campaign on the same list legitimately has nothing to send.
+
+Three call sites go through it — the invite preview, the invite send, and `startCampaign()` — so the
+numbers an operator is shown before starting are exactly the numbers that get frozen.
+`describeEmptyAudience()` turns an empty result into whichever of the three causes actually applies,
+and the campaign wizard shows the split live (`refreshCampAudience()`) before the campaign is even
+created. `POST /api/campaigns/:id/start` returns the counts so the UI can say how many were skipped.
+
+`GET /api/campaigns/:id/plan` counts the live audience when nothing is frozen yet, so a **draft**
+can report how long the send will take before it has started — the only moment that estimate is
+useful.
+
 ## Words we use in the UI
 
 The interface deliberately uses plain words rather than the engineering vocabulary. The data model,
