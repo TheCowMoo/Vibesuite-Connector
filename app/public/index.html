@@ -146,7 +146,10 @@
       <div class="invite-grid">
         <div class="card">
           <h3 class="invite-step">1 · The event</h3>
-          <label class="field"><span class="field__label">Google account</span><select id="inviteConnection"></select></label>
+          <div class="field">
+            <span class="field__label">Google accounts</span>
+            <div id="inviteAccountList" role="group" aria-label="Google accounts"><p class="muted">Loading accounts…</p></div>
+          </div>
           <label class="field"><span class="field__label">Event title</span><input id="inviteSummary" placeholder="e.g. Product webinar" /></label>
           <div class="field">
             <div class="field__label-row"><span class="field__label">Description</span><button class="btn btn--ghost btn--sm" id="inviteDraftAi" type="button">Draft with AI</button></div>

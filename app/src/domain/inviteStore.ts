@@ -9,13 +9,25 @@ export interface InviteBatch {
   count: number;
 }
 
+export interface InviteSenderSummary {
+  connectionId: string;
+  connectionName: string;
+  sent: number;
+  failed: number;
+  /** Set when this account was picked but could not send (paused, cooling, no headroom, ...). */
+  skippedReason?: string;
+}
+
 export interface InviteRecord {
   id: string;
   listId: string;
   listName: string;
   segments: string[];
+  /** The account that sent the most, kept for older records and single-account sends. */
   connectionId: string;
   connectionName: string;
+  /** Per-account breakdown. Absent on records written before multi-account sends existed. */
+  senders?: InviteSenderSummary[];
   summary: string;
   start: string;
   end: string;

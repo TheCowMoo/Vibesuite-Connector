@@ -672,24 +672,81 @@
     }).catch(function (e) { toast(e.message, 'error'); });
   }
 
+  var inviteAccountsRendered = false;
+  var inviteCapacityTotal = 0;
+
+  /** The ticked accounts, in the order they appear on screen. */
+  function selectedInviteAccountIds() {
+    var out = [];
+    $$('#inviteAccountList input[data-account]').forEach(function (cb) { if (cb.checked) out.push(cb.dataset.account); });
+    return out;
+  }
+
   function renderInviteConnections() {
-    var sel = document.getElementById('inviteConnection');
-    var prev = sel.value;
-    sel.innerHTML = '';
+    var el = document.getElementById('inviteAccountList');
+    if (!el) return;
+
     if (!inviteConnections.length) {
-      sel.innerHTML = '<option value="">No active connections</option>';
-      sel.disabled = true;
+      el.innerHTML = '<p class="muted">No active Google accounts yet.</p>';
+      inviteAccountsRendered = true;
       return;
     }
-    sel.disabled = false;
-    inviteConnections.forEach(function (c) {
-      var o = document.createElement('option');
-      o.value = c.id;
-      o.textContent = c.name + ' (' + c.googleCalendarId + ')';
-      sel.appendChild(o);
+
+    // Tick everything on the very first render — spreading the list is the whole point — but honour
+    // whatever the operator chose on every later render, which happens each time the view opens.
+    var prev = selectedInviteAccountIds();
+    var keepPrev = inviteAccountsRendered;
+    inviteAccountsRendered = true;
+
+    el.innerHTML = inviteConnections.map(function (c) {
+      var on = keepPrev ? prev.indexOf(c.id) !== -1 : true;
+      return '<label class="daychk"><input type="checkbox" data-account="' + esc(c.id) + '"' + (on ? ' checked' : '') + ' />' +
+        '<span>' + esc(c.name) + '<span class="muted" data-cap="' + esc(c.id) + '"></span></span></label>';
+    }).join('') + '<p class="muted" id="inviteCapacity"></p>';
+
+    $$('#inviteAccountList input[data-account]').forEach(function (cb) {
+      cb.addEventListener('change', function () { refreshInviteCapacity(); syncInviteValidity(); });
     });
-    if (prev && inviteConnections.some(function (c) { return c.id === prev; })) sel.value = prev;
-    else if (inviteConnections.length) sel.value = inviteConnections[0].id;
+
+    refreshInviteCapacity();
+  }
+
+  /**
+   * How much each ticked account can still send right now.
+   *
+   * These are the same per-mailbox caps campaigns consume, so an account can legitimately have no
+   * room left. Far better to see that here than to have the send quietly do nothing.
+   */
+  function refreshInviteCapacity() {
+    $$('#inviteAccountList [data-cap]').forEach(function (n) { n.textContent = ''; });
+    var note = document.getElementById('inviteCapacity');
+    var ids = selectedInviteAccountIds();
+
+    if (!ids.length) {
+      if (note) note.textContent = 'Tick at least one account to send from.';
+      inviteCapacityTotal = 0;
+      return;
+    }
+
+    api('/api/invites/capacity', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ connectionIds: ids }) })
+      .then(function (d) {
+        var total = 0;
+        (d.accounts || []).forEach(function (a) {
+          var node = document.querySelector('#inviteAccountList [data-cap="' + a.connectionId + '"]');
+          if (node) {
+            node.textContent = a.allowance ? ' — ' + a.allowance + ' left today' : ' — ' + (a.reason || 'cannot send now');
+          }
+          total += a.allowance || 0;
+        });
+        inviteCapacityTotal = total;
+        if (note) {
+          note.textContent = total
+            ? 'About ' + total + ' can go out right now across the ticked accounts.'
+            : 'None of the ticked accounts can send at the moment — see the reasons above.';
+        }
+        syncInviteValidity();
+      })
+      .catch(function (e) { if (note) note.textContent = 'Could not check capacity: ' + e.message; });
   }
 
   function renderInviteLists() {
@@ -822,7 +879,7 @@
   function syncInviteValidity() {
     var btn = document.getElementById('inviteSend');
     var reasons = [];
-    if (!document.getElementById('inviteConnection').value) reasons.push('a calendar connection');
+    if (!selectedInviteAccountIds().length) reasons.push('at least one Google account');
     if (!document.getElementById('inviteList').value) reasons.push('a contact list');
     if (!document.getElementById('inviteSummary').value.trim()) reasons.push('an event title');
     var start = document.getElementById('inviteStart').value;
@@ -830,6 +887,7 @@
     if (!start || !end) reasons.push('start and end times');
     else if (new Date(end) <= new Date(start)) reasons.push('an end after start');
     if (!inviteRecipientCount) reasons.push('people to invite');
+    if (!inviteCapacityTotal) reasons.push('an account with room left to send');
     btn.disabled = reasons.length > 0;
     btn.title = reasons.length ? ('Send is disabled — choose ' + reasons.join(', ')) : 'Send invites';
   }
@@ -845,19 +903,37 @@
       '<div class="summary__item"><span class="summary__value">' + last + '</span><span class="summary__label">last sent</span></div>';
   }
 
+  /** One account's name, or "3 accounts" for a split send. Safe on records written before this. */
+  function inviteAccountLabel(inv) {
+    var used = (inv.senders || []).filter(function (s) { return s.sent > 0; });
+    if (used.length > 1) return used.length + ' accounts';
+    if (used.length === 1) return used[0].connectionName;
+    return inv.connectionName || '—';
+  }
+
   function renderInviteResult(r) {
     var el = document.getElementById('inviteResult');
     el.hidden = false;
     var links = ((r.invite && r.invite.batches) || []).map(function (b) {
       return b.htmlLink ? '<a href="' + esc(b.htmlLink) + '" target="_blank" rel="noopener">open event</a>' : '';
     }).filter(Boolean).join(', ');
-    if (r.ok) {
+    var unplaced = (r.skipped && r.skipped.unplaced) || 0;
+
+    if (r.ok && !unplaced) {
       el.className = 'invite-result invite-result--success';
       el.innerHTML = 'Sent to ' + r.sent + ' recipient' + (r.sent === 1 ? '' : 's') + (links ? ' — ' + links : '') + '.';
-    } else {
-      el.className = 'invite-result invite-result--error';
-      el.innerHTML = 'Failed: ' + (r.invite && r.invite.error ? esc(r.invite.error) : 'unknown error') + '. ' + r.sent + '/' + (r.sent + r.failed) + ' sent' + (links ? ' — ' + links : '') + '.';
+      return;
     }
+
+    // Anything short of "all of them went" gets the eye-catching styling, including the case where
+    // there was simply no headroom left — those people have not been invited and do need a retry.
+    el.className = 'invite-result invite-result--error';
+    var bits = [];
+    if (r.sent) bits.push(r.sent + ' went out');
+    if (r.failed) bits.push(r.failed + ' failed');
+    if (unplaced) bits.push(unplaced + ' not sent — no room left today, try again later');
+    var why = (r.invite && r.invite.error) ? esc(r.invite.error) + '. ' : '';
+    el.innerHTML = why + (bits.join(', ') || 'nothing went through') + (links ? ' — ' + links : '') + '.';
   }
 
   function renderInvitePrereqs() {
@@ -902,7 +978,7 @@
       var err = inv.error ? '<div class="muted" style="font-size:0.75rem; margin-top:0.2rem">' + esc(inv.error) + '</div>' : '';
       return '<tr>' +
         '<td><strong>' + esc(inv.summary) + '</strong><div class="muted" style="font-size:0.8rem">' + esc(inv.listName) + '</div></td>' +
-        '<td>' + esc(inv.connectionName) + '</td>' +
+        '<td>' + esc(inviteAccountLabel(inv)) + '</td>' +
         '<td>' + inv.recipientCount + '</td>' +
         '<td>' + inviteChip(inv.status) + err + '</td>' +
         '<td title="' + esc(new Date(inv.createdAt).toLocaleString()) + '">' + relativeTime(inv.createdAt) + '</td>' +
@@ -953,12 +1029,12 @@
   });
 
   document.getElementById('inviteSend').addEventListener('click', function () {
-    var connId = document.getElementById('inviteConnection').value;
+    var connectionIds = selectedInviteAccountIds();
     var listId = document.getElementById('inviteList').value;
     var summary = document.getElementById('inviteSummary').value.trim();
     var start = document.getElementById('inviteStart').value;
     var end = document.getElementById('inviteEnd').value;
-    if (!connId) { toast('Choose a Google account first', 'error'); return; }
+    if (!connectionIds.length) { toast('Tick at least one Google account first', 'error'); return; }
     if (!listId) { toast('Choose a contact list', 'error'); return; }
     if (!summary) { toast('Event title is required', 'error'); return; }
     if (!start || !end) { toast('Add a start and end time', 'error'); return; }
@@ -967,11 +1043,12 @@
     api('/api/invites/preview', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ listId: listId, segments: selectedInviteSegments() }) })
       .then(function (p) {
         if (!p.emails.length) { toast('Nobody left to invite — they have all been invited already, or the emails are not valid', 'error'); return; }
-        return confirmDialog('Send invites?', 'This emails a real calendar invite to ' + p.emails.length + ' recipient(s) via Google Calendar. It cannot be undone.', 'Send')
+        var accounts = connectionIds.length === 1 ? '1 Google account' : connectionIds.length + ' Google accounts';
+        return confirmDialog('Send invites?', 'This emails a real calendar invite to ' + p.emails.length + ' recipient(s), split across ' + accounts + '. It cannot be undone.', 'Send')
           .then(function (ok) {
             if (!ok) return;
             var body = {
-              connectionId: connId,
+              connectionIds: connectionIds,
               listId: listId,
               segments: selectedInviteSegments(),
               event: {
@@ -985,15 +1062,21 @@
             };
             return withBusy(document.getElementById('inviteSend'), api('/api/invites', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }))
               .then(function (r) {
-                if (r.ok) {
+                var unplaced = (r.skipped && r.skipped.unplaced) || 0;
+                if (r.ok && !unplaced) {
                   toast('Invitations sent (' + r.sent + ' people)', 'success');
+                } else if (r.sent) {
+                  var why = (r.invite && r.invite.error) ? r.invite.error : "some didn't go through";
+                  var tail = unplaced ? ' ' + unplaced + ' had no room left today, so they were left for next time.' : '';
+                  toast('Partly sent: ' + r.sent + ' went out — ' + why + tail, 'error');
                 } else {
-                  var reason = (r.invite && r.invite.error) ? r.invite.error : "some didn't go through";
-                  toast('Invite failed: ' + reason + ' (' + r.sent + '/' + (r.sent + r.failed) + ' sent)', 'error');
+                  var reason = (r.invite && r.invite.error) ? r.invite.error : 'nothing went through';
+                  toast('Invite failed: ' + reason, 'error');
                 }
                 renderInviteResult(r);
                 loadInviteHistory();
                 refreshInvitePreview();
+                refreshInviteCapacity();
               })
               .catch(function (e) { toast(e.message, 'error'); });
           });
@@ -1030,7 +1113,6 @@
     renderInviteEventPreview();
     syncInviteValidity();
   });
-  document.getElementById('inviteConnection').addEventListener('change', syncInviteValidity);
   document.getElementById('inviteSummary').addEventListener('input', syncInviteValidity);
 
   /* ---- Attendance ---- */

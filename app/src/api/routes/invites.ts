@@ -8,7 +8,11 @@ import { generateJson } from '../../lib/ai';
 import { createInviteEvent } from '../../google/events';
 import { chunk, hasTimeZoneOffset } from '../../domain/invite';
 import { buildAudience, describeEmptyAudience } from '../../domain/audience';
-import { createInviteRecord, listInvites, deleteInvite, getInvitedEmails, markInvited } from '../../domain/inviteStore';
+import { createInviteRecord, listInvites, deleteInvite, getInvitedEmails, markInvited, type InviteSenderSummary } from '../../domain/inviteStore';
+import { bumpSenderDay, bumpSenderHour, getSenderGauge, isoHour } from '../../domain/senderStore';
+import { senderReadiness } from '../../domain/campaignSchedule';
+import { isoDate } from '../../domain/senderLoad';
+import { planInviteSplit, type AccountAllowance } from '../../domain/invitePlan';
 import { withRetry, sleep } from '../../lib/backoff';
 import { env } from '../../config/env';
 import { logger } from '../../lib/logger';
@@ -23,7 +27,10 @@ interface InviteEventBody {
 }
 
 interface CreateInviteBody {
-  connectionId: string;
+  /** Legacy single-account field; still honoured so a cached client cannot break mid-deploy. */
+  connectionId?: string;
+  /** Preferred: one or more accounts to split the audience across. */
+  connectionIds?: string[];
   listId: string;
   segments?: string[];
   event: InviteEventBody;
@@ -42,6 +49,44 @@ function describeError(err: unknown): string {
   const detail = typeof d === 'string' ? d : d?.message;
   const base = detail || e?.message || 'unknown error';
   return status ? `${status} ${base}` : base;
+}
+
+interface AccountCapacity extends AccountAllowance {
+  name: string;
+}
+
+/**
+ * How much each chosen account can still send right now, and why not when it can't.
+ *
+ * The same `senderReadiness()` the campaign scheduler uses, so the numbers shown before a send are
+ * the numbers the send itself honours. These counters are per *mailbox*, not per feature, so any
+ * campaigns running on the same account share this budget — an invite sent here consumes it.
+ */
+async function accountAllowances(connectionIds: string[], now: Date): Promise<AccountCapacity[]> {
+  return Promise.all(
+    connectionIds.map(async (connectionId) => {
+      const conn = await getConnection(connectionId);
+      const name = conn?.name || connectionId;
+      if (!conn) return { connectionId, name, allowance: 0, reason: 'account not found' };
+      if (conn.status !== 'active') return { connectionId, name, allowance: 0, reason: 'not connected to Google' };
+
+      const gauge = await getSenderGauge(connectionId, now);
+      const readiness = senderReadiness({
+        enabled: gauge.profile.enabled,
+        inWindow: gauge.inWindow,
+        coolingUntil: gauge.state.cooldownUntil,
+        now: now.getTime(),
+        capToday: gauge.capToday,
+        sentToday: gauge.sentToday,
+        hourlyCap: gauge.profile.hourlyCap,
+        sentThisHour: gauge.sentThisHour,
+      });
+
+      return readiness.ready
+        ? { connectionId, name, allowance: readiness.allowance }
+        : { connectionId, name, allowance: 0, reason: readiness.reason };
+    }),
+  );
 }
 
 export async function inviteRoutes(app: FastifyInstance): Promise<void> {
@@ -75,6 +120,19 @@ export async function inviteRoutes(app: FastifyInstance): Promise<void> {
       invalid: audience.invalid,
       alreadyInvited: audience.alreadyInvited,
     };
+  });
+
+  /**
+   * Per-account headroom, for the account picker.
+   *
+   * Deliberately NOT role-gated, unlike `/api/senders`: sending invitations is open to every role,
+   * so the picker has to be able to show what each account can do. It exposes an allowance and a
+   * reason only — never profile settings.
+   */
+  app.post('/api/invites/capacity', async (req) => {
+    const b = req.body as { connectionIds?: string[] };
+    const ids = Array.isArray(b.connectionIds) ? b.connectionIds.filter(Boolean) : [];
+    return { accounts: await accountAllowances(ids, new Date()) };
   });
 
   app.post('/api/invites/copy', async (req, reply) => {
@@ -112,8 +170,12 @@ export async function inviteRoutes(app: FastifyInstance): Promise<void> {
   app.post('/api/invites', async (req, reply) => {
     const b = req.body as CreateInviteBody;
     const ev = b.event;
-    if (!b.connectionId || !b.listId || !ev || !ev.summary || !ev.start || !ev.end) {
-      reply.code(400).send({ error: 'connectionId, listId, event.summary, event.start and event.end are required' });
+    const requestedIds = Array.from(
+      new Set([...(Array.isArray(b.connectionIds) ? b.connectionIds : []), b.connectionId].filter(Boolean) as string[]),
+    );
+
+    if (!requestedIds.length || !b.listId || !ev || !ev.summary || !ev.start || !ev.end) {
+      reply.code(400).send({ error: 'at least one Google account, a listId, event.summary, event.start and event.end are required' });
       return;
     }
     if (Date.parse(ev.end) <= Date.parse(ev.start)) {
@@ -125,15 +187,9 @@ export async function inviteRoutes(app: FastifyInstance): Promise<void> {
       return;
     }
 
-    const conn = await getConnection(b.connectionId);
-    if (!conn) {
-      reply.code(404).send({ error: 'connection not found' });
-      return;
-    }
-    if (conn.status !== 'active') {
-      reply.code(400).send({ error: 'connection is not active — connect Google first' });
-      return;
-    }
+    // Per-account checks — exists, active, and how much headroom it has left — happen in
+    // accountAllowances() below. A missing or paused account is reported as a skip for that
+    // account rather than failing the whole send.
 
     const list = await getList(b.listId);
     if (!list) {
@@ -154,35 +210,85 @@ export async function inviteRoutes(app: FastifyInstance): Promise<void> {
       return;
     }
 
-    const chunks = chunk(emails, env.INVITE_BATCH_SIZE);
+    const now = new Date();
+    const accounts = await accountAllowances(requestedIds, now);
+    const split = planInviteSplit(emails, accounts);
+
+    if (!split.totalCapacity) {
+      const why = accounts.filter((a) => a.reason).map((a) => `${a.name}: ${a.reason}`).join('; ');
+      reply.code(400).send({
+        error: `none of the chosen accounts can send right now${why ? ` (${why})` : ''}`,
+        accounts,
+      });
+      return;
+    }
+
     const batches: Array<{ chunk: number; eventId: string; htmlLink?: string; count: number }> = [];
+    const senders: InviteSenderSummary[] = [];
     const sentEmails: string[] = [];
     let firstError = '';
 
-    for (let i = 0; i < chunks.length; i++) {
-      const part = chunks[i];
-      const summary = chunks.length > 1 ? `${ev.summary} (${i + 1}/${chunks.length})` : ev.summary;
-      try {
-        const res = await withRetry(() => createInviteEvent(conn, { ...ev, summary, emails: part }), { retries: 3 });
-        batches.push({ chunk: i + 1, eventId: res.id, htmlLink: res.htmlLink, count: part.length });
-        sentEmails.push(...part);
-      } catch (err) {
-        const msg = describeError(err);
-        firstError = firstError || msg;
-        logger.error({ connectionId: conn.id, listId: b.listId, chunk: i + 1, err: msg }, 'invite chunk failed');
+    for (const account of accounts) {
+      const slice = split.allocated[account.connectionId] || [];
+      const row: InviteSenderSummary = {
+        connectionId: account.connectionId,
+        connectionName: account.name,
+        sent: 0,
+        failed: 0,
+        skippedReason: account.reason,
+      };
+      senders.push(row);
+      if (!slice.length) continue;
+
+      const conn = await getConnection(account.connectionId);
+      if (!conn) {
+        row.skippedReason = 'account not found';
+        continue;
       }
-      if (i < chunks.length - 1) await sleep(env.INVITE_DELAY_MS);
+
+      // Chunk per mailbox rather than across the whole audience. With one chunk each — the normal
+      // case once the list is spread — no numbered suffix appears at all, so a guest never receives
+      // something titled "Webinar (3/5)". The suffix only returns if one account needs splitting.
+      const parts = chunk(slice, env.INVITE_BATCH_SIZE);
+
+      for (let i = 0; i < parts.length; i++) {
+        const part = parts[i];
+        const summary = parts.length > 1 ? `${ev.summary} (${i + 1}/${parts.length})` : ev.summary;
+        try {
+          const res = await withRetry(() => createInviteEvent(conn, { ...ev, summary, emails: part }), { retries: 3 });
+          batches.push({ chunk: batches.length + 1, eventId: res.id, htmlLink: res.htmlLink, count: part.length });
+          sentEmails.push(...part);
+          row.sent += part.length;
+          // Spend the shared per-mailbox budget. Without this the caps we just read would never be
+          // consumed, so every send would see the same full headroom — and campaigns on the same
+          // account would not see this usage either.
+          await bumpSenderDay(conn.id, isoDate(now), 'sent', part.length);
+          await bumpSenderHour(conn.id, isoHour(now), part.length);
+        } catch (err) {
+          const msg = describeError(err);
+          firstError = firstError || msg;
+          row.failed += part.length;
+          await bumpSenderDay(conn.id, isoDate(now), 'failed', part.length);
+          logger.error({ connectionId: conn.id, listId: b.listId, chunk: i + 1, err: msg }, 'invite chunk failed');
+        }
+        if (i < parts.length - 1) await sleep(env.INVITE_DELAY_MS);
+      }
+
+      // Small gap between mailboxes so several accounts never hit Google in lockstep.
+      await sleep(env.INVITE_DELAY_MS);
     }
 
     if (sentEmails.length) await markInvited(b.listId, sentEmails);
 
     const status = firstError ? (sentEmails.length ? 'partial' : 'failed') : 'sent';
+    const primary = senders.find((s) => s.sent > 0) || senders[0];
     const record = await createInviteRecord({
       listId: b.listId,
       listName: list.name,
       segments: b.segments && b.segments.length ? b.segments : audience.perSegment.map((s) => s.name),
-      connectionId: conn.id,
-      connectionName: conn.name,
+      connectionId: primary.connectionId,
+      connectionName: primary.connectionName,
+      senders,
       summary: ev.summary,
       start: ev.start,
       end: ev.end,
@@ -197,12 +303,17 @@ export async function inviteRoutes(app: FastifyInstance): Promise<void> {
       ok: status === 'sent',
       invite: record,
       sent: sentEmails.length,
-      failed: emails.length - sentEmails.length,
+      failed: senders.reduce((n, s) => n + s.failed, 0),
       skipped: {
         duplicatesRemoved: audience.duplicatesRemoved,
         invalid: audience.invalid.length,
         alreadyInvited: audience.alreadyInvited.length,
+        unplaced: split.unplaced.length,
+        noCapacity: accounts
+          .filter((a) => a.reason)
+          .map((a) => ({ connectionId: a.connectionId, name: a.name, reason: a.reason })),
       },
+      senders,
     };
   });
 }

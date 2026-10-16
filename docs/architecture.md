@@ -16,7 +16,8 @@ calendar id, location id, and optional webhook URLs. All runtime keys are namesp
 1. Google Calendar POSTs an empty-body notification to `/webhooks/google/calendar` with all
    routing info in `X-Goog-*` headers.
 2. `app-api` validates `X-Goog-Channel-Token` against the stored channel, resolves the channel to
-   a **connection**, returns `200 OK`, and enqueues a per-connection `process-sync` BullMQ job.
+   a **connection**, returns `200 OK` *before* enqueuing (see the sweep in step 6 for why that
+   ordering needs a safety net), and enqueues a per-connection `process-sync` BullMQ job.
 3. `app-worker` loads the connection, acquires a per-connection Redis lock (`SET NX EX 5`) for
    dedupe, then:
    - full sync (`events.list` + `timeMin`) if no `nextSyncToken` exists, or
@@ -24,6 +25,14 @@ calendar id, location id, and optional webhook URLs. All runtime keys are namesp
 4. Attendee `responseStatus` is diffed against last-known state; only actual changes proceed.
 5. Each change maps through the transform matrix and dispatches to GHL using that connection's
    credentials and webhook URLs.
+6. **Safety net.** A reconciliation sweep (`scheduler/reconcile.ts`) calls `processSync()` for every
+   active connection — every `SYNC_RECONCILE_INTERVAL_MS` (default 15 min, `0` disables) and once at
+   worker startup. Since step 2 answers Google *before* it enqueues, a dropped notification or a
+   failed enqueue has no retry path; the sweep is what recovers it. `processSync()` is idempotent (a
+   per-connection lock, a state diff, and a `SET NX` dispatch claim), so an unchanged connection is a
+   cheap no-op, and a sweep overlapping a live sync skips that connection rather than double-sending.
+   One failing connection never aborts the pass (`domain/reconcile.ts` — the loop is dependency-free
+   so exactly that property is unit-tested).
 
 ## Redis keys
 
@@ -236,6 +245,25 @@ created. `POST /api/campaigns/:id/start` returns the counts so the UI can say ho
 `GET /api/campaigns/:id/plan` counts the live audience when nothing is frozen yet, so a **draft**
 can report how long the send will take before it has started — the only moment that estimate is
 useful.
+
+### One-off invitations vs campaigns
+
+The Invitations tab sends **now**, from one or more accounts. `planInviteSplit()`
+(`domain/invitePlan.ts`) splits the audience evenly across the chosen accounts, each capped at its own
+remaining headroom via `senderReadiness()` — the same call the campaign scheduler makes, so
+daily/hourly caps, cooldowns, a paused account and the send window all apply. Because the counters
+(`sender:day` / `sender:hour`) are keyed by mailbox rather than by feature, a successful invite
+**spends the same budget a campaign would**. A send that exceeds total headroom sends what it can and
+reports the remainder as `unplaced` rather than refusing outright or over-sending.
+
+Events are chunked **per account**, not across the whole audience, so the normal case (one chunk per
+account) produces no `(1/3)` suffix and a guest never receives a numbered title. The suffix only
+returns when a single account needs splitting.
+
+`POST /api/invites/capacity` reports per-account headroom for the picker. It is deliberately **not**
+role-gated, unlike `/api/senders` — sending invitations is open to every role, so the picker has to
+be able to show what each account can do. It returns an allowance and a reason, never profile
+settings.
 
 ## Words we use in the UI
 
