@@ -170,9 +170,15 @@ Key counters: `webhook_received_total`, `webhook_rejected_total`, `jobs_enqueued
 
 ## Notes & caveats
 
-- Google push notifications are **not 100% reliable**. The worker's incremental sync is the source
-  of truth; the watch renewal scheduler also reconciles, and you can trigger a manual re-sync via
-  a synthetic notification or by clearing the stored token.
+- Google push notifications are **not 100% reliable**, and the webhook answers Google `200` before it
+  enqueues the job — so a dropped notification or a failed enqueue has no retry path. The
+  **reconciliation sweep** (`scheduler/reconcile.ts`) closes that gap: it calls `processSync()` for
+  every active connection every `SYNC_RECONCILE_INTERVAL_MS` (default 15 min, `0` disables), plus
+  once at worker startup, so a restart is also a recovery point. Because `processSync()` is
+  idempotent it is a cheap no-op when nothing changed. Note it **bounds** the delay rather than
+  eliminating it — worst case is one interval. `scheduler/renewal.ts` only renews the watch channel
+  itself; it does not reconcile. You can always force a re-sync manually via a synthetic
+  notification or by clearing the stored token.
 - Event ↔ GHL appointment linkage uses the per-connection Redis mapping table
   (`conn:{id}:map:event:{eventId}`). Populate it at booking time; if absent, the worker still
   applies contact tags, DND, and the webhook (appointment status update is best-effort).

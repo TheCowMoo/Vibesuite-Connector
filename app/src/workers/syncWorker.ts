@@ -10,6 +10,7 @@ import type { SyncJobData } from '../queue/jobs/types';
 import { startWatchRenewal } from '../scheduler/renewal';
 import { startAttendancePolling } from '../scheduler/attendance';
 import { startCampaignScheduler } from '../scheduler/campaigns';
+import { startReconciliation } from '../scheduler/reconcile';
 
 async function main(): Promise<void> {
   const worker = new Worker<SyncJobData>(
@@ -29,12 +30,13 @@ async function main(): Promise<void> {
   startWatchRenewal();
   startAttendancePolling();
   startCampaignScheduler();
+  startReconciliation();
 
   if (env.METRICS_PORT > 0) {
     startMetricsServer(env.METRICS_PORT);
   }
 
-  logger.info('sync worker started (multi-tenant, incl. watch renewal scheduler + metrics)');
+  logger.info('sync worker started (multi-tenant, incl. watch renewal + reconcile + metrics)');
 }
 
 main().catch((err) => {

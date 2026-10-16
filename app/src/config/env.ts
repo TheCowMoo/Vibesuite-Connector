@@ -48,6 +48,8 @@ const EnvSchema = z.object({
   METRICS_PORT: z.coerce.number().int().min(0).default(9090),
   SYNC_RETRY_ATTEMPTS: z.coerce.number().int().positive().default(5),
   SYNC_BACKOFF_DELAY_MS: z.coerce.number().int().positive().default(2000),
+  // Catch-up sweep so a dropped push notification cannot strand an RSVP. 0 disables it.
+  SYNC_RECONCILE_INTERVAL_MS: z.coerce.number().int().min(0).default(900000),
   INVITE_BATCH_SIZE: z.coerce.number().int().positive().default(100),
   INVITE_DELAY_MS: z.coerce.number().int().min(0).default(300),
   ATTENDANCE_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(900000),
