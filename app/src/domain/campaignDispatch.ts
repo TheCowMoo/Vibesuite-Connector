@@ -36,6 +36,7 @@ import {
 } from './campaignStore';
 import { allocateEmails, type Campaign, type CampaignSender, type RecipientRecord } from './campaign';
 import { dueForNextBatch, senderReadiness } from './campaignSchedule';
+import { sessionJoinUrl } from './joinLink';
 
 function describeError(err: unknown): string {
   const e = err as { response?: { status?: number; data?: { error?: { message?: string } | string } }; message?: string };
@@ -49,10 +50,7 @@ function describeError(err: unknown): string {
 async function resolveJoinUrl(camp: Campaign): Promise<string | undefined> {
   if (!camp.sessionId) return undefined;
   const session = await getSession(camp.sessionId);
-  if (!session) return undefined;
-  if (session.joinUrl) return session.joinUrl;
-  if (session.provider === 'zoom' && session.externalId) return `https://zoom.us/j/${encodeURIComponent(session.externalId)}`;
-  return undefined;
+  return session ? sessionJoinUrl(session) : undefined;
 }
 
 /** Freeze the audience, drop anyone already invited for that list, partition across senders. */

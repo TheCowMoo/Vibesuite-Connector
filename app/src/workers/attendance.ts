@@ -112,6 +112,19 @@ export async function syncSession(sessionId: string): Promise<AttendanceReport> 
 
   try {
     const provider = getProvider(session.provider);
+
+    // Resolve the join link *before* the report fetch. `fetch()` reads the report API, which only
+    // exists once the session has ended, so anything placed after it would never run for an
+    // upcoming webinar — the one that actually needs its link. This also backfills sessions that
+    // were created before we started storing one.
+    if (!session.joinUrl && provider.resolveJoinUrl) {
+      const resolved = await provider.resolveJoinUrl(session.externalId, session.sessionType ?? 'meeting');
+      if (resolved) {
+        session.joinUrl = resolved;
+        await saveSession(session);
+      }
+    }
+
     const fetched = await provider.fetch(session.externalId, session.sessionType ?? 'meeting');
 
     const invited = await resolveInvitedEmails(session);

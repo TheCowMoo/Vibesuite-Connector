@@ -124,6 +124,31 @@ keeps its `connectionId` and `eventId`. Rates are real percentages of real denom
 tentative)`), never estimates. Bounce/open metrics are intentionally absent until the GHL reminder
 layer exists.
 
+## Video calls and join links
+
+Sessions reference a provider (`zoom` is the only implemented one) and an external id. The Zoom
+integration is **read-only and retrospective**: every call it makes is a `GET`, and nearly all of them
+are `/report/*`, which only exist after the session has ended. It cannot create, edit, start or list
+webinars.
+
+The link a calendar invite carries comes from `sessionJoinUrl()` (`domain/joinLink.ts`), in priority
+order:
+
+1. what the operator typed on the session (they may be pasting a registration or per-guest link);
+2. whatever the provider resolved via `resolveJoinUrl()` — Zoom's `GET /webinars|meetings/{id}` →
+   `join_url`, which *does* work before the session;
+3. a synthesised `https://zoom.us/j/{id}`, for older Zoom sessions that have neither.
+
+Resolution happens when a session is created and at the start of `syncSession()` — deliberately
+**before** the report fetch, because that fetch throws for a session that has not run yet, which is
+exactly the one needing its link. That ordering is also what backfills existing sessions, one
+attendance-poll interval after deploy.
+
+Reading `join_url` needs `webinar:read` / `meeting:read` on the Zoom Server-to-Server app. Without
+those scopes the call 403s → `getJson()` returns null → no link, which is the previous behaviour, so
+the failure mode is benign. Note step 3 always builds the `/j/` **meeting** form; whether Zoom accepts
+that for a webinar is unverified, which is why step 2 matters.
+
 ## Advisor
 
 The Advisor tab is advisory-only: `analyzeAdvisor()` builds a **PII-free aggregate snapshot**,

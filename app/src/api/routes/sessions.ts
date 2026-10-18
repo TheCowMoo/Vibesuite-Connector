@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { createSession, getSession, listSessions, deleteSession } from '../../domain/sessionStore';
 import { getAttendance } from '../../domain/attendanceStore';
 import { syncSession, dispatchSession } from '../../workers/attendance';
+import { getProvider } from '../../video';
 import type { SessionType, VideoProvider } from '../../video/types';
 
 export async function sessionRoutes(app: FastifyInstance): Promise<void> {
@@ -26,6 +27,18 @@ export async function sessionRoutes(app: FastifyInstance): Promise<void> {
       reply.code(400).send({ error: 'provider, externalId, title, startTime and endTime are required' });
       return;
     }
+    // Fill in the real join link when the operator did not paste one. Best-effort: a Zoom app
+    // without the `webinar:read` / `meeting:read` scope simply resolves nothing and the session
+    // saves exactly as it did before.
+    if (!b.joinUrl) {
+      try {
+        const resolved = await getProvider(b.provider).resolveJoinUrl?.(b.externalId, b.sessionType ?? 'meeting');
+        if (resolved) b.joinUrl = resolved;
+      } catch {
+        /* leave it blank; the dispatcher still has its synthesised fallback */
+      }
+    }
+
     const rec = await createSession(b);
     reply.code(201).send({ session: rec });
   });

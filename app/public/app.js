@@ -1293,6 +1293,7 @@
       startTime: fd.get('startTime'),
       endTime: fd.get('endTime'),
       connectionId: fd.get('connectionId') || undefined,
+      joinUrl: fd.get('joinUrl') || undefined,
       inviteId: fd.get('inviteId') || undefined
     };
     if (!body.externalId || !body.title || !body.startTime || !body.endTime) { toast('Meeting ID, title, start and end are required', 'error'); return; }

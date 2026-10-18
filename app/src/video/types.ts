@@ -46,4 +46,10 @@ export interface VideoProviderImpl {
   key: VideoProvider;
   fetch(externalId: string, sessionType?: SessionType): Promise<ProviderFetchResult>;
   test(): Promise<{ ok: boolean; detail?: string }>;
+  /**
+   * The shareable join link, if the provider can supply it *before* the session runs. Optional:
+   * the report-based `fetch()` above only exists after the fact, so most providers will not have
+   * anything to offer here.
+   */
+  resolveJoinUrl?(externalId: string, sessionType?: SessionType): Promise<string | undefined>;
 }

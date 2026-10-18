@@ -151,6 +151,26 @@ export const zoomProvider: VideoProviderImpl = {
     };
   },
 
+  /**
+   * The real attendee join link, read from the management endpoint — which works *before* the
+   * session runs, unlike the /report/* endpoints `fetch()` uses, which only exist once it has
+   * ended.
+   *
+   * Best-effort by design: a missing Zoom config, or an app without the `webinar:read` /
+   * `meeting:read` scope, yields undefined instead of throwing, so creating a session never fails
+   * because of Zoom.
+   */
+  async resolveJoinUrl(externalId: string, sessionType: SessionType = 'meeting'): Promise<string | undefined> {
+    try {
+      const token = await getAccessToken();
+      const seg = sessionType === 'webinar' ? 'webinars' : 'meetings';
+      const data = await getJson(token, `/${seg}/${encodeURIComponent(externalId)}`);
+      return data ? str(data.join_url) : undefined;
+    } catch {
+      return undefined;
+    }
+  },
+
   async test() {
     try {
       const token = await getAccessToken();
