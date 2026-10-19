@@ -623,6 +623,7 @@
   var inviteConnections = [];
   var inviteLists = [];
   var inviteRecipientCount = 0;
+  var inviteAlreadyInvited = 0;
 
   function inviteChip(status) {
     if (status === 'sent') return '<span class="chip chip--success">Sent</span>';
@@ -837,6 +838,7 @@
     if (!listId) {
       el.innerHTML = '<span class="muted">Pick a contact list to see who will be invited.</span>';
       inviteRecipientCount = 0;
+      inviteAlreadyInvited = 0;
       updateInviteSegmentCounts(null);
       renderReinviteBlock([], []);
       syncInviteValidity();
@@ -845,12 +847,17 @@
     api('/api/invites/preview', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ listId: listId, segments: selectedInviteSegments() }) })
       .then(function (d) {
         inviteRecipientCount = d.emails.length;
+        inviteAlreadyInvited = (d.alreadyInvited || []).length;
         updateInviteSegmentCounts(d.perSegment);
         var html = pill('people', d.emails.length, d.emails.length ? 'ok' : 'danger');
         if (d.duplicatesRemoved) html += pill('duplicates', d.duplicatesRemoved, 'neutral');
         if (d.invalid && d.invalid.length) html += pill('invalid', d.invalid.length, 'warn');
         if (d.alreadyInvited && d.alreadyInvited.length) html += pill('already invited', d.alreadyInvited.length, 'warn');
-        if (!d.emails.length) html += ' <span class="muted" style="font-size:0.85rem">Nobody new to invite.</span>';
+        if (!d.emails.length) {
+          html += ' <span class="muted" style="font-size:0.85rem">' +
+            (inviteAlreadyInvited ? 'Nobody new to invite — everyone here has already been invited.' : 'Nobody new to invite.') +
+            '</span>';
+        }
         el.innerHTML = html;
         renderReinviteBlock(d.alreadyInvited || [], d.previouslyInvited || []);
         syncInviteValidity();
@@ -935,6 +942,12 @@
     endEl.dataset.auto = '1';
   }
 
+  /** One rule for the re-invite opt-in, shared by the button state and the click handler. */
+  function reinviteTicked() {
+    var box = document.getElementById('inviteReinvite');
+    return !!(box && box.checked);
+  }
+
   function syncInviteValidity() {
     var btn = document.getElementById('inviteSend');
     var why = document.getElementById('inviteWhy');
@@ -949,7 +962,15 @@
     if (!start || !end) reasons.push('set start and end times');
     else if (new Date(end) <= new Date(start)) reasons.push('make the end later than the start');
 
-    if (!inviteRecipientCount) reasons.push('pick a list with people to invite');
+    // Reach mirrors what the click handler will actually send: fresh people, plus the already-invited
+    // ones when the opt-in is ticked. Those two used to disagree, which left the button greyed with
+    // no way to satisfy it — so when the box is the answer, say so.
+    var reach = inviteRecipientCount + (reinviteTicked() ? inviteAlreadyInvited : 0);
+    if (!reach) {
+      reasons.push(inviteAlreadyInvited
+        ? 'tick "also invite people who were already invited"'
+        : 'pick a list with people to invite');
+    }
 
     // Only block on capacity once we actually know it, and name which account is the problem.
     if (inviteCapacityKnown && !inviteCapacityTotal) {
@@ -1084,6 +1105,11 @@
     if (!id) {
       document.getElementById('inviteSegments').innerHTML = '<p class="muted">Choose a list to see its segments.</p>';
       document.getElementById('inviteRecipients').textContent = 'Pick a contact list to see who will be invited.';
+      // This path writes the preview directly, so the counts feeding the button must be cleared here too.
+      inviteRecipientCount = 0;
+      inviteAlreadyInvited = 0;
+      renderReinviteBlock([], []);
+      syncInviteValidity();
       return;
     }
     api('/api/lists/' + id).then(function (d) {
@@ -1124,8 +1150,7 @@
     api('/api/invites/preview', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ listId: listId, segments: selectedInviteSegments() }) })
       .then(function (p) {
         var already = (p.alreadyInvited || []).length;
-        var reinviteBox = document.getElementById('inviteReinvite');
-        var reinvite = !!(reinviteBox && reinviteBox.checked);
+        var reinvite = reinviteTicked();
         var reach = p.emails.length + (reinvite ? already : 0);
 
         if (!reach) { toast('Nobody left to invite — they have all been invited already, or the emails are not valid', 'error'); return; }
@@ -1205,6 +1230,8 @@
     syncInviteValidity();
   });
   document.getElementById('inviteSummary').addEventListener('input', syncInviteValidity);
+  var inviteReinviteBox = document.getElementById('inviteReinvite');
+  if (inviteReinviteBox) inviteReinviteBox.addEventListener('change', syncInviteValidity);
 
   /* ---- Attendance ---- */
   var attendanceSessions = [];
