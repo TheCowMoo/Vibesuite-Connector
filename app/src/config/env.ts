@@ -64,6 +64,11 @@ const EnvSchema = z.object({
   INVITE_TTL_DAYS: z.coerce.number().int().positive().default(7),
   AUTH_ALLOW_FIRST_RUN_SETUP: z.enum(['true', 'false']).default('true').transform((v) => v === 'true'),
   TEAM_INVITE_WEBHOOK_URL: z.string().url().optional(),
+  // System email via GoHighLevel (team invites and account notices — never calendar invitations).
+  // Optional env defaults; anything saved in Team → System email wins over these.
+  SYSTEM_EMAIL_GHL_TOKEN: z.string().optional(),
+  SYSTEM_EMAIL_GHL_LOCATION_ID: z.string().optional(),
+  SYSTEM_EMAIL_FROM: z.string().email().optional(),
   CAMPAIGN_TICK_INTERVAL_MS: z.coerce.number().int().positive().default(300000),
   CAMPAIGN_DEFAULT_DAILY_CAP: z.coerce.number().int().positive().default(800),
   CAMPAIGN_DEFAULT_HOURLY_CAP: z.coerce.number().int().positive().default(100),

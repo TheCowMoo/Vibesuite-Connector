@@ -274,9 +274,38 @@
     <h2 class="section-title">Invitations not yet accepted</h2>
     <div id="teamInvites"></div>
 
-    <h2 class="section-title">How invitations get delivered</h2>
+    <h2 class="section-title">How invitations get sent</h2>
+
     <div class="card">
-      <p class="muted">Every invite always shows a copyable link. Optionally POST it to a GoHighLevel inbound webhook so GHL sends the email.</p>
+      <h3 class="detail__sub" style="margin-top:0">System email (via GoHighLevel)</h3>
+      <p class="muted">Sends team invites through GoHighLevel. Calendar invitations are unaffected — those go out from your own Google accounts.</p>
+
+      <label class="field"><span class="field__label">API token</span><input id="sysEmailToken" type="password" autocomplete="off" placeholder="Paste the private integration token" /></label>
+      <div class="sender__grid">
+        <label class="field"><span class="field__label">Location ID</span><input id="sysEmailLocation" placeholder="ve9EPM428h8vShlRW1KT" /></label>
+        <label class="field"><span class="field__label">From email</span><input id="sysEmailFrom" placeholder="info@connect.vibesuite.io" /></label>
+        <label class="field"><span class="field__label">From name</span><input id="sysEmailFromName" placeholder="Vibesuite" /></label>
+      </div>
+
+      <h3 class="detail__sub">The invite email</h3>
+      <label class="field"><span class="field__label">Subject</span><input id="sysEmailSubject" /></label>
+      <label class="field"><span class="field__label">Body</span><textarea id="sysEmailBody" rows="9" spellcheck="false"></textarea></label>
+      <div class="daychks" id="sysEmailChips"></div>
+      <p class="muted">Plain text — links are made clickable automatically. The body must include {{inviteUrl}} or nobody can accept.</p>
+
+      <p class="muted" id="sysEmailStatus"></p>
+      <div class="conn__actions">
+        <button class="btn btn--ghost btn--sm" id="sysEmailReset">Reset to default</button>
+        <button class="btn btn--ghost btn--sm" id="sysEmailPreview">Preview</button>
+        <button class="btn btn--ghost btn--sm" id="sysEmailTest">Send test to me</button>
+        <button class="btn btn--primary btn--sm" id="sysEmailSave">Save</button>
+      </div>
+      <div class="invite-result" id="sysEmailResult" hidden></div>
+    </div>
+
+    <div class="card" style="margin-top:1rem">
+      <h3 class="detail__sub" style="margin-top:0">Fallback webhook</h3>
+      <p class="muted">If a GoHighLevel send fails, invites still go to this inbound webhook.</p>
       <label class="field"><span class="field__label">Webhook URL for invitations (GHL)</span><input id="teamWebhookUrl" placeholder="https://services.leadconnectorhq.com/hooks/…" /></label>
       <p class="muted" id="teamWebhookStatus"></p>
       <div class="conn__actions">

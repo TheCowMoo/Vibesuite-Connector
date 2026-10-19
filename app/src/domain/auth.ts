@@ -1,5 +1,7 @@
-import axios from 'axios';
 import { env } from '../config/env';
+import { renderInviteEmail, DEFAULT_INVITE_TEMPLATE } from './inviteEmail';
+import { resolveSystemEmailSettings } from './systemEmailSettings';
+import { sendSystemEmail, type SystemEmailResult } from './systemEmail';
 import { logger } from '../lib/logger';
 import { hashPassword, verifyPassword } from '../lib/passwords';
 import { randomToken, sha256 } from '../lib/tokens';
@@ -30,7 +32,6 @@ import {
   type UserRole,
   type UserStatus,
 } from './authStore';
-import { resolveInviteWebhookUrl } from './teamSettings';
 
 const MAX_LOGIN_ATTEMPTS = 10;
 const ATTEMPT_WINDOW_SECONDS = 900;
@@ -149,41 +150,64 @@ export async function changePassword(userId: string, currentPassword: string, ne
 export interface InviteResult {
   invite: InviteRecord;
   inviteUrl: string;
-  webhook: { ok: boolean; detail?: string };
+  /** Which channel actually delivered it, and why if it did not. */
+  webhook: SystemEmailResult;
 }
 
 export function inviteUrlFor(token: string, baseUrl: string): string {
   return `${baseUrl.replace(/\/$/, '')}/invite?token=${encodeURIComponent(token)}`;
 }
 
-export async function sendInviteWebhook(invite: InviteRecord, inviteUrl: string): Promise<{ ok: boolean; detail?: string }> {
-  const url = await resolveInviteWebhookUrl();
-  if (!url) return { ok: false, detail: 'no invite webhook configured' };
-  try {
-    await axios.post(
-      url,
-      {
-        type: 'team_invite',
-        email: invite.email,
-        name: invite.name ?? null,
-        role: invite.role,
-        inviteUrl,
-        invitedBy: invite.invitedBy,
-        expiresAt: new Date(invite.expiresAt).toISOString(),
-        subject: "You've been invited to Vibesuite",
-        timestamp: new Date().toISOString(),
-      },
-      { timeout: 15000 }
-    );
-    return { ok: true };
-  } catch (err) {
-    const e = err as { response?: { status?: number; data?: unknown }; message?: string };
-    const detail = e?.response?.status
-      ? `${e.response.status} ${JSON.stringify(e.response.data).slice(0, 200)}`
-      : e?.message || 'unknown error';
-    logger.warn({ email: invite.email, detail }, 'invite webhook failed');
-    return { ok: false, detail };
-  }
+const MONTHS_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/** UTC day, so the wording in the email is stable regardless of the server's timezone. */
+function formatExpiry(ms: number): string {
+  const d = new Date(ms);
+  if (Number.isNaN(d.getTime())) return 'soon';
+  return `${d.getUTCDate()} ${MONTHS_SHORT[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
+}
+
+/**
+ * Deliver a team invite.
+ *
+ * System email goes through GoHighLevel when configured (see `sendSystemEmail`), with the GHL
+ * inbound webhook as the fallback. The webhook payload keeps its original shape, so workflows
+ * already built against it keep working unchanged.
+ */
+export async function deliverInvite(invite: InviteRecord, inviteUrl: string): Promise<SystemEmailResult> {
+  const settings = await resolveSystemEmailSettings();
+  const template = {
+    subject: settings.subjectTemplate || DEFAULT_INVITE_TEMPLATE.subject,
+    body: settings.bodyTemplate || DEFAULT_INVITE_TEMPLATE.body,
+  };
+
+  const rendered = renderInviteEmail(template, {
+    name: invite.name || invite.email,
+    email: invite.email,
+    role: invite.role,
+    invitedBy: invite.invitedBy,
+    expiresAt: formatExpiry(invite.expiresAt),
+    inviteUrl,
+  });
+
+  return sendSystemEmail({
+    to: invite.email,
+    name: invite.name,
+    subject: rendered.subject,
+    html: rendered.html,
+    text: rendered.text,
+    webhookPayload: {
+      type: 'team_invite',
+      email: invite.email,
+      name: invite.name ?? null,
+      role: invite.role,
+      inviteUrl,
+      invitedBy: invite.invitedBy,
+      expiresAt: new Date(invite.expiresAt).toISOString(),
+      subject: rendered.subject,
+      timestamp: new Date().toISOString(),
+    },
+  });
 }
 
 export async function createTeamInvite(input: {
@@ -208,7 +232,7 @@ export async function createTeamInvite(input: {
 
   const inviteUrl = inviteUrlFor(token, input.baseUrl);
   await pushAudit({ at: Date.now(), actor: input.invitedBy, action: 'invite_created', detail: invite.email });
-  const webhook = await sendInviteWebhook(invite, inviteUrl);
+  const webhook = await deliverInvite(invite, inviteUrl);
   return { invite, inviteUrl, webhook };
 }
 
@@ -225,7 +249,7 @@ export async function resendInvite(id: string, baseUrl: string): Promise<InviteR
   const invite = await getInvite(id);
   if (!invite) return null;
   const inviteUrl = inviteUrlFor(invite.token, baseUrl);
-  const webhook = await sendInviteWebhook(invite, inviteUrl);
+  const webhook = await deliverInvite(invite, inviteUrl);
   return { invite, inviteUrl, webhook };
 }
 

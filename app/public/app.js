@@ -2013,10 +2013,130 @@
         renderTeamInvites(d.invites || []);
         renderTeamAudit(d.audit || []);
         document.getElementById('teamWebhookUrl').value = (d.settings && d.settings.inviteWebhookUrl) || '';
+        loadSystemEmail();
       })
       .catch(function (e) {
         document.getElementById('teamMembers').innerHTML = '<div class="card"><p class="muted">' + esc(e.message) + '</p></div>';
       });
+  }
+
+  /* ---- System email (GoHighLevel) ----
+   * Platform email only: team invites and account notices. Calendar invitations are untouched. */
+
+  var systemEmailDefaults = { subject: '', body: '' };
+
+  function loadSystemEmail() {
+    return api('/api/team/system-email')
+      .then(function (d) {
+        systemEmailDefaults = d.defaults || systemEmailDefaults;
+
+        document.getElementById('sysEmailLocation').value = d.locationId || '';
+        document.getElementById('sysEmailFrom').value = d.fromEmail || '';
+        document.getElementById('sysEmailFromName').value = d.fromName || '';
+        document.getElementById('sysEmailSubject').value = (d.template && d.template.subject) || systemEmailDefaults.subject;
+        document.getElementById('sysEmailBody').value = (d.template && d.template.body) || systemEmailDefaults.body;
+
+        var token = document.getElementById('sysEmailToken');
+        token.value = '';
+        token.placeholder = d.apiTokenMasked
+          ? 'Saved (' + d.apiTokenMasked + ') — leave blank to keep'
+          : 'Paste the private integration token';
+
+        renderSystemEmailChips(d.placeholders || []);
+        setSystemEmailStatus(d);
+      })
+      .catch(function (e) {
+        setSystemEmailStatus({ configured: false });
+        toast(e.message, 'error');
+      });
+  }
+
+  function setSystemEmailStatus(d) {
+    var el = document.getElementById('sysEmailStatus');
+    if (!el) return;
+    el.textContent = d.configured
+      ? 'Sending as ' + (d.fromName ? d.fromName + ' <' + d.fromEmail + '>' : d.fromEmail) + '.'
+      : 'Not connected — invites fall back to the webhook below, or only produce a copyable link.';
+  }
+
+  function renderSystemEmailChips(placeholders) {
+    var el = document.getElementById('sysEmailChips');
+    if (!el) return;
+    el.innerHTML = '<span class="muted" style="font-size:0.8rem">Insert: </span>' +
+      placeholders.map(function (p) {
+        return '<button type="button" class="btn btn--ghost btn--sm" data-chip="' + esc(p) + '">{{' + esc(p) + '}}</button>';
+      }).join(' ');
+    $$('#sysEmailChips [data-chip]').forEach(function (btn) {
+      btn.addEventListener('click', function () { insertSystemEmailChip(btn.dataset.chip); });
+    });
+  }
+
+  /** Drop the placeholder at the cursor, so nobody has to type braces from memory. */
+  function insertSystemEmailChip(name) {
+    var ta = document.getElementById('sysEmailBody');
+    var token = '{{' + name + '}}';
+    var start = ta.selectionStart || 0;
+    var end = ta.selectionEnd || 0;
+    ta.value = ta.value.slice(0, start) + token + ta.value.slice(end);
+    ta.selectionStart = ta.selectionEnd = start + token.length;
+    ta.focus();
+  }
+
+  function saveSystemEmail() {
+    var body = {
+      apiToken: document.getElementById('sysEmailToken').value,
+      locationId: document.getElementById('sysEmailLocation').value.trim(),
+      fromEmail: document.getElementById('sysEmailFrom').value.trim(),
+      fromName: document.getElementById('sysEmailFromName').value.trim(),
+      subjectTemplate: document.getElementById('sysEmailSubject').value,
+      bodyTemplate: document.getElementById('sysEmailBody').value
+    };
+    api('/api/team/system-email', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+      .then(function (d) {
+        toast('System email saved', 'success');
+        var token = document.getElementById('sysEmailToken');
+        token.value = '';
+        if (d.apiTokenMasked) token.placeholder = 'Saved (' + d.apiTokenMasked + ') — leave blank to keep';
+        setSystemEmailStatus(d);
+      })
+      .catch(function (e) { toast(e.message, 'error'); });
+  }
+
+  function testSystemEmail(btn) {
+    withBusy(btn, api('/api/team/system-email/test', { method: 'POST' }))
+      .then(function (r) {
+        if (r.ok) {
+          toast('Test email sent to ' + r.to + ' via ' + (r.via === 'ghl' ? 'GoHighLevel' : 'the fallback webhook'), 'success');
+        } else {
+          toast('Test failed: ' + (r.detail || 'unknown error'), 'error');
+        }
+      })
+      .catch(function (e) { toast(e.message, 'error'); });
+  }
+
+  function previewSystemEmail() {
+    api('/api/team/system-email/preview', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        subjectTemplate: document.getElementById('sysEmailSubject').value,
+        bodyTemplate: document.getElementById('sysEmailBody').value
+      })
+    })
+      .then(function (d) {
+        var el = document.getElementById('sysEmailResult');
+        el.hidden = false;
+        el.className = 'invite-result invite-result--success';
+        el.innerHTML = '<div class="muted" style="font-size:0.8rem;margin-bottom:0.5rem">Subject: ' + esc(d.subject) + '</div>' + d.html;
+      })
+      .catch(function (e) { toast(e.message, 'error'); });
+  }
+
+  function resetSystemEmailTemplate() {
+    document.getElementById('sysEmailSubject').value = systemEmailDefaults.subject || '';
+    document.getElementById('sysEmailBody').value = systemEmailDefaults.body || '';
+    document.getElementById('sysEmailResult').hidden = true;
+    toast('Template reset — press Save to keep it', 'success');
   }
 
   function renderTeamMembers(users) {
@@ -2196,6 +2316,11 @@
       })
       .catch(function (e) { toast(e.message, 'error'); });
   });
+
+  document.getElementById('sysEmailSave').addEventListener('click', saveSystemEmail);
+  document.getElementById('sysEmailReset').addEventListener('click', resetSystemEmailTemplate);
+  document.getElementById('sysEmailPreview').addEventListener('click', previewSystemEmail);
+  document.getElementById('sysEmailTest').addEventListener('click', function () { testSystemEmail(this); });
 
   document.getElementById('accountBtn').addEventListener('click', function (e) {
     e.stopPropagation();

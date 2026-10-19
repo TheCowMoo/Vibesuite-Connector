@@ -13,7 +13,16 @@ export const ghlHttp: AxiosInstance = axios.create({
 
 const accessTokenCache = new Map<string, { token: string; expiresAt: number }>();
 
-async function resolveGhlToken(conn: StoredConnection): Promise<string> {
+/**
+ * The slice of a connection `ghlRequest` actually needs.
+ *
+ * Widening to a `Pick` (rather than requiring a whole `StoredConnection`) lets system-level calls —
+ * like sending platform email — supply their own credentials without inventing a fake connection.
+ * Every existing call site still passes a full `StoredConnection`, which satisfies this.
+ */
+export type GhlRequestTarget = Pick<StoredConnection, 'id' | 'ghlAuthType' | 'ghlApiToken' | 'ghlRefreshToken'>;
+
+async function resolveGhlToken(conn: GhlRequestTarget): Promise<string> {
   if (conn.ghlAuthType === 'api_token') {
     if (!conn.ghlApiToken) throw new Error(`connection ${conn.id}: missing GHL API token`);
     return conn.ghlApiToken;
@@ -32,7 +41,7 @@ async function resolveGhlToken(conn: StoredConnection): Promise<string> {
 }
 
 export async function ghlRequest<T>(
-  conn: StoredConnection,
+  conn: GhlRequestTarget,
   config: AxiosRequestConfig,
   opts: { idempotencyKey?: string } = {}
 ): Promise<T> {

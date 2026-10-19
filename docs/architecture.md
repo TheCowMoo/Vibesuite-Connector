@@ -149,6 +149,38 @@ those scopes the call 403s → `getJson()` returns null → no link, which is th
 the failure mode is benign. Note step 3 always builds the `/j/` **meeting** form; whether Zoom accepts
 that for a webinar is unverified, which is why step 2 matters.
 
+## System email
+
+Platform mail — team invites and account notices — goes through **GoHighLevel's Conversations API**,
+not SMTP and not the calendar path. Calendar invitations are deliberately excluded: those are sent by
+each connection's own Google account (`createInviteEvent` → `sendUpdates: 'all'`), so they must never
+be routed through here.
+
+`sendSystemEmail()` (`domain/systemEmail.ts`) delivers, in this order:
+
+1. **GHL, when configured** — upsert the recipient as a contact (`POST /contacts/upsert`, with
+   `source: 'vibesuite team invite'` so teammates are distinguishable from leads), then
+   `POST /conversations/messages` with `type: Email`. The Conversations endpoint requires a
+   `contactId`, which is why the upsert is unavoidable.
+2. **The GHL inbound webhook** (`TEAM_INVITE_WEBHOOK_URL`, or the per-team setting) when GHL is not
+   configured *or* when the GHL send throws — so a workflow already built against it keeps working
+   across a deploy.
+3. **Nothing** — the invite still returns a copyable link, and the caller is told which path was used.
+
+`ghlRequest()` now accepts a `GhlRequestTarget` (a `Pick` of the fields it actually reads) rather than a
+full `StoredConnection`, so the system path reuses the same retry, backoff, `Retry-After` and 401
+handling without fabricating a connection.
+
+The email body is an **admin-editable template** (`domain/inviteEmail.ts`, pure and unit-tested): a
+subject plus a plain-text body with `{{placeholders}}`. It is escaped first and linkified second, so
+neither the template nor a recipient's display name can inject markup into a message sent on the
+operator's behalf. `{{inviteUrl}}` is mandatory — a template without it is rejected on save, because
+otherwise the email would send successfully and be unusable.
+
+Credentials and template live in `settings:systemEmail`, encrypted with `CREDENTIALS_ENCRYPTION_KEY`
+and exposed only as a masked token. **The from address must be a verified sender on that GHL
+location**, or GHL rejects it or silently substitutes the location default.
+
 ## Advisor
 
 The Advisor tab is advisory-only: `analyzeAdvisor()` builds a **PII-free aggregate snapshot**,
