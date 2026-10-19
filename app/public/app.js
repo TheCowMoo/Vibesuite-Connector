@@ -674,6 +674,8 @@
 
   var inviteAccountsRendered = false;
   var inviteCapacityTotal = 0;
+  var inviteCapacityKnown = false;   // false until /capacity answers, so "pending" never reads as "no room"
+  var inviteCapacityAccounts = [];   // last per-account result, used to name the actual blocker
 
   /** The ticked accounts, in the order they appear on screen. */
   function selectedInviteAccountIds() {
@@ -725,20 +727,33 @@
     if (!ids.length) {
       if (note) note.textContent = 'Tick at least one account to send from.';
       inviteCapacityTotal = 0;
+      inviteCapacityKnown = false;
+      inviteCapacityAccounts = [];
+      syncInviteValidity();
       return;
     }
+
+    // "Not answered yet" must not look like "no room", or one slow request greys the button out.
+    inviteCapacityKnown = false;
+    if (note) note.textContent = 'Checking what each account can send…';
 
     api('/api/invites/capacity', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ connectionIds: ids }) })
       .then(function (d) {
         var total = 0;
-        (d.accounts || []).forEach(function (a) {
+        var accounts = d.accounts || [];
+
+        accounts.forEach(function (a) {
           var node = document.querySelector('#inviteAccountList [data-cap="' + a.connectionId + '"]');
           if (node) {
             node.textContent = a.allowance ? ' — ' + a.allowance + ' left today' : ' — ' + (a.reason || 'cannot send now');
           }
           total += a.allowance || 0;
         });
+
+        inviteCapacityAccounts = accounts;
         inviteCapacityTotal = total;
+        inviteCapacityKnown = true;
+
         if (note) {
           note.textContent = total
             ? 'About ' + total + ' can go out right now across the ticked accounts.'
@@ -746,7 +761,13 @@
         }
         syncInviteValidity();
       })
-      .catch(function (e) { if (note) note.textContent = 'Could not check capacity: ' + e.message; });
+      .catch(function (e) {
+        // Stay "unknown" rather than "zero": a failed check must not disable the button.
+        inviteCapacityKnown = false;
+        inviteCapacityAccounts = [];
+        if (note) note.textContent = 'Could not check capacity: ' + e.message;
+        syncInviteValidity();
+      });
   }
 
   function renderInviteLists() {
@@ -916,18 +937,40 @@
 
   function syncInviteValidity() {
     var btn = document.getElementById('inviteSend');
+    var why = document.getElementById('inviteWhy');
     var reasons = [];
-    if (!selectedInviteAccountIds().length) reasons.push('at least one Google account');
-    if (!document.getElementById('inviteList').value) reasons.push('a contact list');
-    if (!document.getElementById('inviteSummary').value.trim()) reasons.push('an event title');
+
+    if (!selectedInviteAccountIds().length) reasons.push('pick a Google account');
+    if (!document.getElementById('inviteList').value) reasons.push('choose a contact list');
+    if (!document.getElementById('inviteSummary').value.trim()) reasons.push('add an event title');
+
     var start = document.getElementById('inviteStart').value;
     var end = document.getElementById('inviteEnd').value;
-    if (!start || !end) reasons.push('start and end times');
-    else if (new Date(end) <= new Date(start)) reasons.push('an end after start');
-    if (!inviteRecipientCount) reasons.push('people to invite');
-    if (!inviteCapacityTotal) reasons.push('an account with room left to send');
+    if (!start || !end) reasons.push('set start and end times');
+    else if (new Date(end) <= new Date(start)) reasons.push('make the end later than the start');
+
+    if (!inviteRecipientCount) reasons.push('pick a list with people to invite');
+
+    // Only block on capacity once we actually know it, and name which account is the problem.
+    if (inviteCapacityKnown && !inviteCapacityTotal) {
+      var blocked = inviteCapacityAccounts
+        .filter(function (a) { return !a.allowance; })
+        .map(function (a) { return a.name + ': ' + (a.reason || 'cannot send'); });
+      reasons.push('an account with room to send' + (blocked.length ? ' (' + blocked.join('; ') + ')' : ''));
+    }
+
     btn.disabled = reasons.length > 0;
-    btn.title = reasons.length ? ('Send is disabled — choose ' + reasons.join(', ')) : 'Send invites';
+
+    // A disabled button shows no tooltip in any browser, so the reason has to be readable text.
+    if (why) {
+      if (reasons.length) {
+        why.textContent = 'Before you can send: ' + reasons.join(' · ');
+        why.classList.add('invite-actions__note--blocking');
+      } else {
+        why.textContent = 'Guest list is hidden from invitees';
+        why.classList.remove('invite-actions__note--blocking');
+      }
+    }
   }
 
   function renderInviteSummaryStrip(invites) {

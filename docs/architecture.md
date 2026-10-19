@@ -292,7 +292,10 @@ send onward; there is no backfill.
 The Invitations tab sends **now**, from one or more accounts. `planInviteSplit()`
 (`domain/invitePlan.ts`) splits the audience evenly across the chosen accounts, each capped at its own
 remaining headroom via `senderReadiness()` — the same call the campaign scheduler makes, so
-daily/hourly caps, cooldowns, a paused account and the send window all apply. Because the counters
+daily/hourly caps, cooldowns and a paused account all apply. The **send window is deliberately
+ignored** here (`ignoreWindow: true`): it exists to pace a bulk campaign, and a manual send is an
+explicit act — refusing it at 9pm because a default window says 9–5 would be surprising. Campaigns
+still honour it. Because the counters
 (`sender:day` / `sender:hour`) are keyed by mailbox rather than by feature, a successful invite
 **spends the same budget a campaign would**. A send that exceeds total headroom sends what it can and
 reports the remainder as `unplaced` rather than refusing outright or over-sending.

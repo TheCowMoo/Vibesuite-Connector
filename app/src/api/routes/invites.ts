@@ -81,6 +81,10 @@ async function accountAllowances(connectionIds: string[], now: Date): Promise<Ac
         sentToday: gauge.sentToday,
         hourlyCap: gauge.profile.hourlyCap,
         sentThisHour: gauge.sentThisHour,
+        // Sending invitations is an explicit act, not scheduled pacing — the send window exists to
+        // spread a bulk campaign, so it must not grey out a one-off send at 9pm. Caps and cooldowns
+        // below still apply, so an account with no headroom is still refused.
+        ignoreWindow: true,
       });
 
       return readiness.ready

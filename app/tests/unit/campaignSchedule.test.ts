@@ -139,3 +139,42 @@ describe('isStranded', () => {
     expect(isStranded({ enabled: false, cooling: false, queueLength: 0 })).toBe(false);
   });
 });
+
+describe('senderReadiness with ignoreWindow', () => {
+  const outside = { enabled: true, inWindow: false, now: 1_000_000, capToday: 100, sentToday: 40, sentThisHour: 0 };
+
+  it('refuses a mailbox outside its send window by default', () => {
+    expect(senderReadiness(outside)).toEqual({ ready: false, allowance: 0, reason: 'outside send window' });
+  });
+
+  /*
+   * The one-off invitation path passes ignoreWindow: a manual send is an explicit act, not scheduled
+   * pacing. That first assertion is the behaviour change; the rest are the guardrail proving nothing
+   * else relaxed with it.
+   */
+  it('lets a manual send through outside the window', () => {
+    expect(senderReadiness({ ...outside, ignoreWindow: true })).toEqual({ ready: true, allowance: 60 });
+  });
+
+  it('still enforces caps, cooldowns and pause when the window is ignored', () => {
+    expect(senderReadiness({ ...outside, ignoreWindow: true, hourlyCap: 20, sentThisHour: 5 })).toEqual({
+      ready: true,
+      allowance: 15,
+    });
+    expect(senderReadiness({ ...outside, ignoreWindow: true, sentToday: 100 })).toEqual({
+      ready: false,
+      allowance: 0,
+      reason: 'daily cap reached',
+    });
+    expect(senderReadiness({ ...outside, ignoreWindow: true, coolingUntil: 2_000_000 })).toEqual({
+      ready: false,
+      allowance: 0,
+      reason: 'cooling down',
+    });
+    expect(senderReadiness({ ...outside, ignoreWindow: true, enabled: false })).toEqual({
+      ready: false,
+      allowance: 0,
+      reason: 'paused',
+    });
+  });
+});
