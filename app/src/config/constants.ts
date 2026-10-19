@@ -34,6 +34,7 @@ export const REDIS_KEYS = {
   invite: (id: string) => `invite:${id}`,
   listInvites: (listId: string) => `list:${listId}:invites`,
   listInvited: (listId: string) => `list:${listId}:invited`,
+  listInvitedMeta: (listId: string) => `list:${listId}:invitedMeta`,
   videoSettings: () => 'settings:video',
   sessionsIndex: () => 'sessions:index',
   session: (id: string) => `session:${id}`,

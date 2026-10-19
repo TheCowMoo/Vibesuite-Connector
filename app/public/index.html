@@ -172,6 +172,11 @@
             <div id="inviteSegments" role="group" aria-label="Segments"><p class="muted">Choose a list to see its segments.</p></div>
           </div>
           <div class="invite-preview" id="inviteRecipients" aria-live="polite">Select a list to preview recipients.</div>
+          <div class="field" id="inviteReinviteWrap" hidden>
+            <label class="daychk"><input type="checkbox" id="inviteReinvite" /><span>Also invite people who were already invited</span></label>
+            <p class="muted" id="inviteReinviteNote" style="margin:0.4rem 0 0"></p>
+            <div class="reinvite-list muted" id="invitePrevList"></div>
+          </div>
         </div>
       </div>
 
@@ -640,6 +645,7 @@
       <label class="field"><span class="field__label">Timezone</span><input id="campTz" list="tzList" value="UTC" /></label>
     </div>
     <div class="field"><span class="field__label">Which groups to include (leave empty for all)</span><div class="daychks" id="campSegments"></div></div>
+    <div class="field"><label class="daychk"><input type="checkbox" id="campIncludeInvited" /><span>Also invite people who were already invited</span></label></div>
     <div class="field"><span class="field__label">Who this will reach</span><div id="campAudience" aria-live="polite"><span class="muted">Pick a contact list to see who will be invited.</span></div></div>
     <div class="invite-row">
       <label class="field"><span class="field__label">Email subject</span><input id="campSummary" placeholder="Webinar: ..." /></label>

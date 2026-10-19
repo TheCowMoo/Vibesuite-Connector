@@ -56,7 +56,13 @@ async function resolveJoinUrl(camp: Campaign): Promise<string | undefined> {
 /** Freeze the audience, drop anyone already invited for that list, partition across senders. */
 export async function startCampaign(
   id: string,
-): Promise<{ recipients: number; perSender: Record<string, number>; alreadyInvited: number; invalid: number }> {
+): Promise<{
+  recipients: number;
+  perSender: Record<string, number>;
+  alreadyInvited: number;
+  invalid: number;
+  reInviting: number;
+}> {
   const camp = await getCampaign(id);
   if (!camp) throw new Error('campaign not found');
 
@@ -65,9 +71,17 @@ export async function startCampaign(
 
   // The same helper the invite composer previews with, so what the operator was shown before
   // pressing Begin sending is exactly what gets frozen here.
-  const audience = buildAudience(list.result, camp.segments, await getInvitedEmails(camp.listId));
+  // `includeAlreadyInvited` lets an operator deliberately re-invite a list. The repeat count is
+  // taken against the unfiltered set, so the caller can report how many are re-invitations.
+  const allInvited = await getInvitedEmails(camp.listId);
+  const audience = buildAudience(
+    list.result,
+    camp.segments,
+    camp.includeAlreadyInvited ? new Set<string>() : allInvited,
+  );
   const emails = audience.emails;
   if (!emails.length) throw new Error(describeEmptyAudience(audience));
+  const reInviting = camp.includeAlreadyInvited ? emails.filter((e) => allInvited.has(e)).length : 0;
 
   const connectionIds = camp.senders.map((s) => s.connectionId);
   await clearCampaignQueues(id, connectionIds);
@@ -91,7 +105,13 @@ export async function startCampaign(
   camp.completedAt = undefined;
   await saveCampaign(camp);
 
-  return { recipients: records.length, perSender, alreadyInvited: audience.alreadyInvited.length, invalid: audience.invalid.length };
+  return {
+    recipients: records.length,
+    perSender,
+    alreadyInvited: audience.alreadyInvited.length,
+    invalid: audience.invalid.length,
+    reInviting,
+  };
 }
 
 export interface SenderBatchResult {
@@ -195,7 +215,11 @@ export async function sendFromSender(
         for (const email of part) {
           await saveRecipient(campaignId, { email, connectionId: ps.connectionId, status: 'sent', sentAt: Date.now(), eventId: res.id });
         }
-        await markInvited(camp.listId, part);
+        await markInvited(camp.listId, part, {
+          summary: camp.event.summary,
+          start: camp.event.start,
+          source: 'campaign',
+        });
         await bumpSenderDay(ps.connectionId, todayISO, 'sent', part.length);
         await bumpSenderHour(ps.connectionId, hourISO, part.length);
         await bumpCampaignSender(campaignId, ps.connectionId, 'sent', part.length);

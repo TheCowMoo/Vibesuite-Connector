@@ -271,6 +271,22 @@ created. `POST /api/campaigns/:id/start` returns the counts so the UI can say ho
 can report how long the send will take before it has started — the only moment that estimate is
 useful.
 
+### Re-inviting, and what we remember
+
+`list:{id}:invited` is the membership set, and `getInvitedEmails()` is deliberately unchanged: it is
+the fast check every filter uses. Alongside it, `list:{id}:invitedMeta` is a hash of
+`email → { summary, start, at, source }`, written by `markInvited(..., meta)` from both send paths, so
+the UI can say *"previously invited to <event> on <date>"* instead of only showing a count. The most
+recent invitation wins — that is the one you would act on when deciding to re-invite someone.
+
+Re-inviting is **opt-in in both places**: `force: true` on `POST /api/invites`, and a stored
+`includeAlreadyInvited` flag on a campaign (default `false`). It is never automatic, because
+re-inviting emails those people a second time and creates a second calendar event.
+
+Anyone invited before `invitedMeta` existed has no entry, so `labelPreviousInvite()` degrades to a
+plain "previously invited" rather than implying an event it cannot name. Labels fill in from the next
+send onward; there is no backfill.
+
 ### One-off invitations vs campaigns
 
 The Invitations tab sends **now**, from one or more accounts. `planInviteSplit()`

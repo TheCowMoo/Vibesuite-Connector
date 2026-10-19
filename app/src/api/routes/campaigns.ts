@@ -107,7 +107,8 @@ export async function campaignRoutes(app: FastifyInstance): Promise<void> {
     if (total === 0) {
       const list = await getList(camp.listId);
       if (list && list.result) {
-        total = buildAudience(list.result, camp.segments, await getInvitedEmails(camp.listId)).emails.length;
+        const invited = camp.includeAlreadyInvited ? new Set<string>() : await getInvitedEmails(camp.listId);
+        total = buildAudience(list.result, camp.segments, invited).emails.length;
       }
     }
     if (total === 0) total = Math.max(0, Number(q.total ?? 0) || 0);

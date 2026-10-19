@@ -32,6 +32,11 @@ export const CampaignSchema = z.object({
   event: CampaignEventSchema,
   senders: z.array(CampaignSenderSchema).min(1),
   distribution: z.object({ mode: z.enum(['even', 'weighted']).default('even') }).default({ mode: 'even' }),
+  /**
+   * Deliberately re-invite people who already received an invitation for this list. Off by default:
+   * a second send silently re-inviting everyone is exactly what the invited-set filter prevents.
+   */
+  includeAlreadyInvited: z.boolean().default(false),
   createdAt: z.number(),
   startedAt: z.number().optional(),
   completedAt: z.number().optional(),

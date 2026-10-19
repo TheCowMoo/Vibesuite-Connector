@@ -817,6 +817,7 @@
       el.innerHTML = '<span class="muted">Pick a contact list to see who will be invited.</span>';
       inviteRecipientCount = 0;
       updateInviteSegmentCounts(null);
+      renderReinviteBlock([], []);
       syncInviteValidity();
       return;
     }
@@ -830,9 +831,46 @@
         if (d.alreadyInvited && d.alreadyInvited.length) html += pill('already invited', d.alreadyInvited.length, 'warn');
         if (!d.emails.length) html += ' <span class="muted" style="font-size:0.85rem">Nobody new to invite.</span>';
         el.innerHTML = html;
+        renderReinviteBlock(d.alreadyInvited || [], d.previouslyInvited || []);
         syncInviteValidity();
       })
       .catch(function (e) { el.textContent = 'Preview failed: ' + e.message; syncInviteValidity(); });
+  }
+
+  /**
+   * "Previously invited" block: how many, which event, and a deliberate opt-in to invite them again.
+   *
+   * Hidden entirely when nobody on this list has been invited yet, so a first send sees no extra
+   * noise. Re-inviting is never the default — those people get a second invitation email.
+   */
+  function renderReinviteBlock(emails, labelled) {
+    var wrap = document.getElementById('inviteReinviteWrap');
+    if (!wrap) return;
+
+    var note = document.getElementById('inviteReinviteNote');
+    var list = document.getElementById('invitePrevList');
+
+    if (!emails.length) {
+      wrap.hidden = true;
+      if (note) note.textContent = '';
+      if (list) list.innerHTML = '';
+      return;
+    }
+
+    wrap.hidden = false;
+    if (note) {
+      note.textContent = emails.length + (emails.length === 1 ? ' person was' : ' people were') +
+        ' already invited to this list. Ticking the box invites them again — they will get a second invitation.';
+    }
+
+    var labelFor = {};
+    labelled.forEach(function (p) { labelFor[p.email] = p.label; });
+
+    var shown = emails.slice(0, 25).map(function (email) {
+      return '<div>' + esc(email) + ' — ' + esc(labelFor[email] || 'previously invited') + '</div>';
+    }).join('');
+    var more = emails.length > 25 ? '<div>…and ' + (emails.length - 25) + ' more</div>' : '';
+    if (list) list.innerHTML = shown + more;
   }
 
   function updateInviteSegmentCounts(perSegment) {
@@ -1042,15 +1080,25 @@
 
     api('/api/invites/preview', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ listId: listId, segments: selectedInviteSegments() }) })
       .then(function (p) {
-        if (!p.emails.length) { toast('Nobody left to invite — they have all been invited already, or the emails are not valid', 'error'); return; }
+        var already = (p.alreadyInvited || []).length;
+        var reinviteBox = document.getElementById('inviteReinvite');
+        var reinvite = !!(reinviteBox && reinviteBox.checked);
+        var reach = p.emails.length + (reinvite ? already : 0);
+
+        if (!reach) { toast('Nobody left to invite — they have all been invited already, or the emails are not valid', 'error'); return; }
+
         var accounts = connectionIds.length === 1 ? '1 Google account' : connectionIds.length + ' Google accounts';
-        return confirmDialog('Send invites?', 'This emails a real calendar invite to ' + p.emails.length + ' recipient(s), split across ' + accounts + '. It cannot be undone.', 'Send')
+        var extra = reinvite && already
+          ? ' It also re-invites ' + already + ' who were already invited, so they will get a second invitation.'
+          : '';
+        return confirmDialog('Send invites?', 'This emails a real calendar invite to ' + reach + ' recipient(s), split across ' + accounts + '.' + extra + ' It cannot be undone.', 'Send')
           .then(function (ok) {
             if (!ok) return;
             var body = {
               connectionIds: connectionIds,
               listId: listId,
               segments: selectedInviteSegments(),
+              force: reinvite || undefined,
               event: {
                 summary: summary,
                 description: document.getElementById('inviteDescription').value,
@@ -2514,15 +2562,20 @@
     }
     api('/api/invites/preview', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ listId: listId, segments: selectedCampaignSegments() }) })
       .then(function (d) {
-        var html = pill('people', d.emails.length, d.emails.length ? 'ok' : 'danger');
+        var includeBox = document.getElementById('campIncludeInvited');
+        var also = !!(includeBox && includeBox.checked);
+        var already = (d.alreadyInvited || []).length;
+        var reach = d.emails.length + (also ? already : 0);
+
+        var html = pill('people', reach, reach ? 'ok' : 'danger');
         if (d.duplicatesRemoved) html += pill('duplicates', d.duplicatesRemoved, 'neutral');
         if (d.invalid && d.invalid.length) html += pill('invalid', d.invalid.length, 'warn');
-        if (d.alreadyInvited && d.alreadyInvited.length) html += pill('already invited', d.alreadyInvited.length, 'warn');
-        if (!d.emails.length) {
+        if (already) html += pill('already invited', already, 'warn');
+        if (!reach) {
           html += ' <span class="muted" style="font-size:0.85rem">' +
-            (d.alreadyInvited && d.alreadyInvited.length
-              ? 'Everyone on this list has already been invited.'
-              : 'Nobody new to invite on this list.') + '</span>';
+            (already ? 'Everyone on this list has already been invited.' : 'Nobody new to invite on this list.') + '</span>';
+        } else if (also && already) {
+          html += ' <span class="muted" style="font-size:0.85rem">Includes ' + already + ' repeat invitation(s).</span>';
         }
         el.innerHTML = html;
       })
@@ -2551,6 +2604,7 @@
     start.setHours(10, 0, 0, 0);
     document.getElementById('campStart').value = campLocalInput(start);
     document.getElementById('campEnd').value = campLocalInput(new Date(start.getTime() + 3600000));
+    document.getElementById('campIncludeInvited').checked = false;
 
     renderCampSenderRows();
     loadCampaignSegments();
@@ -2600,7 +2654,8 @@
         timeZone: document.getElementById('campTz').value.trim() || 'UTC'
       },
       senders: senders,
-      distribution: { mode: document.getElementById('campMode').value }
+      distribution: { mode: document.getElementById('campMode').value },
+      includeAlreadyInvited: document.getElementById('campIncludeInvited').checked
     };
 
     withBusy(btn, api('/api/campaigns', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }))
@@ -2640,7 +2695,7 @@
 
     if (c.status === 'draft') {
       if (!total) {
-        return 'Not started yet, and this list has nobody new to invite. Everyone on it may already have been invited, or it has not been sorted into groups yet.';
+        return 'Not started yet, and this list has nobody to invite. Either everyone has already been invited, or the list has not been sorted into groups yet.';
       }
       if (!days) {
         return 'Not started yet. <strong>' + total + '</strong> are ready to invite, but nothing can send at the moment — check the <strong>Sending accounts</strong> tab.';
@@ -2670,7 +2725,8 @@
     document.getElementById('campaignDetailBody').innerHTML =
       '<div class="conn__head">' + campStatusChip(c.status) +
         '<span class="chip chip--neutral">' + esc(spreadLabel(c.distribution.mode)) + '</span>' +
-        '<span class="chip chip--neutral">' + esc(campListName(c.listId)) + '</span></div>' +
+        '<span class="chip chip--neutral">' + esc(campListName(c.listId)) + '</span>' +
+        (c.includeAlreadyInvited ? '<span class="chip chip--warning">includes repeat invitations</span>' : '') + '</div>' +
       '<div class="summary">' +
         '<div class="summary__item"><span class="summary__value">' + counts.total + '</span><span class="summary__label">people</span></div>' +
         '<div class="summary__item"><span class="summary__value">' + counts.sent + '</span><span class="summary__label">sent</span></div>' +
@@ -2721,6 +2777,8 @@
 
   $('#campaignNew').addEventListener('click', openCampaignWizard);
   $('#campList').addEventListener('change', loadCampaignSegments);
+  var campIncludeBox = document.getElementById('campIncludeInvited');
+  if (campIncludeBox) campIncludeBox.addEventListener('change', refreshCampAudience);
   $('#campSave').addEventListener('click', function () { saveCampaign(this); });
 
   $('#campSendNow').addEventListener('click', function () {
@@ -2771,7 +2829,8 @@
         if (r && typeof r.sent === 'number') extra = ' — ' + r.sent + ' sent' + (r.failed ? '. ' + r.failed + " didn't go through" : '');
         else if (r && typeof r.recipients === 'number') {
           extra = ' — ' + r.recipients + ' people added to the queue';
-          if (r.alreadyInvited) extra += ' (' + r.alreadyInvited + ' were already invited)';
+          if (r.reInviting) extra += ' (' + r.reInviting + ' are repeat invitations)';
+          else if (r.alreadyInvited) extra += ' (' + r.alreadyInvited + ' were skipped as already invited)';
         }
         toast(route.msg + extra, 'success');
         loadCampaigns();

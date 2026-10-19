@@ -8,7 +8,8 @@ import { generateJson } from '../../lib/ai';
 import { createInviteEvent } from '../../google/events';
 import { chunk, hasTimeZoneOffset } from '../../domain/invite';
 import { buildAudience, describeEmptyAudience } from '../../domain/audience';
-import { createInviteRecord, listInvites, deleteInvite, getInvitedEmails, markInvited, type InviteSenderSummary } from '../../domain/inviteStore';
+import { createInviteRecord, listInvites, deleteInvite, getInvitedEmails, getInvitedMeta, markInvited, type InviteSenderSummary } from '../../domain/inviteStore';
+import { labelPreviousInvite } from '../../domain/reinvite';
 import { bumpSenderDay, bumpSenderHour, getSenderGauge, isoHour } from '../../domain/senderStore';
 import { senderReadiness } from '../../domain/campaignSchedule';
 import { isoDate } from '../../domain/senderLoad';
@@ -112,6 +113,7 @@ export async function inviteRoutes(app: FastifyInstance): Promise<void> {
     }
 
     const audience = buildAudience(rec.result, b.segments, await getInvitedEmails(b.listId));
+    const meta = await getInvitedMeta(b.listId);
 
     return {
       emails: audience.emails,
@@ -119,6 +121,13 @@ export async function inviteRoutes(app: FastifyInstance): Promise<void> {
       duplicatesRemoved: audience.duplicatesRemoved,
       invalid: audience.invalid,
       alreadyInvited: audience.alreadyInvited,
+      // The same people, each with a human label naming the event they were invited to. Returned
+      // alongside the plain `alreadyInvited` list so nothing that reads that is affected.
+      previouslyInvited: audience.alreadyInvited.map((email) => ({
+        email,
+        label: labelPreviousInvite(meta[email]),
+        meta: meta[email],
+      })),
     };
   });
 
@@ -278,7 +287,13 @@ export async function inviteRoutes(app: FastifyInstance): Promise<void> {
       await sleep(env.INVITE_DELAY_MS);
     }
 
-    if (sentEmails.length) await markInvited(b.listId, sentEmails);
+    if (sentEmails.length) {
+      await markInvited(b.listId, sentEmails, {
+        summary: ev.summary,
+        start: ev.start,
+        source: 'invite',
+      });
+    }
 
     const status = firstError ? (sentEmails.length ? 'partial' : 'failed') : 'sent';
     const primary = senders.find((s) => s.sent > 0) || senders[0];
