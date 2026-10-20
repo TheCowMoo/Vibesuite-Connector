@@ -4,6 +4,7 @@ import { getVideoSettings } from '../domain/videoSettings';
 import { refreshZoomToken, isInvalidGrant, zoomErrorDetail } from '../oauth/zoomOAuth';
 import {
   chooseZoomTokenSource,
+  defaultZoomAuthMode,
   expiryFrom,
   pickZoomAccount,
   tokenUsable,
@@ -37,7 +38,7 @@ async function getAccessToken(ctx?: VideoAuthContext): Promise<string> {
   const conn = ctx?.connectionId ? await getConnection(ctx.connectionId) : null;
 
   const source = chooseZoomTokenSource({
-    mode: settings.zoomAuthMode ?? 's2s',
+    mode: defaultZoomAuthMode(settings.zoomAuthMode),
     requestedUserId: ctx?.zoomUserId,
     accounts: conn?.zoomAccounts,
     tokens: conn?.zoomTokens,

@@ -2,6 +2,7 @@ import { redis } from '../queue/connection';
 import { REDIS_KEYS } from '../config/constants';
 import { env } from '../config/env';
 import { seal, open } from '../lib/crypto';
+import { defaultZoomAuthMode } from '../video/zoomAuth';
 import type { ZoomAuthMode } from './connection';
 
 export interface VideoSettings {
@@ -37,7 +38,7 @@ export async function saveVideoSettings(s: VideoSettings): Promise<void> {
 
 export function publicVideoSettings(s: VideoSettings): Record<string, unknown> {
   return {
-    zoomAuthMode: s.zoomAuthMode ?? 's2s',
+    zoomAuthMode: defaultZoomAuthMode(s.zoomAuthMode),
     zoom: s.zoom
       ? { accountId: s.zoom.accountId, clientId: s.zoom.clientId, clientSecretMasked: maskSecret(s.zoom.clientSecret) }
       : undefined,

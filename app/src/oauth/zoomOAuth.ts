@@ -6,6 +6,11 @@ const AUTHORIZE_URL = 'https://zoom.us/oauth/authorize';
 const TOKEN_URL = 'https://zoom.us/oauth/token';
 const API_BASE = 'https://api.zoom.us/v2';
 
+/** Whether the General App credentials the user-OAuth flow needs are present. */
+export function zoomOAuthConfigured(): boolean {
+  return !!(env.ZOOM_OAUTH_CLIENT_ID && env.ZOOM_OAUTH_CLIENT_SECRET);
+}
+
 function credentials(): { clientId: string; clientSecret: string } {
   if (!env.ZOOM_OAUTH_CLIENT_ID || !env.ZOOM_OAUTH_CLIENT_SECRET) {
     throw new Error(

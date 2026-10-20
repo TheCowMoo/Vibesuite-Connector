@@ -3,6 +3,18 @@ import type { ZoomAccountLink, ZoomAuthMode, ZoomTokenSet } from '../domain/conn
 /** Refresh this long before Zoom's stated expiry, so a call in flight cannot land on an expired token. */
 export const TOKEN_SKEW_MS = 60_000;
 
+/**
+ * Which authorisation mode an install runs in when nothing is stored.
+ *
+ * The General App is the default because it is the only mode where each Google account can own its
+ * Zoom identity. Server-to-server remains available as an explicit choice — and as an automatic
+ * fallback for a connection with no authorised hosts — so an existing S2S install keeps working
+ * unchanged even though the default moved.
+ */
+export function defaultZoomAuthMode(stored?: ZoomAuthMode): ZoomAuthMode {
+  return stored ?? 'user';
+}
+
 /** One Zoom identity's token, or the account-wide server-to-server app, or a reason neither is possible. */
 export type ZoomTokenSource =
   | {

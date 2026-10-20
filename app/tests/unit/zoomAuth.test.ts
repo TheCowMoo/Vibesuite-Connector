@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   chooseZoomTokenSource,
+  defaultZoomAuthMode,
   expiryFrom,
   pickZoomAccount,
   removeZoomAccount,
@@ -104,6 +105,19 @@ describe('reportAccessFromStatus', () => {
   it('leaves anything else unknown, so it is retried', () => {
     expect(reportAccessFromStatus(404)).toBe('unknown');
     expect(reportAccessFromStatus(0)).toBe('unknown');
+  });
+});
+
+describe('defaultZoomAuthMode', () => {
+  /* The General App is the default: it is the only mode where a Google account owns its Zoom identity. */
+  it('defaults to the General App when nothing is stored', () => {
+    expect(defaultZoomAuthMode()).toBe('user');
+    expect(defaultZoomAuthMode(undefined)).toBe('user');
+  });
+
+  it('honours an explicit choice either way', () => {
+    expect(defaultZoomAuthMode('user')).toBe('user');
+    expect(defaultZoomAuthMode('s2s')).toBe('s2s');
   });
 });
 

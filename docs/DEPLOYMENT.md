@@ -321,10 +321,12 @@ docker compose restart nginx
 
 Two modes, chosen in **Settings → Video conferencing**:
 
-- **Server-to-server** (default) — paste the Account ID, Client ID and Client secret from a
-  Server-to-Server OAuth app. No redirect URL, no consent screen, hourly token.
-- **Each Google account connects its own Zoom** — a **user-managed General App**; every Google account
-  authorises one or more Zoom hosts, and sessions name the host whose meetings to read.
+- **Each Google account connects its own Zoom** (default) — a **user-managed General App**. Every
+  Google account authorises one or more Zoom hosts, and sessions name the host whose meetings to read.
+  Nothing works in this mode until the app credentials below are set and a host is connected.
+- **Server-to-server** — paste the Account ID, Client ID and Client secret from a Server-to-Server OAuth
+  app. No redirect URL, no consent screen, hourly token. Still selectable, and used automatically for
+  any Google account that has no Zoom host connected.
 
 ### Creating the user-managed app
 
@@ -333,8 +335,12 @@ Two modes, chosen in **Settings → Video conferencing**:
 3. **OAuth redirect URL** *and* **OAuth allow list** must both contain
    `https://connect.vibesuite.io/oauth/zoom/callback` — it must match `OAUTH_BASE_URL` +
    `ZOOM_OAUTH_REDIRECT_PATH` exactly.
-4. Scopes: `user:read`, `meeting:read`, `webinar:read`. Add `report:read:admin` only if an account
-   admin will authorise the app — that scope is what unlocks polls, Q&A and the absentee list.
+4. Scopes: pick the equivalents of **user read**, **meeting read** and **webinar read** in the app's
+   scope picker. Zoom now presents granular names (for example `user:read:user`,
+   `meeting:read:meeting`, `webinar:read:webinar`) alongside the classic ones (`user:read`,
+   `meeting:read`, `webinar:read`) — use whichever the picker offers. Add the report scope
+   (`report:read:admin`) only if an account admin will authorise the app; that is what unlocks polls,
+   Q&A and the absentee list.
 5. Copy the **production** client id/secret (development credentials are separate) into `.env`:
 
 ```bash
@@ -348,6 +354,10 @@ Then apply it — an env change only, no rebuild required:
 docker compose up -d --force-recreate
 docker compose restart nginx
 ```
+
+Until those two values exist, the settings card shows *"Zoom sign-in is not set up yet"* instead of a
+**Connect Zoom** button, and `/oauth/zoom/start` answers with the same instruction rather than failing
+inside the URL builder.
 
 ### What to expect
 

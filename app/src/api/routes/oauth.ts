@@ -12,6 +12,7 @@ import {
   fetchZoomUser,
   probeZoomReportAccess,
   zoomErrorDetail,
+  zoomOAuthConfigured,
 } from '../../oauth/zoomOAuth';
 import { expiryFrom, upsertZoomAccount } from '../../video/zoomAuth';
 import { bootstrapConnection } from '../../domain/bootstrap';
@@ -134,6 +135,15 @@ export async function oauthRoutes(app: FastifyInstance): Promise<void> {
     }
     if (!(await getConnection(connectionId))) {
       reply.code(404).send({ error: 'connection not found' });
+      return;
+    }
+    if (!zoomOAuthConfigured()) {
+      // A browser lands here directly from the settings card, so say what is missing instead of
+      // failing inside the URL builder.
+      reply.code(400).send({
+        error:
+          'Zoom sign-in is not set up yet. Create a General App in the Zoom App Marketplace, then set ZOOM_OAUTH_CLIENT_ID and ZOOM_OAUTH_CLIENT_SECRET.',
+      });
       return;
     }
 

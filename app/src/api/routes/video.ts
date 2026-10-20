@@ -1,14 +1,20 @@
 import type { FastifyInstance } from 'fastify';
 import { getConnection, publicConnection, saveConnection } from '../../domain/connectionStore';
 import { getVideoSettings, saveVideoSettings, publicVideoSettings } from '../../domain/videoSettings';
-import { probeZoomReportAccess } from '../../oauth/zoomOAuth';
+import { probeZoomReportAccess, zoomOAuthConfigured } from '../../oauth/zoomOAuth';
 import { removeZoomAccount, withoutZoomToken } from '../../video/zoomAuth';
+import { defaultZoomAuthMode } from '../../video/zoomAuth';
 import { zoomAccessToken, zoomProvider } from '../../video';
 
 export async function videoRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/video/settings', async () => {
     const s = await getVideoSettings();
-    return { configured: !!(s.zoom || s.webinargeek), ...publicVideoSettings(s) };
+    return {
+      configured: !!(s.zoom || s.webinargeek),
+      ...publicVideoSettings(s),
+      // Lets the UI hide "Connect Zoom" until there is actually an app to connect to.
+      zoomUserOAuthConfigured: zoomOAuthConfigured(),
+    };
   });
 
   app.put('/api/video/settings', async (req, reply) => {
@@ -22,7 +28,7 @@ export async function videoRoutes(app: FastifyInstance): Promise<void> {
     }
 
     const existing = await getVideoSettings();
-    const mode = b.zoomAuthMode ?? existing.zoomAuthMode ?? 's2s';
+    const mode = b.zoomAuthMode ?? defaultZoomAuthMode(existing.zoomAuthMode);
 
     let zoom = existing.zoom;
     if (b.zoom) {
@@ -31,12 +37,13 @@ export async function videoRoutes(app: FastifyInstance): Promise<void> {
         clientId: b.zoom.clientId ?? existing.zoom?.clientId ?? '',
         clientSecret: b.zoom.clientSecret ? b.zoom.clientSecret : existing.zoom?.clientSecret ?? '',
       };
-      // Only required for the account-wide app. In `user` mode the per-connection authorisations
-      // are the credentials, so saving that mode must not demand them.
-      if (mode === 's2s' && (!zoom.accountId || !zoom.clientId || !zoom.clientSecret)) {
-        reply.code(400).send({ error: 'Zoom accountId, clientId and clientSecret are required for server-to-server' });
-        return;
-      }
+    }
+
+    // Picking server-to-server without credentials would save a mode that cannot authenticate, so
+    // reject it even when this request did not send a `zoom` block.
+    if (mode === 's2s' && (!zoom?.accountId || !zoom.clientId || !zoom.clientSecret)) {
+      reply.code(400).send({ error: 'server-to-server needs Zoom accountId, clientId and clientSecret' });
+      return;
     }
 
     const next = { zoomAuthMode: mode, zoom, webinargeek: existing.webinargeek };

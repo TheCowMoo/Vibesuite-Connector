@@ -173,8 +173,10 @@ webinars.
 
 ### Two Zoom authorisation modes
 
-`zoomAuthMode` in the video settings picks how a token is obtained. It defaults to **`s2s`**, so an
-existing install keeps behaving exactly as before until someone switches it.
+`zoomAuthMode` in the video settings picks how a token is obtained. It defaults to **`user`** (the
+General App). Server-to-server is still selectable, and it is also the automatic fallback for a
+connection with no authorised hosts — so an install that only has the old S2S credentials keeps
+working untouched even though the default moved.
 
 | Mode | Credentials | Token | Who it can read |
 |---|---|---|---|

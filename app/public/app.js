@@ -1510,8 +1510,8 @@
       '<p class="muted">Connect Zoom to cross-reference attendance. Google Meet and WebinarGeek are coming soon.</p>' +
       '<label class="field"><span class="field__label">How Zoom is connected</span>' +
         '<select id="zoomAuthMode">' +
+          '<option value="user">Each Google account connects its own Zoom (General App)</option>' +
           '<option value="s2s">One Zoom account for everything (server-to-server)</option>' +
-          '<option value="user">Each Google account connects its own Zoom</option>' +
         '</select></label>' +
       '<div id="zoomS2sFields">' +
         '<label class="field"><span class="field__label">Zoom — Account ID</span><input id="zoomAccountId" /></label>' +
@@ -1527,14 +1527,26 @@
   /** The connections last loaded for the Zoom host list, so Test can name a real host. */
   var zoomHostConnections = [];
 
-  function renderZoomHosts(conns) {
+  function renderZoomHosts(conns, opts) {
     zoomHostConnections = conns;
     var el = document.getElementById('zoomHosts');
     if (!el) return;
 
+    var mode = (opts && opts.mode) || 'user';
+    var ready = !!(opts && opts.userOAuthReady);
+
     if (!conns.length) {
       el.innerHTML = '<p class="muted">Link a Google account first — Zoom hosts are connected per Google account.</p>';
       return;
+    }
+
+    // Never offer a Connect button that would land on a half-configured OAuth route: without the
+    // General App credentials the browser gets an error page, which reads like a broken integration.
+    var footer;
+    if (mode !== 'user') {
+      footer = '<p class="muted">Server-to-server uses the credentials above. Switch to “Each Google account connects its own Zoom” to connect a host.</p>';
+    } else if (!ready) {
+      footer = '<p class="muted">Zoom sign-in is not set up yet. Create a General App in the Zoom App Marketplace, then set <code>ZOOM_OAUTH_CLIENT_ID</code> and <code>ZOOM_OAUTH_CLIENT_SECRET</code>.</p>';
     }
 
     el.innerHTML = conns.map(function (c) {
@@ -1550,13 +1562,17 @@
           '<button class="btn btn--ghost btn--sm" data-zoom-disconnect="' + esc(c.id) + '" data-zoom-user="' + esc(a.userId) + '">Disconnect</button></div>';
       }).join('');
 
+      var connect = (mode === 'user' && ready)
+        ? '<div class="conn__actions"><a class="btn btn--outline btn--sm" href="/oauth/zoom/start?connectionId=' +
+          encodeURIComponent(c.id) + '">' + (accounts.length ? 'Connect another Zoom account' : 'Connect Zoom') + '</a></div>'
+        : '';
+
       return '<div class="conn"><div class="conn__main">' +
         '<div class="conn__head"><span class="conn__name">' + esc(c.name) + '</span></div>' +
         (rows || '<p class="muted">No Zoom account connected.</p>') +
-        '<div class="conn__actions"><a class="btn btn--outline btn--sm" href="/oauth/zoom/start?connectionId=' +
-          encodeURIComponent(c.id) + '">' + (accounts.length ? 'Connect another Zoom account' : 'Connect Zoom') + '</a></div>' +
+        connect +
         '</div></div>';
-    }).join('');
+    }).join('') + (footer || '');
   }
 
   function wireVideo() {
@@ -1573,12 +1589,17 @@
         : 'Server-to-server uses the account credentials above.';
     }
 
+    var userOAuthReady = false;
+
     function loadHosts() {
-      return api('/api/connections').then(function (r) { renderZoomHosts(r.connections || []); }).catch(function () {});
+      return api('/api/connections').then(function (r) {
+        renderZoomHosts(r.connections || [], { mode: modeSel.value, userOAuthReady: userOAuthReady });
+      }).catch(function () {});
     }
 
     api('/api/video/settings').then(function (d) {
-      modeSel.value = d.zoomAuthMode || 's2s';
+      userOAuthReady = !!d.zoomUserOAuthConfigured;
+      modeSel.value = d.zoomAuthMode || 'user';
       applyMode();
       if (d.zoom) {
         document.getElementById('zoomAccountId').value = d.zoom.accountId || '';
@@ -1588,13 +1609,13 @@
       } else {
         document.getElementById('videoStatus').textContent = modeSel.value === 'user' ? modeHint() : 'Zoom not configured yet.';
       }
-    }).catch(function () {});
-
-    loadHosts();
+      return loadHosts();
+    }).catch(function () { loadHosts(); });
 
     modeSel.addEventListener('change', function () {
       applyMode();
       document.getElementById('videoStatus').textContent = modeHint();
+      loadHosts();
     });
 
     document.getElementById('zoomHosts').addEventListener('click', function (e) {
