@@ -23,4 +23,4 @@ export function getProvider(key: VideoProvider): VideoProviderImpl {
   return REGISTRY[key];
 }
 
-export { zoomProvider };
+export { zoomProvider, zoomAccessToken } from './zoom';

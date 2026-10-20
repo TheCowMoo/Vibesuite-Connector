@@ -171,6 +171,45 @@ integration is **read-only and retrospective**: every call it makes is a `GET`, 
 are `/report/*`, which only exist after the session has ended. It cannot create, edit, start or list
 webinars.
 
+### Two Zoom authorisation modes
+
+`zoomAuthMode` in the video settings picks how a token is obtained. It defaults to **`s2s`**, so an
+existing install keeps behaving exactly as before until someone switches it.
+
+| Mode | Credentials | Token | Who it can read |
+|---|---|---|---|
+| `s2s` | `accountId` + `clientId` + `clientSecret` pasted into Settings → Video conferencing | `grant_type=account_credentials`, no refresh token, re-requested hourly | the whole Zoom account that owns the app |
+| `user` | a **user-managed General App** (`ZOOM_OAUTH_CLIENT_ID/_SECRET`); each connection authorises its own hosts | `grant_type=authorization_code` once, then `grant_type=refresh_token` | only what that host can see |
+
+`chooseZoomTokenSource()` (`video/zoomAuth.ts`) is the single, pure decision point. In `user` mode it
+picks the host named on the session, or the connection's only host; with several hosts and none named
+it **refuses to guess**. A host that is listed but whose token is gone produces "needs reconnecting"
+rather than falling back to another identity — reading the wrong person's meetings and reporting an
+empty attendance list would be worse than an error. Only a tenant with *no* host authorised falls back
+to `s2s`, and only when that app is configured.
+
+Tokens are stored per host in `conn:{id}:secrets` (`zoomTokens`, keyed by Zoom user id, encrypted like
+every other credential) and cached in-process per identity — never in one shared slot, which would
+leak a token between tenants. Zoom may rotate the refresh token; the rotated value is persisted. An
+`invalid_grant` drops that host's tokens, so the UI asks for a reconnect instead of retrying a dead
+token forever.
+
+### Reports are optional; attendance is not
+
+A user-managed app authorised by a **non-admin host** is refused the report endpoints (401/403). That
+is expected, not an error, and it is handled:
+
+1. the refusal is recorded as `reportAccess: 'denied'` on that host, so we stop probing every sync;
+2. `fetch()` falls through to `GET /past_meetings|past_webinars/{id}/participants`, which a host can
+   read for their own meetings (retrying with the double-encoded `uuid` when the numeric id 404s);
+3. absentees, polls and Q&A come back empty, and a `notes` entry is stored on the session and shown
+   in the UI so an empty section is explained rather than looking broken.
+
+Attendance and no-show tagging still work in that mode because `buildReport()` derives no-shows from
+invited − attended (`domain/attendance.ts`); the report's absentee list is informational only. Hosts
+that *are* account admins, or whose app has been granted the report scope, get the rich path
+automatically — "Check access" re-probes without reconnecting.
+
 The link a calendar invite carries comes from `sessionJoinUrl()` (`domain/joinLink.ts`), in priority
 order:
 
@@ -182,12 +221,13 @@ order:
 Resolution happens when a session is created and at the start of `syncSession()` — deliberately
 **before** the report fetch, because that fetch throws for a session that has not run yet, which is
 exactly the one needing its link. That ordering is also what backfills existing sessions, one
-attendance-poll interval after deploy.
+attendance-poll interval after deploy. Both call sites pass a `VideoAuthContext`
+(`{ connectionId, zoomUserId }`) so the right host's token is used.
 
-Reading `join_url` needs `webinar:read` / `meeting:read` on the Zoom Server-to-Server app. Without
-those scopes the call 403s → `getJson()` returns null → no link, which is the previous behaviour, so
-the failure mode is benign. Note step 3 always builds the `/j/` **meeting** form; whether Zoom accepts
-that for a webinar is unverified, which is why step 2 matters.
+Reading `join_url` needs `webinar:read` / `meeting:read` on the Zoom app. Without those scopes the call
+403s → `getJson()` returns null → no link, which is the previous behaviour, so the failure mode is
+benign. Note step 3 always builds the `/j/` **meeting** form; whether Zoom accepts that for a webinar
+is unverified, which is why step 2 matters.
 
 ## System email
 

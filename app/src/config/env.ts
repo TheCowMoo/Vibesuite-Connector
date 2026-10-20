@@ -19,6 +19,14 @@ const EnvSchema = z.object({
   GHL_OAUTH_CLIENT_SECRET: z.string().optional(),
   GHL_OAUTH_REDIRECT_PATH: z.string().default('/oauth/ghl/callback'),
 
+  // Zoom user-managed General App (the optional per-connection authorisation). The
+  // server-to-server credentials live in Settings → Video conferencing, not here.
+  ZOOM_OAUTH_CLIENT_ID: z.string().optional(),
+  ZOOM_OAUTH_CLIENT_SECRET: z.string().optional(),
+  ZOOM_OAUTH_REDIRECT_PATH: z.string().default('/oauth/zoom/callback'),
+  /** Optional: pin the scopes on the authorise URL. Empty means "use whatever the Zoom app allows". */
+  ZOOM_OAUTH_SCOPES: z.string().default(''),
+
   // Encryption key for stored credentials (recommended in production).
   CREDENTIALS_ENCRYPTION_KEY: z.string().optional(),
 

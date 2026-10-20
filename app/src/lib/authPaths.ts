@@ -21,7 +21,7 @@ const PUBLIC_EXACT = new Set([
   '/api/auth/accept-invite',
 ]);
 
-const PUBLIC_PREFIXES = ['/static/', '/webhooks/google/calendar', '/oauth/google', '/oauth/ghl'];
+const PUBLIC_PREFIXES = ['/static/', '/webhooks/google/calendar', '/oauth/google', '/oauth/ghl', '/oauth/zoom'];
 
 export function isPublicPath(pathname: string): boolean {
   if (PUBLIC_EXACT.has(pathname)) return true;

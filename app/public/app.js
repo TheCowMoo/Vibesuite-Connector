@@ -1285,6 +1285,9 @@
             badge(new Date(s.startTime).toLocaleString()) +
           '</div>' +
           (s.error ? '<div class="muted" style="font-size:0.8rem">' + esc(s.error) + '</div>' : '') +
+          ((s.warnings || []).length
+            ? '<div class="muted" style="font-size:0.8rem">' + s.warnings.map(function (w) { return esc(w); }).join(' ') + '</div>'
+            : '') +
         '</div>' +
         '<div class="conn__actions">' +
           '<button class="btn btn--primary btn--sm" data-action="syncSession" data-id="' + esc(s.id) + '">Sync now</button>' +
@@ -1319,6 +1322,9 @@
       '<tr><th>Start</th><td>' + new Date(session.startTime).toLocaleString() + '</td></tr>' +
       '<tr><th>End</th><td>' + new Date(session.endTime).toLocaleString() + '</td></tr>' +
       (session.error ? '<tr><th>Error</th><td>' + esc(session.error) + '</td></tr>' : '') +
+      ((session.warnings || []).length
+        ? '<tr><th>Notes</th><td>' + session.warnings.map(function (w) { return esc(w); }).join('<br>') + '</td></tr>'
+        : '') +
       '</table>';
 
     var body = head;
@@ -1389,6 +1395,7 @@
       o.textContent = c.name;
       connSel.appendChild(o);
     });
+    renderSessionZoomHosts();
     api('/api/invites').then(function (d) {
       var invSel = document.getElementById('sessionInvite');
       invSel.innerHTML = '<option value="">None</option>';
@@ -1401,6 +1408,28 @@
     }).catch(function () {});
   }
 
+  /**
+   * Which Zoom host owns this call.
+   *
+   * Only meaningful when the Google account has Zoom hosts authorised (user-managed app). With one
+   * host it is preselected so the session records exactly whose meetings to read; with several the
+   * operator must choose rather than have the server guess.
+   */
+  function renderSessionZoomHosts() {
+    var sel = document.getElementById('sessionZoomHost');
+    var wrap = document.getElementById('sessionZoomHostWrap');
+    if (!sel || !wrap) return;
+
+    var connId = document.getElementById('sessionConnection').value;
+    var conn = (state.connections || []).filter(function (c) { return c.id === connId; })[0];
+    var accounts = (conn && conn.zoomAccounts) || [];
+
+    wrap.hidden = accounts.length === 0;
+    sel.innerHTML = accounts
+      .map(function (a) { return '<option value="' + esc(a.userId) + '">' + esc(a.email || a.userId) + '</option>'; })
+      .join('') || '<option value="">Automatic</option>';
+  }
+
   function saveNewSession() {
     var fd = new FormData(document.getElementById('newSessionForm'));
     var body = {
@@ -1411,6 +1440,7 @@
       startTime: fd.get('startTime'),
       endTime: fd.get('endTime'),
       connectionId: fd.get('connectionId') || undefined,
+      zoomUserId: fd.get('zoomUserId') || undefined,
       joinUrl: fd.get('joinUrl') || undefined,
       inviteId: fd.get('inviteId') || undefined
     };
@@ -1421,6 +1451,7 @@
   }
 
   document.getElementById('newSessionBtn').addEventListener('click', openNewSession);
+  document.getElementById('sessionConnection').addEventListener('change', renderSessionZoomHosts);
   document.getElementById('newSessionSave').addEventListener('click', saveNewSession);
   document.getElementById('sessionDispatch').addEventListener('click', dispatchSession);
 
@@ -1477,39 +1508,156 @@
   function videoCard() {
     return '<div class="card"><h3 class="card__title">Video conferencing</h3>' +
       '<p class="muted">Connect Zoom to cross-reference attendance. Google Meet and WebinarGeek are coming soon.</p>' +
-      '<label class="field"><span class="field__label">Zoom — Account ID</span><input id="zoomAccountId" /></label>' +
-      '<label class="field"><span class="field__label">Zoom — Client ID</span><input id="zoomClientId" /></label>' +
-      '<label class="field"><span class="field__label">Zoom — Client secret</span><input id="zoomClientSecret" type="password" placeholder="Leave blank to keep current" /></label>' +
+      '<label class="field"><span class="field__label">How Zoom is connected</span>' +
+        '<select id="zoomAuthMode">' +
+          '<option value="s2s">One Zoom account for everything (server-to-server)</option>' +
+          '<option value="user">Each Google account connects its own Zoom</option>' +
+        '</select></label>' +
+      '<div id="zoomS2sFields">' +
+        '<label class="field"><span class="field__label">Zoom — Account ID</span><input id="zoomAccountId" /></label>' +
+        '<label class="field"><span class="field__label">Zoom — Client ID</span><input id="zoomClientId" /></label>' +
+        '<label class="field"><span class="field__label">Zoom — Client secret</span><input id="zoomClientSecret" type="password" placeholder="Leave blank to keep current" /></label>' +
+      '</div>' +
+      '<div id="zoomHosts"></div>' +
       '<p class="muted" id="videoStatus"></p>' +
       '<div class="conn__actions"><button class="btn btn--ghost btn--sm" id="videoTest">Test</button><button class="btn btn--primary btn--sm" id="videoSave">Save</button></div>' +
       '</div>';
   }
 
+  /** The connections last loaded for the Zoom host list, so Test can name a real host. */
+  var zoomHostConnections = [];
+
+  function renderZoomHosts(conns) {
+    zoomHostConnections = conns;
+    var el = document.getElementById('zoomHosts');
+    if (!el) return;
+
+    if (!conns.length) {
+      el.innerHTML = '<p class="muted">Link a Google account first — Zoom hosts are connected per Google account.</p>';
+      return;
+    }
+
+    el.innerHTML = conns.map(function (c) {
+      var accounts = c.zoomAccounts || [];
+      var rows = accounts.map(function (a) {
+        var chip = a.reportAccess === 'granted'
+          ? '<span class="chip chip--success">Reports OK</span>'
+          : a.reportAccess === 'denied'
+            ? '<span class="chip chip--warning">No report access — attendance still syncs</span>'
+            : '<span class="chip chip--neutral">Report access unknown</span>';
+        return '<div class="conn__meta"><span class="conn__cal">' + esc(a.email || a.userId) + '</span>' + chip +
+          '<button class="btn btn--ghost btn--sm" data-zoom-probe="' + esc(c.id) + '" data-zoom-user="' + esc(a.userId) + '">Check access</button>' +
+          '<button class="btn btn--ghost btn--sm" data-zoom-disconnect="' + esc(c.id) + '" data-zoom-user="' + esc(a.userId) + '">Disconnect</button></div>';
+      }).join('');
+
+      return '<div class="conn"><div class="conn__main">' +
+        '<div class="conn__head"><span class="conn__name">' + esc(c.name) + '</span></div>' +
+        (rows || '<p class="muted">No Zoom account connected.</p>') +
+        '<div class="conn__actions"><a class="btn btn--outline btn--sm" href="/oauth/zoom/start?connectionId=' +
+          encodeURIComponent(c.id) + '">' + (accounts.length ? 'Connect another Zoom account' : 'Connect Zoom') + '</a></div>' +
+        '</div></div>';
+    }).join('');
+  }
+
   function wireVideo() {
+    var modeSel = document.getElementById('zoomAuthMode');
+    var s2sFields = document.getElementById('zoomS2sFields');
+
+    function applyMode() {
+      if (s2sFields) s2sFields.hidden = modeSel.value === 'user';
+    }
+
+    function modeHint() {
+      return modeSel.value === 'user'
+        ? 'Each Google account connects its own Zoom host below.'
+        : 'Server-to-server uses the account credentials above.';
+    }
+
+    function loadHosts() {
+      return api('/api/connections').then(function (r) { renderZoomHosts(r.connections || []); }).catch(function () {});
+    }
+
     api('/api/video/settings').then(function (d) {
+      modeSel.value = d.zoomAuthMode || 's2s';
+      applyMode();
       if (d.zoom) {
         document.getElementById('zoomAccountId').value = d.zoom.accountId || '';
         document.getElementById('zoomClientId').value = d.zoom.clientId || '';
         document.getElementById('zoomClientSecret').placeholder = d.zoom.clientSecretMasked ? ('Current: ' + d.zoom.clientSecretMasked) : 'Leave blank to keep current';
-        document.getElementById('videoStatus').textContent = 'Zoom configured.';
+        document.getElementById('videoStatus').textContent = modeSel.value === 'user' ? modeHint() : 'Zoom configured.';
       } else {
-        document.getElementById('videoStatus').textContent = 'Zoom not configured yet.';
+        document.getElementById('videoStatus').textContent = modeSel.value === 'user' ? modeHint() : 'Zoom not configured yet.';
       }
     }).catch(function () {});
 
+    loadHosts();
+
+    modeSel.addEventListener('change', function () {
+      applyMode();
+      document.getElementById('videoStatus').textContent = modeHint();
+    });
+
+    document.getElementById('zoomHosts').addEventListener('click', function (e) {
+      var disconnectBtn = e.target.closest('[data-zoom-disconnect]');
+      var probeBtn = e.target.closest('[data-zoom-probe]');
+      if (!disconnectBtn && !probeBtn) return;
+
+      var btn = disconnectBtn || probeBtn;
+      var id = disconnectBtn ? disconnectBtn.dataset.zoomDisconnect : probeBtn.dataset.zoomProbe;
+      var userId = btn.dataset.zoomUser;
+      var base = '/api/connections/' + encodeURIComponent(id) + '/zoom/accounts/' + encodeURIComponent(userId);
+
+      if (disconnectBtn) {
+        confirmDialog('Disconnect this Zoom account?', 'Attendance for this Google account stops syncing until a Zoom host is connected again.', 'Disconnect')
+          .then(function (ok) {
+            if (!ok) return;
+            withBusy(btn, api(base, { method: 'DELETE' }))
+              .then(function () { toast('Zoom account disconnected', 'success'); loadHosts(); })
+              .catch(function (err) { toast(err.message, 'error'); });
+          });
+        return;
+      }
+
+      withBusy(btn, api(base + '/probe', { method: 'POST' }))
+        .then(function (r) {
+          toast(
+            r.reportAccess === 'granted' ? 'Zoom reports are available' : 'Zoom still refuses report access for this host',
+            r.reportAccess === 'granted' ? 'success' : 'error'
+          );
+          loadHosts();
+        })
+        .catch(function (err) { toast(err.message, 'error'); });
+    });
+
     document.getElementById('videoSave').addEventListener('click', function () {
-      var body = { zoom: {
-        accountId: document.getElementById('zoomAccountId').value,
-        clientId: document.getElementById('zoomClientId').value,
-        clientSecret: document.getElementById('zoomClientSecret').value || undefined
-      } };
+      var mode = modeSel.value;
+      var body = { zoomAuthMode: mode };
+      if (mode === 's2s') {
+        body.zoom = {
+          accountId: document.getElementById('zoomAccountId').value,
+          clientId: document.getElementById('zoomClientId').value,
+          clientSecret: document.getElementById('zoomClientSecret').value || undefined
+        };
+      }
       withBusy(this, api('/api/video/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }))
-        .then(function () { document.getElementById('zoomClientSecret').value = ''; toast('Video settings saved', 'success'); })
+        .then(function () {
+          document.getElementById('zoomClientSecret').value = '';
+          toast('Video settings saved', 'success');
+          loadHosts();
+        })
         .catch(function (e) { toast(e.message, 'error'); });
     });
 
     document.getElementById('videoTest').addEventListener('click', function () {
-      withBusy(this, api('/api/video/test', { method: 'POST' }))
+      var body = {};
+      if (modeSel.value === 'user') {
+        var conn = zoomHostConnections.filter(function (c) { return (c.zoomAccounts || []).length; })[0];
+        if (conn) {
+          body.connectionId = conn.id;
+          body.zoomUserId = conn.zoomAccounts[0].userId;
+        }
+      }
+      withBusy(this, api('/api/video/test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }))
         .then(function (r) {
           if (r.ok) { document.getElementById('videoStatus').textContent = 'Zoom connection OK.'; toast('Zoom test OK', 'success'); }
           else { document.getElementById('videoStatus').textContent = 'Test failed — ' + (r.detail || 'unknown'); toast('Zoom test failed: ' + (r.detail || ''), 'error'); }

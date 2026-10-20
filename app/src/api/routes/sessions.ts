@@ -20,6 +20,7 @@ export async function sessionRoutes(app: FastifyInstance): Promise<void> {
       endTime: string;
       joinUrl?: string;
       connectionId?: string;
+      zoomUserId?: string;
       inviteId?: string;
       listId?: string;
     };
@@ -32,7 +33,10 @@ export async function sessionRoutes(app: FastifyInstance): Promise<void> {
     // saves exactly as it did before.
     if (!b.joinUrl) {
       try {
-        const resolved = await getProvider(b.provider).resolveJoinUrl?.(b.externalId, b.sessionType ?? 'meeting');
+        const resolved = await getProvider(b.provider).resolveJoinUrl?.(b.externalId, b.sessionType ?? 'meeting', {
+          connectionId: b.connectionId,
+          zoomUserId: b.zoomUserId,
+        });
         if (resolved) b.joinUrl = resolved;
       } catch {
         /* leave it blank; the dispatcher still has its synthesised fallback */

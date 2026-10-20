@@ -2,8 +2,15 @@ import { redis } from '../queue/connection';
 import { REDIS_KEYS } from '../config/constants';
 import { env } from '../config/env';
 import { seal, open } from '../lib/crypto';
+import type { ZoomAuthMode } from './connection';
 
 export interface VideoSettings {
+  /**
+   * How Zoom is authorised. `s2s` (default) is the original account-wide Server-to-Server app;
+   * `user` uses a user-managed General App where each connection holds its own authorised hosts.
+   * Absent means `s2s`, so existing installs behave exactly as before.
+   */
+  zoomAuthMode?: ZoomAuthMode;
   zoom?: { accountId: string; clientId: string; clientSecret: string };
   webinargeek?: { apiKey: string };
 }
@@ -30,6 +37,7 @@ export async function saveVideoSettings(s: VideoSettings): Promise<void> {
 
 export function publicVideoSettings(s: VideoSettings): Record<string, unknown> {
   return {
+    zoomAuthMode: s.zoomAuthMode ?? 's2s',
     zoom: s.zoom
       ? { accountId: s.zoom.accountId, clientId: s.zoom.clientId, clientSecretMasked: maskSecret(s.zoom.clientSecret) }
       : undefined,

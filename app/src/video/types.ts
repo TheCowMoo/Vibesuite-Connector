@@ -40,16 +40,28 @@ export interface ProviderFetchResult {
   sessionStats: Record<string, string>;
   polls: PollResult[];
   qa: QaEntry[];
+  /**
+   * Non-fatal explanations for anything that came back empty on purpose — e.g. a user-managed Zoom
+   * authorisation without report access has no polls or Q&A. Surfaced on the session so an empty
+   * section is explained instead of looking broken.
+   */
+  notes?: string[];
+}
+
+/** Which tenant a session belongs to, and which video host owns it. */
+export interface VideoAuthContext {
+  connectionId?: string;
+  zoomUserId?: string;
 }
 
 export interface VideoProviderImpl {
   key: VideoProvider;
-  fetch(externalId: string, sessionType?: SessionType): Promise<ProviderFetchResult>;
-  test(): Promise<{ ok: boolean; detail?: string }>;
+  fetch(externalId: string, sessionType?: SessionType, ctx?: VideoAuthContext): Promise<ProviderFetchResult>;
+  test(ctx?: VideoAuthContext): Promise<{ ok: boolean; detail?: string }>;
   /**
    * The shareable join link, if the provider can supply it *before* the session runs. Optional:
    * the report-based `fetch()` above only exists after the fact, so most providers will not have
    * anything to offer here.
    */
-  resolveJoinUrl?(externalId: string, sessionType?: SessionType): Promise<string | undefined>;
+  resolveJoinUrl?(externalId: string, sessionType?: SessionType, ctx?: VideoAuthContext): Promise<string | undefined>;
 }

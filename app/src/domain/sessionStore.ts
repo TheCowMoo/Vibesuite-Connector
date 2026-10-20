@@ -13,6 +13,8 @@ export interface SessionRecord {
   joinUrl?: string;
   title: string;
   connectionId?: string;
+  /** Which authorised Zoom host owns this session (user-managed Zoom auth). */
+  zoomUserId?: string;
   inviteId?: string;
   listId?: string;
   startTime: string;
@@ -20,6 +22,8 @@ export interface SessionRecord {
   status: SessionStatus;
   lastSyncedAt?: number;
   error?: string;
+  /** Non-fatal notes from the provider, e.g. why polls and Q&A are empty. */
+  warnings?: string[];
   samplePayload?: unknown;
   createdAt: number;
 }

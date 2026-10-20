@@ -112,20 +112,23 @@ export async function syncSession(sessionId: string): Promise<AttendanceReport> 
 
   try {
     const provider = getProvider(session.provider);
+    // Which tenant/mailbox this session belongs to — with per-connection Zoom auth this selects the
+    // right host token instead of the account-wide one.
+    const authCtx = { connectionId: session.connectionId, zoomUserId: session.zoomUserId };
 
     // Resolve the join link *before* the report fetch. `fetch()` reads the report API, which only
     // exists once the session has ended, so anything placed after it would never run for an
     // upcoming webinar — the one that actually needs its link. This also backfills sessions that
     // were created before we started storing one.
     if (!session.joinUrl && provider.resolveJoinUrl) {
-      const resolved = await provider.resolveJoinUrl(session.externalId, session.sessionType ?? 'meeting');
+      const resolved = await provider.resolveJoinUrl(session.externalId, session.sessionType ?? 'meeting', authCtx);
       if (resolved) {
         session.joinUrl = resolved;
         await saveSession(session);
       }
     }
 
-    const fetched = await provider.fetch(session.externalId, session.sessionType ?? 'meeting');
+    const fetched = await provider.fetch(session.externalId, session.sessionType ?? 'meeting', authCtx);
 
     const invited = await resolveInvitedEmails(session);
     const report = buildReport({
@@ -151,6 +154,8 @@ export async function syncSession(sessionId: string): Promise<AttendanceReport> 
     session.status = 'synced';
     session.lastSyncedAt = Date.now();
     session.error = undefined;
+    // Keep the provider's explanations (e.g. no report access) so an empty section is not a mystery.
+    session.warnings = fetched.notes;
     session.samplePayload = buildPayload(session, samplePerson, report);
     await saveSession(session);
 

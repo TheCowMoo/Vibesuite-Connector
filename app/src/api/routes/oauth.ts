@@ -6,13 +6,21 @@ import { logger } from '../../lib/logger';
 import { getConnection, saveConnection } from '../../domain/connectionStore';
 import { buildGoogleAuthUrl, exchangeGoogleCode } from '../../oauth/googleOAuth';
 import { buildGhlAuthUrl, exchangeGhlCode } from '../../oauth/ghlOAuth';
+import {
+  buildZoomAuthUrl,
+  exchangeZoomCode,
+  fetchZoomUser,
+  probeZoomReportAccess,
+  zoomErrorDetail,
+} from '../../oauth/zoomOAuth';
+import { expiryFrom, upsertZoomAccount } from '../../video/zoomAuth';
 import { bootstrapConnection } from '../../domain/bootstrap';
 
 const STATE_TTL_SECONDS = 600;
 
-async function storeState(connectionId: string): Promise<string> {
+async function storeState(value: string): Promise<string> {
   const state = randomBytes(16).toString('hex');
-  await redis.set(REDIS_KEYS.oauthState(state), connectionId, 'EX', STATE_TTL_SECONDS);
+  await redis.set(REDIS_KEYS.oauthState(state), value, 'EX', STATE_TTL_SECONDS);
   return state;
 }
 
@@ -112,6 +120,85 @@ export async function oauthRoutes(app: FastifyInstance): Promise<void> {
       return reply.redirect('/');
     } catch (err) {
       reply.code(500).send({ error: (err as Error).message });
+    }
+  });
+
+  // --- Zoom user OAuth (user-managed General App) ---
+  // Each connection holds its own authorised Zoom hosts, so the state is namespaced with `zoom:`.
+  // Without the prefix a Google state could be replayed at this callback.
+  app.get('/oauth/zoom/start', async (req, reply) => {
+    const connectionId = (req.query as { connectionId?: string }).connectionId;
+    if (!connectionId) {
+      reply.code(400).send({ error: 'connectionId is required' });
+      return;
+    }
+    if (!(await getConnection(connectionId))) {
+      reply.code(404).send({ error: 'connection not found' });
+      return;
+    }
+
+    const state = await storeState(`zoom:${connectionId}`);
+    try {
+      return reply.redirect(buildZoomAuthUrl(state));
+    } catch (err) {
+      reply.code(500).send({ error: (err as Error).message });
+    }
+  });
+
+  app.get('/oauth/zoom/callback', async (req, reply) => {
+    const { code, state } = req.query as { code?: string; state?: string };
+    if (!code || !state) {
+      reply.code(400).send({ error: 'missing code or state' });
+      return;
+    }
+
+    const stored = await consumeState(state);
+    if (!stored || !stored.startsWith('zoom:')) {
+      reply.code(400).send({ error: 'invalid or expired state' });
+      return;
+    }
+
+    const conn = await getConnection(stored.slice('zoom:'.length));
+    if (!conn) {
+      reply.code(404).send({ error: 'connection not found' });
+      return;
+    }
+
+    try {
+      const tokens = await exchangeZoomCode(code);
+      if (!tokens.refresh_token) {
+        reply.code(400).send({
+          error: 'Zoom did not return a refresh token — remove the app from Zoom and connect again',
+        });
+        return;
+      }
+
+      const user = await fetchZoomUser(tokens.access_token);
+      // Ask once, up front: a non-admin host is refused report access, and the UI needs to know now
+      // rather than showing empty polls later.
+      const reportAccess = await probeZoomReportAccess(tokens.access_token, user.id);
+
+      conn.zoomTokens = {
+        ...(conn.zoomTokens ?? {}),
+        [user.id]: {
+          refreshToken: tokens.refresh_token,
+          accessToken: tokens.access_token,
+          expiresAt: expiryFrom(Date.now(), tokens.expires_in),
+        },
+      };
+      conn.zoomAccounts = upsertZoomAccount(conn.zoomAccounts, {
+        userId: user.id,
+        email: user.email,
+        displayName: user.displayName,
+        connectedAt: Date.now(),
+        reportAccess,
+      });
+      conn.updatedAt = Date.now();
+      await saveConnection(conn);
+
+      return reply.redirect('/');
+    } catch (err) {
+      reply.code(500).send({ error: zoomErrorDetail(err) });
     }
   });
 }

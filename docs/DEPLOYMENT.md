@@ -317,6 +317,49 @@ docker compose restart nginx
 - Login attempts are rate-limited (10 per 15 min per email+IP).
 - With `AUTH_ENABLED=false` every route behaves exactly as before.
 
+## 9. Zoom authorisation (optional)
+
+Two modes, chosen in **Settings → Video conferencing**:
+
+- **Server-to-server** (default) — paste the Account ID, Client ID and Client secret from a
+  Server-to-Server OAuth app. No redirect URL, no consent screen, hourly token.
+- **Each Google account connects its own Zoom** — a **user-managed General App**; every Google account
+  authorises one or more Zoom hosts, and sessions name the host whose meetings to read.
+
+### Creating the user-managed app
+
+1. Zoom App Marketplace → **Developer → Build an app → General app**.
+2. Management type: **user-managed** (each host authorises their own Zoom user).
+3. **OAuth redirect URL** *and* **OAuth allow list** must both contain
+   `https://connect.vibesuite.io/oauth/zoom/callback` — it must match `OAUTH_BASE_URL` +
+   `ZOOM_OAUTH_REDIRECT_PATH` exactly.
+4. Scopes: `user:read`, `meeting:read`, `webinar:read`. Add `report:read:admin` only if an account
+   admin will authorise the app — that scope is what unlocks polls, Q&A and the absentee list.
+5. Copy the **production** client id/secret (development credentials are separate) into `.env`:
+
+```bash
+ZOOM_OAUTH_CLIENT_ID=your_client_id
+ZOOM_OAUTH_CLIENT_SECRET=your_client_secret
+```
+
+Then apply it — an env change only, no rebuild required:
+
+```bash
+docker compose up -d --force-recreate
+docker compose restart nginx
+```
+
+### What to expect
+
+- A host who is **not** a Zoom account admin connects fine but shows **No report access — attendance
+  still syncs**. That is Zoom refusing `/report/*` for a user-managed app; attendance is taken from the
+  past-meeting participant list instead, and polls/Q&A/absentees are unavailable. Sessions carry a note
+  saying so.
+- **Check access** re-probes a host after an admin grants the scope — no reconnect needed.
+- **Disconnect** removes just that host; other hosts on the same Google account keep working.
+- Tokens are stored encrypted in Redis (`conn:{id}:secrets`). Switching the mode back to server-to-server
+  restores the previous behaviour; nothing is migrated or deleted.
+
 ## Related docs
 
 - [`architecture.md`](architecture.md) — design decisions, data flow, Redis key map.

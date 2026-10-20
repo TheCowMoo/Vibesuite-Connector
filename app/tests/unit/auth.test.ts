@@ -46,6 +46,7 @@ describe('isPublicPath', () => {
     expect(isPublicPath('/webhooks/google/calendar')).toBe(true);
     expect(isPublicPath('/oauth/google/callback')).toBe(true);
     expect(isPublicPath('/oauth/ghl/callback')).toBe(true);
+    expect(isPublicPath('/oauth/zoom/callback')).toBe(true);
     expect(isPublicPath('/api/auth/login')).toBe(true);
     expect(isPublicPath('/api/auth/me')).toBe(true);
     expect(isPublicPath('/static/app.js')).toBe(true);
