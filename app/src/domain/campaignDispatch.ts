@@ -287,6 +287,25 @@ export async function finalizeIfDone(campaignId: string): Promise<boolean> {
  * mailboxes that can, so one bad mailbox never strands a campaign. Cooldowns are
  * temporary, but the work still moves — the cooled mailbox refills on its own.
  */
+/**
+ * Stop a campaign for good.
+ *
+ * Queues are intentionally left intact: the detail view still reports what never went out, and
+ * `counts.pending` stays truthful. Nothing already sent is recalled — people who were invited keep
+ * their calendar invitations.
+ */
+export async function endCampaign(id: string, reason?: string): Promise<Campaign | null> {
+  const camp = await getCampaign(id);
+  if (!camp) return null;
+  if (camp.status === 'ended' || camp.status === 'completed') return camp;
+
+  camp.status = 'ended';
+  camp.completedAt = Date.now();
+  if (reason) camp.lastError = reason;
+  await saveCampaign(camp);
+  return camp;
+}
+
 export async function redistributeStranded(camp: Campaign): Promise<number> {
   const gauges = await Promise.all(camp.senders.map((s) => getSenderGauge(s.connectionId)));
   const healthy: CampaignSender[] = [];

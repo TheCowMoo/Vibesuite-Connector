@@ -15,7 +15,7 @@ import {
   queueLength,
   saveCampaign,
 } from '../../domain/campaignStore';
-import { sendCampaignBatch, startCampaign } from '../../domain/campaignDispatch';
+import { sendCampaignBatch, startCampaign, endCampaign } from '../../domain/campaignDispatch';
 import { getSenderProfile } from '../../domain/senderStore';
 import { getList } from '../../domain/listStore';
 import { getInvitedEmails } from '../../domain/inviteStore';
@@ -235,5 +235,92 @@ export async function campaignRoutes(app: FastifyInstance): Promise<void> {
     camp.status = 'active';
     await saveCampaign(camp);
     return { ok: true, campaign: await withStats(camp) };
+  });
+
+  /** Put a draft or paused campaign on a timer, with an optional deadline. */
+  app.post('/api/campaigns/:id/schedule', guard, async (req, reply) => {
+    const id = (req.params as { id: string }).id;
+    const camp = await getCampaign(id);
+    if (!camp) {
+      reply.code(404).send({ error: 'campaign not found' });
+      return;
+    }
+    if (camp.status === 'active' || camp.status === 'completed' || camp.status === 'ended') {
+      reply.code(400).send({ error: 'only a draft or paused campaign can be scheduled' });
+      return;
+    }
+
+    const b = (req.body || {}) as { startAt?: number; sendByAt?: number };
+    const startAt = Number(b.startAt);
+    if (!Number.isFinite(startAt)) {
+      reply.code(400).send({ error: 'a start time is required' });
+      return;
+    }
+    if (startAt <= Date.now()) {
+      reply.code(400).send({ error: 'the start time must be in the future' });
+      return;
+    }
+
+    let sendByAt: number | undefined;
+    if (b.sendByAt !== undefined && b.sendByAt !== null) {
+      sendByAt = Number(b.sendByAt);
+      if (!Number.isFinite(sendByAt)) {
+        reply.code(400).send({ error: 'the stop time is not valid' });
+        return;
+      }
+      if (sendByAt <= startAt) {
+        reply.code(400).send({ error: 'the stop time must be after the start time' });
+        return;
+      }
+    }
+
+    camp.scheduledStartAt = startAt;
+    camp.sendByAt = sendByAt;
+    camp.status = 'scheduled';
+    camp.lastError = undefined;
+    await saveCampaign(camp);
+
+    return { ok: true, campaign: await withStats(camp) };
+  });
+
+  /** Take a campaign back off the timer. It returns to being a draft, not an ended one. */
+  app.post('/api/campaigns/:id/unschedule', guard, async (req, reply) => {
+    const id = (req.params as { id: string }).id;
+    const camp = await getCampaign(id);
+    if (!camp) {
+      reply.code(404).send({ error: 'campaign not found' });
+      return;
+    }
+    if (camp.status !== 'scheduled') {
+      reply.code(400).send({ error: 'this campaign is not scheduled' });
+      return;
+    }
+
+    camp.status = 'draft';
+    camp.scheduledStartAt = undefined;
+    camp.lastError = undefined;
+    await saveCampaign(camp);
+
+    return { ok: true, campaign: await withStats(camp) };
+  });
+
+  /**
+   * Stop sending for good. Anyone already invited keeps their calendar invitation — this only halts
+   * future sends, and the untouched recipients stay uninvited.
+   */
+  app.post('/api/campaigns/:id/end', guard, async (req, reply) => {
+    const id = (req.params as { id: string }).id;
+    const camp = await getCampaign(id);
+    if (!camp) {
+      reply.code(404).send({ error: 'campaign not found' });
+      return;
+    }
+    if (camp.status !== 'active' && camp.status !== 'paused') {
+      reply.code(400).send({ error: 'only a running or paused campaign can be ended' });
+      return;
+    }
+
+    const ended = await endCampaign(id);
+    return { ok: true, campaign: ended ? await withStats(ended) : null };
   });
 }

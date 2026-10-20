@@ -675,6 +675,16 @@
     </div>
     <div class="field"><span class="field__label">Which groups to include (leave empty for all)</span><div class="daychks" id="campSegments"></div></div>
     <div class="field"><label class="daychk"><input type="checkbox" id="campIncludeInvited" /><span>Also invite people who were already invited</span></label></div>
+    <div class="invite-row">
+      <label class="field"><span class="field__label">Start sending</span>
+        <select id="campStartMode">
+          <option value="now">Right away</option>
+          <option value="later">At a specific time</option>
+        </select>
+      </label>
+      <label class="field" id="campStartAtWrap" hidden><span class="field__label">Start at</span><input type="datetime-local" id="campStartAt" /></label>
+      <label class="field"><span class="field__label">Stop sending by (optional)</span><input type="datetime-local" id="campStopBy" /></label>
+    </div>
     <div class="field"><span class="field__label">Who this will reach</span><div id="campAudience" aria-live="polite"><span class="muted">Pick a contact list to see who will be invited.</span></div></div>
     <div class="invite-row">
       <label class="field"><span class="field__label">Email subject</span><input id="campSummary" placeholder="Webinar: ..." /></label>
@@ -687,6 +697,24 @@
       <span class="spacer"></span>
       <button class="btn btn--ghost" data-close="newCampaign">Cancel</button>
       <button class="btn btn--primary" id="campSave">Create campaign</button>
+    </div>
+  </div>
+</div>
+
+<!-- Schedule campaign -->
+<div class="backdrop" id="campScheduleModal" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="campScheduleTitle">
+    <div class="modal__head">
+      <h2 class="modal__title" id="campScheduleTitle">Schedule this campaign</h2>
+      <button class="icon-btn" data-close="campScheduleModal" aria-label="Close">&times;</button>
+    </div>
+    <label class="field"><span class="field__label">Start sending at</span><input type="datetime-local" id="campScheduleStart" /></label>
+    <label class="field"><span class="field__label">Stop sending by (optional)</span><input type="datetime-local" id="campScheduleStop" /></label>
+    <p class="muted" id="campScheduleNote">Nobody is invited until the start time. The audience is fixed at that moment, so anyone already invited elsewhere is skipped.</p>
+    <div class="modal__foot">
+      <span class="spacer"></span>
+      <button class="btn btn--ghost" data-close="campScheduleModal">Cancel</button>
+      <button class="btn btn--primary" id="campScheduleSave">Schedule</button>
     </div>
   </div>
 </div>

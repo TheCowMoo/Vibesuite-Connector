@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { dailyCapFor, type SenderProfile } from './senderLoad';
 
-export type CampaignStatus = 'draft' | 'active' | 'paused' | 'completed';
+export type CampaignStatus = 'draft' | 'active' | 'paused' | 'completed' | 'scheduled' | 'ended';
 export type RecipientStatus = 'pending' | 'sent' | 'failed';
 export type DistributionMode = 'even' | 'weighted';
 
@@ -25,7 +25,7 @@ export const CampaignEventSchema = z.object({
 export const CampaignSchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1),
-  status: z.enum(['draft', 'active', 'paused', 'completed']).default('draft'),
+  status: z.enum(['draft', 'active', 'paused', 'completed', 'scheduled', 'ended']).default('draft'),
   listId: z.string().min(1),
   segments: z.array(z.string()).default([]),
   sessionId: z.string().optional(),
@@ -37,6 +37,12 @@ export const CampaignSchema = z.object({
    * a second send silently re-inviting everyone is exactly what the invited-set filter prevents.
    */
   includeAlreadyInvited: z.boolean().default(false),
+  /** When the scheduler should freeze the audience and begin sending. */
+  scheduledStartAt: z.number().int().optional(),
+  /** Optional deadline: sending stops once this is reached. */
+  sendByAt: z.number().int().optional(),
+  /** Why a scheduled activation failed — surfaced on the card so it cannot fail silently. */
+  lastError: z.string().optional(),
   createdAt: z.number(),
   startedAt: z.number().optional(),
   completedAt: z.number().optional(),

@@ -112,6 +112,23 @@ cooldown lapses. `finalizeIfDone()` then flips the campaign to `completed` when 
 drained. Operators can bypass the pacing (but never the caps) for one mailbox with
 `POST /api/senders/:connectionId/send-now`.
 
+### Scheduling and ending
+
+A campaign can also be **`scheduled`** (begin later) and **`ended`** (stopped for good).
+`campaignTickAction()` (`domain/campaignLifecycle.ts`) is the single place that decision lives, kept
+pure so the edges are testable: a `scheduled` campaign with no start time never fires, an `active`
+campaign with no deadline never auto-ends, and only `active` is subject to the deadline at all.
+
+The audience is frozen at **activation**, not at scheduling time, so anyone invited elsewhere in the
+meantime is correctly skipped. `runCampaignTick()` applies the lifecycle *before* the send pass, so the
+send pass only ever sees campaigns that should genuinely be sending. A scheduled campaign whose audience
+turns out to be empty when it activates is flipped to `paused` with `lastError` rather than retried
+silently on every tick — a scheduled failure that nobody can see is worse than a visible pause.
+
+Ending leaves the queues intact: `counts.pending` keeps reporting who never went out, and those people
+stay uninvited (`list:{id}:invited` never recorded them), so a follow-up campaign picks them up. It is
+**not** a recall — invitations already sent remain in people's calendars.
+
 ### Stats & attribution
 
 `buildCampaignStats()` is pure: it folds the frozen recipient records, the per-mailbox Google RSVP

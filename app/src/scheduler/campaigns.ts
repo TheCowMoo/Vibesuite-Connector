@@ -4,7 +4,9 @@ import { inc } from '../lib/metrics';
 import { listCampaigns } from '../domain/campaignStore';
 import { queueLength } from '../domain/campaignStore';
 import { getSenderGauge, getSenderProfile } from '../domain/senderStore';
-import { finalizeIfDone, redistributeStranded, sendFromSender } from '../domain/campaignDispatch';
+import { finalizeIfDone, redistributeStranded, sendFromSender, startCampaign, endCampaign } from '../domain/campaignDispatch';
+import { campaignTickAction } from '../domain/campaignLifecycle';
+import { saveCampaign } from '../domain/campaignStore';
 import {
   allocateBatch,
   dueForNextBatch,
@@ -94,10 +96,47 @@ async function runMailbox(connectionId: string, maxPerSender: number, now: Date,
   return { connectionId, sent, failed, campaigns, reason: sent || failed ? undefined : 'no capacity' };
 }
 
+/**
+ * Activate campaigns whose scheduled start has arrived, and end any past their deadline.
+ *
+ * Runs before the send pass so it only ever sees campaigns that should genuinely be sending. A
+ * scheduled campaign whose audience turns out to be empty is paused with `lastError` rather than
+ * being retried silently on every tick.
+ */
+async function applyLifecycle(now: Date): Promise<void> {
+  const camps = await listCampaigns();
+
+  for (const camp of camps) {
+    const action = campaignTickAction(camp, now.getTime());
+
+    if (action === 'activate') {
+      try {
+        await startCampaign(camp.id);
+        logger.info({ campaignId: camp.id }, 'scheduled campaign activated');
+      } catch (err) {
+        const msg = (err as Error).message;
+        camp.status = 'paused';
+        camp.lastError = `Could not start on schedule: ${msg}`;
+        await saveCampaign(camp);
+        logger.warn({ campaignId: camp.id, err: msg }, 'scheduled campaign could not start; paused for review');
+      }
+      continue;
+    }
+
+    if (action === 'end') {
+      await endCampaign(camp.id, 'Stopped at the send-by time');
+      logger.info({ campaignId: camp.id }, 'campaign ended at its send-by time');
+    }
+  }
+}
+
 /** One full pass over every mailbox that has campaign work queued. */
 export async function runCampaignTick(options: { maxPerSender?: number; now?: Date } = {}): Promise<TickResult> {
   const now = options.now ?? new Date();
   const maxPerSender = options.maxPerSender ?? 200;
+
+  // Lifecycle first, so the send pass only sees campaigns that should actually be sending.
+  await applyLifecycle(now);
 
   const active = await activeCampaigns();
   if (!active.length) return { mailboxes: 0, sent: 0, failed: 0, redistributed: 0, campaigns: [] };
