@@ -67,12 +67,25 @@ export function pickZoomAccount(
 }
 
 /**
- * What Zoom's answer to a report call means for this authorisation. 401/403 is the expected answer
- * for a non-admin host on a user-managed app, and must be remembered so we stop asking.
+ * Whether Zoom's answer means "this authorisation may not read reports".
+ *
+ * 401/403 is the obvious case. The one that used to be misread: a missing scope comes back as **400
+ * with code 4711** ("Invalid access token, does not contain scopes:[report:read:admin]"), which is why
+ * a user-managed app used to sit on "Report access unknown" forever instead of saying it had no
+ * report scope.
  */
-export function reportAccessFromStatus(status: number): 'granted' | 'denied' | 'unknown' {
+export function isScopeDenied(status: number, detail?: string): boolean {
+  if (status === 401 || status === 403) return true;
+  return status === 400 && !!detail && /scope/i.test(detail);
+}
+
+/**
+ * What Zoom's answer to a report probe means. Anything genuinely unexplained (429, a timeout, an odd
+ * 5xx) stays `unknown` so it is retried rather than cached as a refusal.
+ */
+export function reportAccessFromProbe(status: number, detail?: string): 'granted' | 'denied' | 'unknown' {
   if (status >= 200 && status < 300) return 'granted';
-  if (status === 401 || status === 403) return 'denied';
+  if (isScopeDenied(status, detail)) return 'denied';
   return 'unknown';
 }
 

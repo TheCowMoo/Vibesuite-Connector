@@ -368,15 +368,34 @@ inside the URL builder.
 - Connect a host once in **Settings → Video conferencing**, then choose it per campaign — in the
   campaign wizard's **Zoom host** field, or later with **Add / Change Zoom host** on the campaign card.
   The card shows which host the campaign is using.
-- A host who is **not** a Zoom account admin connects fine but shows **No report access — attendance
-  still syncs**. That is Zoom refusing `/report/*` for a user-managed app; attendance is taken from the
-  past-meeting participant list instead, and polls/Q&A/absentees are unavailable. Sessions carry a note
-  saying so.
-- **Check access** re-probes a host after an admin grants the scope — no reconnect needed.
+- A **user-managed** app cannot hold the admin-only report scope, so a connected host shows
+  **Attendance only — Zoom refused report access**, with Zoom's own words underneath (usually
+  `does not contain scopes:[report:read:admin]`). Attendance still syncs from the past-meeting
+  participant list; polls, Q&A and absentees need the admin-managed upgrade below.
+- **Check access** re-probes a host after the app's scopes change — no reconnect needed for a granted
+  scope, but see the upgrade note about existing authorisations.
 - **Disconnect** removes the host from the pool; campaigns that were using it report "needs
   reconnecting" until another host is chosen.
 - Tokens are stored encrypted in Redis (`zoom:account:{userId}:tokens`). Switching the mode back to
   server-to-server restores the previous behaviour; nothing is migrated or deleted.
+
+### Admin-managed upgrade (polls, Q&A, absentees)
+
+The report scope (`report:read:admin`, or the granular `report:read:list_past_participants:admin` and
+its siblings) is only offered to **admin-managed** apps — a user-managed app will not show it at all.
+
+1. Zoom Marketplace → your app → **Basic Information** → change the app to **Admin-managed**, save.
+   Zoom asks you to reconfirm features and scopes afterwards; the redirect URL and allow list are
+   unchanged.
+2. **Scopes** → add the report scope(s), keeping the user/meeting/webinar read scopes.
+3. **Local Test → Add App Now**, authorised by a Zoom account admin. Admin-managed apps are installed
+   at account level, so one admin covers everyone on that account.
+4. In this panel: **Disconnect** the host, then **Connect Zoom** again. A refresh token never gains
+   new scopes, so the old authorisation keeps reporting a refusal until it is replaced.
+5. **Check access** should now read **Reports OK — polls, Q&A and absentees available**.
+
+Customers on other Zoom accounts will each need their own account admin to install the app, and the
+app must pass Zoom's review before it can be installed outside your account.
 
 ## Related docs
 

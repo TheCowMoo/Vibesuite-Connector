@@ -213,7 +213,9 @@ A user-managed app authorised by a **non-admin host** is refused the report endp
 is expected, not an error, and it is handled:
 
 1. the refusal is recorded as `reportAccess: 'denied'` on that host in the pool, so we stop probing
-   every sync (every campaign reusing the host benefits);
+   every sync (every campaign reusing the host benefits). Zoom reports a missing scope as **400 code
+   4711**, not 403 — `isScopeDenied()` recognises that shape, and the probe's own message is kept as
+   `reportDetail` so the UI can quote Zoom instead of showing "unknown";
 2. `fetch()` falls through to `GET /past_meetings|past_webinars/{id}/participants`, which a host can
    read for their own meetings (retrying with the double-encoded `uuid` when the numeric id 404s);
 3. absentees, polls and Q&A come back empty, and a `notes` entry is stored on the session and shown

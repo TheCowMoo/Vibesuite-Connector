@@ -1547,13 +1547,17 @@
 
     var rows = accounts.map(function (a) {
       var chip = a.reportAccess === 'granted'
-        ? '<span class="chip chip--success">Reports OK</span>'
+        ? '<span class="chip chip--success">Reports OK — polls, Q&amp;A and absentees available</span>'
         : a.reportAccess === 'denied'
-          ? '<span class="chip chip--warning">No report access — attendance still syncs</span>'
+          ? '<span class="chip chip--warning">Attendance only — Zoom refused report access</span>'
           : '<span class="chip chip--neutral">Report access unknown</span>';
+      var detail = a.reportDetail
+        ? '<div class="muted" style="font-size:0.78rem">Zoom said: ' + esc(a.reportDetail) + '</div>'
+        : '';
       return '<div class="conn__meta"><span class="conn__cal">' + esc(a.email || a.userId) + '</span>' + chip +
         '<button class="btn btn--ghost btn--sm" data-zoom-probe="' + esc(a.userId) + '">Check access</button>' +
-        '<button class="btn btn--ghost btn--sm" data-zoom-disconnect="' + esc(a.userId) + '">Disconnect</button></div>';
+        '<button class="btn btn--ghost btn--sm" data-zoom-disconnect="' + esc(a.userId) + '">Disconnect</button></div>' +
+        detail;
     }).join('');
 
     var connect = (mode === 'user' && ready)
@@ -1632,10 +1636,10 @@
 
       withBusy(btn, api(base + '/probe', { method: 'POST' }))
         .then(function (r) {
-          toast(
-            r.reportAccess === 'granted' ? 'Zoom reports are available' : 'Zoom still refuses report access for this host',
-            r.reportAccess === 'granted' ? 'success' : 'error'
-          );
+          var message = r.reportAccess === 'granted'
+            ? 'Reports OK — polls, Q&A and absentees are available'
+            : (r.detail ? 'Zoom refused: ' + r.detail : 'Zoom still refuses report access for this host');
+          toast(message, r.reportAccess === 'granted' ? 'success' : 'error');
           loadHosts();
         })
         .catch(function (err) { toast(err.message, 'error'); });

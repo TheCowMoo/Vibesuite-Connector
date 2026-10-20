@@ -25,6 +25,8 @@ export interface ZoomAccountRecord {
    * the empty sections.
    */
   reportAccess: 'granted' | 'denied' | 'unknown';
+  /** What Zoom said when it refused the report probe (e.g. "does not contain scopes:[...]"). */
+  reportDetail?: string;
 }
 
 export interface ZoomTokenRecord {

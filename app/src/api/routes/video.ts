@@ -91,10 +91,10 @@ export async function videoRoutes(app: FastifyInstance): Promise<void> {
 
     try {
       const token = await zoomAccessToken({ zoomUserId: userId });
-      const reportAccess = await probeZoomReportAccess(token, userId);
-      await saveZoomAccount({ ...account, reportAccess });
+      const probe = await probeZoomReportAccess(token, userId);
+      await saveZoomAccount({ ...account, reportAccess: probe.access, reportDetail: probe.detail });
 
-      return { ok: true, reportAccess };
+      return { ok: true, reportAccess: probe.access, detail: probe.detail };
     } catch (err) {
       reply.code(502).send({ error: (err as Error).message });
     }

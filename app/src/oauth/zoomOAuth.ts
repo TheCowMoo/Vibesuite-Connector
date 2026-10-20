@@ -1,6 +1,6 @@
 import axios from 'axios';
 import { env } from '../config/env';
-import { reportAccessFromStatus } from '../video/zoomAuth';
+import { reportAccessFromProbe } from '../video/zoomAuth';
 
 const AUTHORIZE_URL = 'https://zoom.us/oauth/authorize';
 const TOKEN_URL = 'https://zoom.us/oauth/token';
@@ -109,6 +109,12 @@ export async function fetchZoomUser(accessToken: string): Promise<ZoomUser> {
   };
 }
 
+export interface ZoomReportProbe {
+  access: 'granted' | 'denied' | 'unknown';
+  /** What Zoom actually said, when it refused — surfaced in the UI so "refused" is never a mystery. */
+  detail?: string;
+}
+
 /**
  * Ask Zoom whether this authorisation may read account reports.
  *
@@ -119,7 +125,7 @@ export async function fetchZoomUser(accessToken: string): Promise<ZoomUser> {
 export async function probeZoomReportAccess(
   accessToken: string,
   userId: string,
-): Promise<'granted' | 'denied' | 'unknown'> {
+): Promise<ZoomReportProbe> {
   const iso = (d: Date): string => d.toISOString().slice(0, 10);
   const to = new Date();
   const from = new Date(to.getTime() - 30 * 86400000);
@@ -130,10 +136,11 @@ export async function probeZoomReportAccess(
       params: { from: iso(from), to: iso(to), page_size: 1 },
       timeout: 20000,
     });
-    return reportAccessFromStatus(res.status);
+    return { access: reportAccessFromProbe(res.status) };
   } catch (err) {
     const status = (err as { response?: { status?: number } })?.response?.status ?? 0;
-    return reportAccessFromStatus(status);
+    const detail = zoomErrorDetail(err);
+    return { access: reportAccessFromProbe(status, detail), detail };
   }
 }
 

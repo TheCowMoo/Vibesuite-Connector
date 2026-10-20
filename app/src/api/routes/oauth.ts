@@ -190,7 +190,7 @@ export async function oauthRoutes(app: FastifyInstance): Promise<void> {
       const user = await fetchZoomUser(tokens.access_token);
       // Ask once, up front: a non-admin host is refused report access, and the UI needs to know now
       // rather than showing empty polls later.
-      const reportAccess = await probeZoomReportAccess(tokens.access_token, user.id);
+      const probe = await probeZoomReportAccess(tokens.access_token, user.id);
 
       await saveZoomTokens(user.id, {
         refreshToken: tokens.refresh_token,
@@ -202,7 +202,8 @@ export async function oauthRoutes(app: FastifyInstance): Promise<void> {
         email: user.email,
         displayName: user.displayName,
         connectedAt: Date.now(),
-        reportAccess,
+        reportAccess: probe.access,
+        reportDetail: probe.detail,
       });
 
       // Authorising from a campaign attaches that host to it, and stamps its linked video call, so

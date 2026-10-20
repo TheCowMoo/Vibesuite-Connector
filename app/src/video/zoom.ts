@@ -12,6 +12,7 @@ import {
   chooseZoomTokenSource,
   defaultZoomAuthMode,
   expiryFrom,
+  isScopeDenied,
   pickZoomAccount,
   tokenUsable,
   type ZoomTokenSource,
@@ -112,12 +113,14 @@ async function getAccessToken(ctx?: VideoAuthContext): Promise<string> {
 async function rememberReportAccess(
   ctx: VideoAuthContext | undefined,
   access: 'granted' | 'denied',
+  detail?: string,
 ): Promise<void> {
   try {
     const target = pickZoomAccount(await listZoomAccounts(), ctx?.zoomUserId).account;
-    if (!target || target.reportAccess === access) return;
+    if (!target) return;
+    if (target.reportAccess === access && (!detail || target.reportDetail === detail)) return;
 
-    await saveZoomAccount({ ...target, reportAccess: access });
+    await saveZoomAccount({ ...target, reportAccess: access, reportDetail: detail ?? target.reportDetail });
   } catch {
     /* never let bookkeeping break a sync */
   }
@@ -133,7 +136,7 @@ async function getJsonResult(
   token: string,
   path: string,
   params?: Record<string, unknown>,
-): Promise<{ status: number; data: Record<string, unknown> | null }> {
+): Promise<{ status: number; data: Record<string, unknown> | null; detail?: string }> {
   try {
     const res = await axios.get(`${BASE}${path}`, {
       headers: { Authorization: `Bearer ${token}` },
@@ -143,7 +146,8 @@ async function getJsonResult(
     return { status: res.status, data: (res.data ?? null) as Record<string, unknown> | null };
   } catch (err) {
     const status = (err as { response?: { status?: number } })?.response?.status ?? 0;
-    return { status, data: null };
+    // Keep Zoom's own message: a missing scope arrives as 400 code 4711, not 403.
+    return { status, data: null, detail: zoomErrorDetail(err) };
   }
 }
 
@@ -157,15 +161,17 @@ async function fetchListResult(
   token: string,
   path: string,
   key: string,
-): Promise<{ status: number; rows: Array<Record<string, unknown>> }> {
+): Promise<{ status: number; rows: Array<Record<string, unknown>>; detail?: string }> {
   const rows: Array<Record<string, unknown>> = [];
   let nextPageToken: string | undefined;
   let guard = 0;
   let status = 0;
+  let detail: string | undefined;
 
   do {
     const res = await getJsonResult(token, path, { page_size: 300, next_page_token: nextPageToken || undefined });
     status = res.status;
+    detail = res.detail;
     const data = res.data;
     if (!data) break;
 
@@ -185,7 +191,7 @@ async function fetchListResult(
     guard += 1;
   } while (nextPageToken && guard < 25);
 
-  return { status, rows };
+  return { status, rows, detail };
 }
 
 async function fetchList(token: string, path: string, key: string): Promise<Array<Record<string, unknown>>> {
@@ -303,15 +309,15 @@ export const zoomProvider: VideoProviderImpl = {
         };
       }
 
-      if (participants.status === 401 || participants.status === 403) {
-        await rememberReportAccess(ctx, 'denied');
+      if (isScopeDenied(participants.status, participants.detail)) {
+        await rememberReportAccess(ctx, 'denied', participants.detail);
         notes.push(
-          'Zoom did not allow report access for this host, so polls, Q&A and the absentee list are unavailable. Attendance still comes from the meeting participant list.',
+          'Zoom refused report access for this authorisation, so polls, Q&A and the absentee list are unavailable (they need an admin-managed Zoom app). Attendance still comes from the meeting participant list.',
         );
       }
     } else {
       notes.push(
-        'Zoom reports are unavailable for this host, so polls, Q&A and the absentee list are unavailable. Attendance comes from the meeting participant list.',
+        'This Zoom authorisation has no report scope, so polls, Q&A and the absentee list are unavailable. Attendance comes from the meeting participant list.',
       );
     }
 

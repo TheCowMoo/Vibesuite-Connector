@@ -3,8 +3,9 @@ import {
   chooseZoomTokenSource,
   defaultZoomAuthMode,
   expiryFrom,
+  isScopeDenied,
   pickZoomAccount,
-  reportAccessFromStatus,
+  reportAccessFromProbe,
   tokenUsable,
   type ZoomAccountRecord,
 } from '../../src/video/zoomAuth';
@@ -65,20 +66,47 @@ describe('pickZoomAccount', () => {
   });
 });
 
-describe('reportAccessFromStatus', () => {
+describe('isScopeDenied', () => {
+  it('treats 401 and 403 as a refusal', () => {
+    expect(isScopeDenied(401)).toBe(true);
+    expect(isScopeDenied(403)).toBe(true);
+  });
+
+  /*
+   * Zoom answers a missing scope with 400 code 4711, not 403. Reading only 401/403 left every
+   * user-managed host stuck on "Report access unknown" forever.
+   */
+  it('treats Zoom\'s 400 scope error as a refusal', () => {
+    expect(isScopeDenied(400, '400 Invalid access token, does not contain scopes:[report:read:admin].')).toBe(true);
+    expect(isScopeDenied(400, 'Invalid access token, does not contain scopes:[report:read:admin]')).toBe(true);
+  });
+
+  it('does not treat an unrelated 400 as a refusal', () => {
+    expect(isScopeDenied(400, '400 The date range is invalid')).toBe(false);
+    expect(isScopeDenied(400)).toBe(false);
+  });
+
+  it('leaves rate limits and transport failures alone', () => {
+    expect(isScopeDenied(429, 'Too Many Requests')).toBe(false);
+    expect(isScopeDenied(0, 'timeout of 20000ms exceeded')).toBe(false);
+  });
+});
+
+describe('reportAccessFromProbe', () => {
   it('treats a successful report call as granted', () => {
-    expect(reportAccessFromStatus(200)).toBe('granted');
+    expect(reportAccessFromProbe(200)).toBe('granted');
   });
 
-  /* 401/403 is the expected answer for a non-admin host on a user-managed app. */
-  it('treats a refusal as denied', () => {
-    expect(reportAccessFromStatus(401)).toBe('denied');
-    expect(reportAccessFromStatus(403)).toBe('denied');
+  it('maps every refusal shape to denied', () => {
+    expect(reportAccessFromProbe(401)).toBe('denied');
+    expect(reportAccessFromProbe(403)).toBe('denied');
+    expect(reportAccessFromProbe(400, 'does not contain scopes:[report:read:admin]')).toBe('denied');
   });
 
-  it('leaves anything else unknown, so it is retried', () => {
-    expect(reportAccessFromStatus(404)).toBe('unknown');
-    expect(reportAccessFromStatus(0)).toBe('unknown');
+  it('keeps genuinely unclear answers unknown, so they are retried', () => {
+    expect(reportAccessFromProbe(404)).toBe('unknown');
+    expect(reportAccessFromProbe(429)).toBe('unknown');
+    expect(reportAccessFromProbe(0)).toBe('unknown');
   });
 });
 
