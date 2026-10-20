@@ -36,6 +36,10 @@ export const REDIS_KEYS = {
   listInvited: (listId: string) => `list:${listId}:invited`,
   listInvitedMeta: (listId: string) => `list:${listId}:invitedMeta`,
   videoSettings: () => 'settings:video',
+  /** Authorised Zoom hosts, shared by every campaign that picks them. */
+  zoomAccountsIndex: () => 'zoom:accounts',
+  zoomAccount: (userId: string) => `zoom:account:${userId}`,
+  zoomAccountTokens: (userId: string) => `zoom:account:${userId}:tokens`,
   sessionsIndex: () => 'sessions:index',
   session: (id: string) => `session:${id}`,
   attendance: (sessionId: string) => `session:${sessionId}:attendance`,

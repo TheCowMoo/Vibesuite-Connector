@@ -321,12 +321,13 @@ docker compose restart nginx
 
 Two modes, chosen in **Settings → Video conferencing**:
 
-- **Each Google account connects its own Zoom** (default) — a **user-managed General App**. Every
-  Google account authorises one or more Zoom hosts, and sessions name the host whose meetings to read.
-  Nothing works in this mode until the app credentials below are set and a host is connected.
+- **Zoom hosts shared across campaigns** (default) — a **user-managed General App**. Each Zoom account
+  is authorised once into a shared pool, then every campaign picks the host whose webinar it is
+  inviting people to. One host can serve any number of campaigns. Nothing works in this mode until the
+  app credentials below are set and at least one host is connected.
 - **Server-to-server** — paste the Account ID, Client ID and Client secret from a Server-to-Server OAuth
   app. No redirect URL, no consent screen, hourly token. Still selectable, and used automatically for
-  any Google account that has no Zoom host connected.
+  any campaign with no Zoom host chosen.
 
 ### Creating the user-managed app
 
@@ -361,14 +362,18 @@ inside the URL builder.
 
 ### What to expect
 
+- Connect a host once in **Settings → Video conferencing**, then choose it per campaign — in the
+  campaign wizard's **Zoom host** field, or later with **Add / Change Zoom host** on the campaign card.
+  The card shows which host the campaign is using.
 - A host who is **not** a Zoom account admin connects fine but shows **No report access — attendance
   still syncs**. That is Zoom refusing `/report/*` for a user-managed app; attendance is taken from the
   past-meeting participant list instead, and polls/Q&A/absentees are unavailable. Sessions carry a note
   saying so.
 - **Check access** re-probes a host after an admin grants the scope — no reconnect needed.
-- **Disconnect** removes just that host; other hosts on the same Google account keep working.
-- Tokens are stored encrypted in Redis (`conn:{id}:secrets`). Switching the mode back to server-to-server
-  restores the previous behaviour; nothing is migrated or deleted.
+- **Disconnect** removes the host from the pool; campaigns that were using it report "needs
+  reconnecting" until another host is chosen.
+- Tokens are stored encrypted in Redis (`zoom:account:{userId}:tokens`). Switching the mode back to
+  server-to-server restores the previous behaviour; nothing is migrated or deleted.
 
 ## Related docs
 

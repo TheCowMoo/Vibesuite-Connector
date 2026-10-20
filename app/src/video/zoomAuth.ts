@@ -1,4 +1,6 @@
-import type { ZoomAccountLink, ZoomAuthMode, ZoomTokenSet } from '../domain/connection';
+import type { ZoomAccountRecord, ZoomAuthMode, ZoomTokenRecord } from '../domain/zoomStore';
+
+export type { ZoomAccountRecord, ZoomAuthMode, ZoomTokenRecord } from '../domain/zoomStore';
 
 /** Refresh this long before Zoom's stated expiry, so a call in flight cannot land on an expired token. */
 export const TOKEN_SKEW_MS = 60_000;
@@ -47,36 +49,21 @@ export function expiryFrom(now: number, expiresInSeconds: number | undefined, fa
  * person's meeting and report it as empty.
  */
 export function pickZoomAccount(
-  accounts: ZoomAccountLink[] | undefined,
+  accounts: ZoomAccountRecord[] | undefined,
   requestedUserId?: string,
-): { account?: ZoomAccountLink; error?: string } {
+): { account?: ZoomAccountRecord; error?: string } {
   const list = accounts ?? [];
 
   if (requestedUserId) {
     const hit = list.find((a) => a.userId === requestedUserId);
     return hit
       ? { account: hit }
-      : { error: 'that Zoom account is not connected for this Google account — reconnect it in Settings → Video conferencing' };
+      : { error: 'that Zoom account is not connected — connect it in Settings → Video conferencing' };
   }
 
   if (!list.length) return {};
   if (list.length === 1) return { account: list[0] };
-  return { error: 'this Google account has more than one Zoom host — pick one for this call' };
-}
-
-export function upsertZoomAccount(accounts: ZoomAccountLink[] | undefined, next: ZoomAccountLink): ZoomAccountLink[] {
-  const others = (accounts ?? []).filter((a) => a.userId !== next.userId);
-  return [...others, next];
-}
-
-export function removeZoomAccount(accounts: ZoomAccountLink[] | undefined, userId: string): ZoomAccountLink[] {
-  return (accounts ?? []).filter((a) => a.userId !== userId);
-}
-
-export function withoutZoomToken(tokens: Record<string, ZoomTokenSet> | undefined, userId: string): Record<string, ZoomTokenSet> {
-  const next = { ...(tokens ?? {}) };
-  delete next[userId];
-  return next;
+  return { error: 'more than one Zoom host is connected — pick one for this campaign' };
 }
 
 /**
@@ -92,8 +79,8 @@ export function reportAccessFromStatus(status: number): 'granted' | 'denied' | '
 export interface ChooseZoomTokenParams {
   mode: ZoomAuthMode;
   requestedUserId?: string;
-  accounts?: ZoomAccountLink[];
-  tokens?: Record<string, ZoomTokenSet>;
+  accounts?: ZoomAccountRecord[];
+  tokens?: Record<string, ZoomTokenRecord>;
   s2sConfigured: boolean;
   now: number;
 }

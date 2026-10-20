@@ -6,6 +6,8 @@ import {
   type Campaign,
 } from '../../domain/campaign';
 import { resolveSendPlan, stopTimeError } from '../../domain/campaignLifecycle';
+import { applyCampaignZoomHost } from '../../domain/campaignZoom';
+import { getZoomAccount } from '../../domain/zoomStore';
 import {
   countRecipients,
   createCampaign,
@@ -227,6 +229,10 @@ export async function campaignRoutes(app: FastifyInstance): Promise<void> {
     }
 
     const camp = await createCampaign(parsed.data);
+    if (parsed.data.zoomUserId) {
+      // Also stamps the linked session, so attendance sync knows whose Zoom to read.
+      await applyCampaignZoomHost({ campaign: camp, zoomUserId: parsed.data.zoomUserId, previousZoomUserId: undefined });
+    }
     return { ok: true, campaign: await withStats(camp) };
   });
 
@@ -261,6 +267,13 @@ export async function campaignRoutes(app: FastifyInstance): Promise<void> {
     }
 
     await saveCampaign(parsed.data);
+    if ('zoomUserId' in body) {
+      await applyCampaignZoomHost({
+        campaign: parsed.data,
+        zoomUserId: parsed.data.zoomUserId,
+        previousZoomUserId: camp.zoomUserId,
+      });
+    }
     return { ok: true, campaign: await withStats(parsed.data) };
   });
 
@@ -422,6 +435,41 @@ export async function campaignRoutes(app: FastifyInstance): Promise<void> {
     camp.sendByAt = sendByAt;
     await saveCampaign(camp);
     return { ok: true, campaign: await withStats(camp) };
+  });
+
+  /**
+   * Choose (or clear) this campaign's Zoom host.
+   *
+   * One campaign = one webinar = one host. The host itself lives in the shared pool, so several
+   * campaigns can reuse the same authorisation, and the linked session is stamped so `syncSession()`
+   * reads the right account without a reverse lookup.
+   */
+  app.post('/api/campaigns/:id/zoom', guard, async (req, reply) => {
+    const id = (req.params as { id: string }).id;
+    const camp = await getCampaign(id);
+    if (!camp) {
+      reply.code(404).send({ error: 'campaign not found' });
+      return;
+    }
+    if (camp.status === 'ended' || camp.status === 'completed') {
+      reply.code(400).send({ error: 'this campaign has finished' });
+      return;
+    }
+
+    const b = (req.body || {}) as { zoomUserId?: string | null };
+    const next = b.zoomUserId === undefined || b.zoomUserId === null ? undefined : String(b.zoomUserId);
+
+    if (next && !(await getZoomAccount(next))) {
+      reply.code(400).send({ error: 'that Zoom account is not connected — connect it first' });
+      return;
+    }
+
+    const updated = await applyCampaignZoomHost({
+      campaign: camp,
+      zoomUserId: next,
+      previousZoomUserId: camp.zoomUserId,
+    });
+    return { ok: true, campaign: await withStats(updated) };
   });
 
   /**

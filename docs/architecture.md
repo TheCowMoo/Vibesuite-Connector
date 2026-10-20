@@ -175,33 +175,45 @@ webinars.
 
 `zoomAuthMode` in the video settings picks how a token is obtained. It defaults to **`user`** (the
 General App). Server-to-server is still selectable, and it is also the automatic fallback for a
-connection with no authorised hosts — so an install that only has the old S2S credentials keeps
-working untouched even though the default moved.
+campaign with no host chosen — so an install that only has the old S2S credentials keeps working
+untouched even though the default moved.
 
 | Mode | Credentials | Token | Who it can read |
 |---|---|---|---|
 | `s2s` | `accountId` + `clientId` + `clientSecret` pasted into Settings → Video conferencing | `grant_type=account_credentials`, no refresh token, re-requested hourly | the whole Zoom account that owns the app |
-| `user` | a **user-managed General App** (`ZOOM_OAUTH_CLIENT_ID/_SECRET`); each connection authorises its own hosts | `grant_type=authorization_code` once, then `grant_type=refresh_token` | only what that host can see |
+| `user` | a **user-managed General App** (`ZOOM_OAUTH_CLIENT_ID/_SECRET`); hosts are authorised once into a shared pool | `grant_type=authorization_code` once, then `grant_type=refresh_token` | only what that host can see |
 
-`chooseZoomTokenSource()` (`video/zoomAuth.ts`) is the single, pure decision point. In `user` mode it
-picks the host named on the session, or the connection's only host; with several hosts and none named
-it **refuses to guess**. A host that is listed but whose token is gone produces "needs reconnecting"
-rather than falling back to another identity — reading the wrong person's meetings and reporting an
-empty attendance list would be worse than an error. Only a tenant with *no* host authorised falls back
-to `s2s`, and only when that app is configured.
+### One pool of hosts, one host per campaign
 
-Tokens are stored per host in `conn:{id}:secrets` (`zoomTokens`, keyed by Zoom user id, encrypted like
-every other credential) and cached in-process per identity — never in one shared slot, which would
-leak a token between tenants. Zoom may rotate the refresh token; the rotated value is persisted. An
-`invalid_grant` drops that host's tokens, so the UI asks for a reconnect instead of retrying a dead
-token forever.
+Zoom accounts are **not** attached to a Google account. A campaign is the thing that has one webinar,
+one host and possibly several sending mailboxes, so the choice lives there:
+
+- `zoom:accounts` (set), `zoom:account:{userId}` (email, `reportAccess`) and
+  `zoom:account:{userId}:tokens` (sealed with `CREDENTIALS_ENCRYPTION_KEY`) form the pool.
+- `Campaign.zoomUserId` names this campaign's host. Authorising from the campaign card
+  (`/oauth/zoom/start?campaignId=…`) both adds the account and selects it.
+- `applyCampaignZoomHost()` (`domain/campaignZoom.ts`) stamps the host onto the campaign's linked
+  session, because `syncSession()` only reads the session and should not have to look up a campaign in
+  reverse. `planSessionZoomStamp()` (`domain/campaignZoomPlan.ts`, pure) decides whether a write is
+  needed: an unchanged host is a no-op, and clearing a campaign's host only clears the session when the
+  session was still holding *that* host, so a session-level override is never stomped on.
+- Sessions created outside a campaign can name a host themselves; that is the override.
+
+Tokens are cached in-process per Zoom user id — never in one shared slot — and refreshed in place.
+Zoom may rotate the refresh token; the rotated value is persisted. An `invalid_grant` drops that host's
+tokens but keeps the account listed, so the error is "reconnect this host" rather than silently falling
+back to another identity.
+
+`chooseZoomTokenSource()` (`video/zoomAuth.ts`) is the single, pure decision point. It takes the pool
+and the requested host, and refuses to guess when the pool holds several hosts and nothing names one.
 
 ### Reports are optional; attendance is not
 
 A user-managed app authorised by a **non-admin host** is refused the report endpoints (401/403). That
 is expected, not an error, and it is handled:
 
-1. the refusal is recorded as `reportAccess: 'denied'` on that host, so we stop probing every sync;
+1. the refusal is recorded as `reportAccess: 'denied'` on that host in the pool, so we stop probing
+   every sync (every campaign reusing the host benefits);
 2. `fetch()` falls through to `GET /past_meetings|past_webinars/{id}/participants`, which a host can
    read for their own meetings (retrying with the double-encoded `uuid` when the numeric id 404s);
 3. absentees, polls and Q&A come back empty, and a `notes` entry is stored on the session and shown
@@ -224,7 +236,8 @@ Resolution happens when a session is created and at the start of `syncSession()`
 **before** the report fetch, because that fetch throws for a session that has not run yet, which is
 exactly the one needing its link. That ordering is also what backfills existing sessions, one
 attendance-poll interval after deploy. Both call sites pass a `VideoAuthContext`
-(`{ connectionId, zoomUserId }`) so the right host's token is used.
+(`{ connectionId, zoomUserId }`); Zoom uses `zoomUserId` — the campaign's stamped host, or the
+session's own override — and ignores the Google-account id, which is only there for other providers.
 
 Reading `join_url` needs `webinar:read` / `meeting:read` on the Zoom app. Without those scopes the call
 403s → `getJson()` returns null → no link, which is the previous behaviour, so the failure mode is

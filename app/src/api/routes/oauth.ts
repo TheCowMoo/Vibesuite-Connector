@@ -14,7 +14,10 @@ import {
   zoomErrorDetail,
   zoomOAuthConfigured,
 } from '../../oauth/zoomOAuth';
-import { expiryFrom, upsertZoomAccount } from '../../video/zoomAuth';
+import { expiryFrom } from '../../video/zoomAuth';
+import { applyCampaignZoomHost } from '../../domain/campaignZoom';
+import { saveZoomAccount, saveZoomTokens } from '../../domain/zoomStore';
+import { getCampaign } from '../../domain/campaignStore';
 import { bootstrapConnection } from '../../domain/bootstrap';
 
 const STATE_TTL_SECONDS = 600;
@@ -125,20 +128,13 @@ export async function oauthRoutes(app: FastifyInstance): Promise<void> {
   });
 
   // --- Zoom user OAuth (user-managed General App) ---
-  // Each connection holds its own authorised Zoom hosts, so the state is namespaced with `zoom:`.
-  // Without the prefix a Google state could be replayed at this callback.
+  // Accounts are authorised for a campaign, so the state carries the campaign id. The `zoom:` prefix
+  // keeps a Google state from being replayed here.
   app.get('/oauth/zoom/start', async (req, reply) => {
-    const connectionId = (req.query as { connectionId?: string }).connectionId;
-    if (!connectionId) {
-      reply.code(400).send({ error: 'connectionId is required' });
-      return;
-    }
-    if (!(await getConnection(connectionId))) {
-      reply.code(404).send({ error: 'connection not found' });
-      return;
-    }
+    const { campaignId } = req.query as { campaignId?: string };
+
     if (!zoomOAuthConfigured()) {
-      // A browser lands here directly from the settings card, so say what is missing instead of
+      // A browser lands here directly from the campaign card, so say what is missing instead of
       // failing inside the URL builder.
       reply.code(400).send({
         error:
@@ -147,7 +143,13 @@ export async function oauthRoutes(app: FastifyInstance): Promise<void> {
       return;
     }
 
-    const state = await storeState(`zoom:${connectionId}`);
+    if (campaignId && !(await getCampaign(campaignId))) {
+      reply.code(404).send({ error: 'campaign not found' });
+      return;
+    }
+
+    // Without a campaign this simply adds the host to the shared pool, ready to be picked later.
+    const state = await storeState(campaignId ? `zoom:campaign:${campaignId}` : 'zoom:pool');
     try {
       return reply.redirect(buildZoomAuthUrl(state));
     } catch (err) {
@@ -168,9 +170,11 @@ export async function oauthRoutes(app: FastifyInstance): Promise<void> {
       return;
     }
 
-    const conn = await getConnection(stored.slice('zoom:'.length));
-    if (!conn) {
-      reply.code(404).send({ error: 'connection not found' });
+    const scope = stored.slice('zoom:'.length);
+    const campaignId = scope.startsWith('campaign:') ? scope.slice('campaign:'.length) : undefined;
+    const campaign = campaignId ? await getCampaign(campaignId) : null;
+    if (campaignId && !campaign) {
+      reply.code(404).send({ error: 'campaign not found' });
       return;
     }
 
@@ -188,23 +192,24 @@ export async function oauthRoutes(app: FastifyInstance): Promise<void> {
       // rather than showing empty polls later.
       const reportAccess = await probeZoomReportAccess(tokens.access_token, user.id);
 
-      conn.zoomTokens = {
-        ...(conn.zoomTokens ?? {}),
-        [user.id]: {
-          refreshToken: tokens.refresh_token,
-          accessToken: tokens.access_token,
-          expiresAt: expiryFrom(Date.now(), tokens.expires_in),
-        },
-      };
-      conn.zoomAccounts = upsertZoomAccount(conn.zoomAccounts, {
+      await saveZoomTokens(user.id, {
+        refreshToken: tokens.refresh_token,
+        accessToken: tokens.access_token,
+        expiresAt: expiryFrom(Date.now(), tokens.expires_in),
+      });
+      await saveZoomAccount({
         userId: user.id,
         email: user.email,
         displayName: user.displayName,
         connectedAt: Date.now(),
         reportAccess,
       });
-      conn.updatedAt = Date.now();
-      await saveConnection(conn);
+
+      // Authorising from a campaign attaches that host to it, and stamps its linked video call, so
+      // the operator does not have to pick from a list immediately afterwards.
+      if (campaign) {
+        await applyCampaignZoomHost({ campaign, zoomUserId: user.id });
+      }
 
       return reply.redirect('/');
     } catch (err) {

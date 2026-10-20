@@ -1396,6 +1396,10 @@
       connSel.appendChild(o);
     });
     renderSessionZoomHosts();
+    api('/api/zoom/accounts').then(function (d) {
+      zoomAccounts = d.accounts || [];
+      renderSessionZoomHosts();
+    }).catch(function () {});
     api('/api/invites').then(function (d) {
       var invSel = document.getElementById('sessionInvite');
       invSel.innerHTML = '<option value="">None</option>';
@@ -1409,20 +1413,18 @@
   }
 
   /**
-   * Which Zoom host owns this call.
+   * Which authorised Zoom host owns this call.
    *
-   * Only meaningful when the Google account has Zoom hosts authorised (user-managed app). With one
-   * host it is preselected so the session records exactly whose meetings to read; with several the
-   * operator must choose rather than have the server guess.
+   * The pool is global; this is the override for a session created outside a campaign. Campaigns
+   * stamp their chosen host onto their linked session instead.
    */
   function renderSessionZoomHosts() {
     var sel = document.getElementById('sessionZoomHost');
     var wrap = document.getElementById('sessionZoomHostWrap');
     if (!sel || !wrap) return;
 
-    var connId = document.getElementById('sessionConnection').value;
-    var conn = (state.connections || []).filter(function (c) { return c.id === connId; })[0];
-    var accounts = (conn && conn.zoomAccounts) || [];
+    // The pool is global: a session created outside a campaign still needs to name whose Zoom to read.
+    var accounts = zoomAccounts || [];
 
     wrap.hidden = accounts.length === 0;
     sel.innerHTML = accounts
@@ -1451,7 +1453,6 @@
   }
 
   document.getElementById('newSessionBtn').addEventListener('click', openNewSession);
-  document.getElementById('sessionConnection').addEventListener('change', renderSessionZoomHosts);
   document.getElementById('newSessionSave').addEventListener('click', saveNewSession);
   document.getElementById('sessionDispatch').addEventListener('click', dispatchSession);
 
@@ -1510,7 +1511,7 @@
       '<p class="muted">Connect Zoom to cross-reference attendance. Google Meet and WebinarGeek are coming soon.</p>' +
       '<label class="field"><span class="field__label">How Zoom is connected</span>' +
         '<select id="zoomAuthMode">' +
-          '<option value="user">Each Google account connects its own Zoom (General App)</option>' +
+          '<option value="user">Zoom hosts shared across campaigns (General App)</option>' +
           '<option value="s2s">One Zoom account for everything (server-to-server)</option>' +
         '</select></label>' +
       '<div id="zoomS2sFields">' +
@@ -1524,55 +1525,46 @@
       '</div>';
   }
 
-  /** The connections last loaded for the Zoom host list, so Test can name a real host. */
-  var zoomHostConnections = [];
+  /** The authorised hosts last loaded, so Test can name a real one. */
+  var zoomAccountPool = [];
 
-  function renderZoomHosts(conns, opts) {
-    zoomHostConnections = conns;
+  function renderZoomAccounts(accounts, opts) {
+    zoomAccountPool = accounts;
     var el = document.getElementById('zoomHosts');
     if (!el) return;
 
     var mode = (opts && opts.mode) || 'user';
     var ready = !!(opts && opts.userOAuthReady);
 
-    if (!conns.length) {
-      el.innerHTML = '<p class="muted">Link a Google account first — Zoom hosts are connected per Google account.</p>';
-      return;
-    }
-
     // Never offer a Connect button that would land on a half-configured OAuth route: without the
     // General App credentials the browser gets an error page, which reads like a broken integration.
     var footer;
     if (mode !== 'user') {
-      footer = '<p class="muted">Server-to-server uses the credentials above. Switch to “Each Google account connects its own Zoom” to connect a host.</p>';
+      footer = '<p class="muted">Server-to-server uses the credentials above. Switch to the General App mode to authorise hosts.</p>';
     } else if (!ready) {
       footer = '<p class="muted">Zoom sign-in is not set up yet. Create a General App in the Zoom App Marketplace, then set <code>ZOOM_OAUTH_CLIENT_ID</code> and <code>ZOOM_OAUTH_CLIENT_SECRET</code>.</p>';
     }
 
-    el.innerHTML = conns.map(function (c) {
-      var accounts = c.zoomAccounts || [];
-      var rows = accounts.map(function (a) {
-        var chip = a.reportAccess === 'granted'
-          ? '<span class="chip chip--success">Reports OK</span>'
-          : a.reportAccess === 'denied'
-            ? '<span class="chip chip--warning">No report access — attendance still syncs</span>'
-            : '<span class="chip chip--neutral">Report access unknown</span>';
-        return '<div class="conn__meta"><span class="conn__cal">' + esc(a.email || a.userId) + '</span>' + chip +
-          '<button class="btn btn--ghost btn--sm" data-zoom-probe="' + esc(c.id) + '" data-zoom-user="' + esc(a.userId) + '">Check access</button>' +
-          '<button class="btn btn--ghost btn--sm" data-zoom-disconnect="' + esc(c.id) + '" data-zoom-user="' + esc(a.userId) + '">Disconnect</button></div>';
-      }).join('');
+    var rows = accounts.map(function (a) {
+      var chip = a.reportAccess === 'granted'
+        ? '<span class="chip chip--success">Reports OK</span>'
+        : a.reportAccess === 'denied'
+          ? '<span class="chip chip--warning">No report access — attendance still syncs</span>'
+          : '<span class="chip chip--neutral">Report access unknown</span>';
+      return '<div class="conn__meta"><span class="conn__cal">' + esc(a.email || a.userId) + '</span>' + chip +
+        '<button class="btn btn--ghost btn--sm" data-zoom-probe="' + esc(a.userId) + '">Check access</button>' +
+        '<button class="btn btn--ghost btn--sm" data-zoom-disconnect="' + esc(a.userId) + '">Disconnect</button></div>';
+    }).join('');
 
-      var connect = (mode === 'user' && ready)
-        ? '<div class="conn__actions"><a class="btn btn--outline btn--sm" href="/oauth/zoom/start?connectionId=' +
-          encodeURIComponent(c.id) + '">' + (accounts.length ? 'Connect another Zoom account' : 'Connect Zoom') + '</a></div>'
-        : '';
+    var connect = (mode === 'user' && ready)
+      ? '<div class="conn__actions"><a class="btn btn--outline btn--sm" href="/oauth/zoom/start">Connect Zoom</a></div>'
+      : '';
 
-      return '<div class="conn"><div class="conn__main">' +
-        '<div class="conn__head"><span class="conn__name">' + esc(c.name) + '</span></div>' +
-        (rows || '<p class="muted">No Zoom account connected.</p>') +
-        connect +
-        '</div></div>';
-    }).join('') + (footer || '');
+    el.innerHTML =
+      '<p class="muted">Authorised Zoom hosts. One host can run any number of campaigns; each campaign picks its own.</p>' +
+      (rows || '<p class="muted">No Zoom account connected yet.</p>') +
+      connect +
+      (footer || '');
   }
 
   function wireVideo() {
@@ -1585,15 +1577,15 @@
 
     function modeHint() {
       return modeSel.value === 'user'
-        ? 'Each Google account connects its own Zoom host below.'
+        ? 'Zoom hosts are shared: authorise them below, then pick one per campaign.'
         : 'Server-to-server uses the account credentials above.';
     }
 
     var userOAuthReady = false;
 
     function loadHosts() {
-      return api('/api/connections').then(function (r) {
-        renderZoomHosts(r.connections || [], { mode: modeSel.value, userOAuthReady: userOAuthReady });
+      return api('/api/zoom/accounts').then(function (r) {
+        renderZoomAccounts(r.accounts || [], { mode: modeSel.value, userOAuthReady: userOAuthReady });
       }).catch(function () {});
     }
 
@@ -1624,12 +1616,11 @@
       if (!disconnectBtn && !probeBtn) return;
 
       var btn = disconnectBtn || probeBtn;
-      var id = disconnectBtn ? disconnectBtn.dataset.zoomDisconnect : probeBtn.dataset.zoomProbe;
-      var userId = btn.dataset.zoomUser;
-      var base = '/api/connections/' + encodeURIComponent(id) + '/zoom/accounts/' + encodeURIComponent(userId);
+      var userId = disconnectBtn ? disconnectBtn.dataset.zoomDisconnect : probeBtn.dataset.zoomProbe;
+      var base = '/api/zoom/accounts/' + encodeURIComponent(userId);
 
       if (disconnectBtn) {
-        confirmDialog('Disconnect this Zoom account?', 'Attendance for this Google account stops syncing until a Zoom host is connected again.', 'Disconnect')
+        confirmDialog('Disconnect this Zoom account?', 'Campaigns using it will stop syncing attendance until a host is connected again.', 'Disconnect')
           .then(function (ok) {
             if (!ok) return;
             withBusy(btn, api(base, { method: 'DELETE' }))
@@ -1672,11 +1663,8 @@
     document.getElementById('videoTest').addEventListener('click', function () {
       var body = {};
       if (modeSel.value === 'user') {
-        var conn = zoomHostConnections.filter(function (c) { return (c.zoomAccounts || []).length; })[0];
-        if (conn) {
-          body.connectionId = conn.id;
-          body.zoomUserId = conn.zoomAccounts[0].userId;
-        }
+        var first = zoomAccountPool[0];
+        if (first) body.zoomUserId = first.userId;
       }
       withBusy(this, api('/api/video/test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }))
         .then(function (r) {
@@ -2708,6 +2696,8 @@
   var campLists = [];
   var campSessions = [];
   var campConnections = [];
+  /** Authorised Zoom hosts, shared across campaigns. */
+  var zoomAccounts = [];
   var currentCampaignId = null;
 
   function campStatusChip(status) {
@@ -2761,12 +2751,13 @@
 
   function loadCampaigns() {
     document.getElementById('campaignsList').innerHTML = skeletonCards(2);
-    return Promise.all([api('/api/campaigns'), api('/api/lists'), api('/api/sessions'), api('/api/connections')])
+    return Promise.all([api('/api/campaigns'), api('/api/lists'), api('/api/sessions'), api('/api/connections'), api('/api/zoom/accounts')])
       .then(function (r) {
         campaignData = r[0].campaigns || [];
         campLists = r[1].lists || [];
         campSessions = r[2].sessions || [];
         campConnections = r[3].connections || [];
+        zoomAccounts = r[4].accounts || [];
         renderCampaigns(campaignData);
       })
       .catch(function (e) {
@@ -2794,6 +2785,10 @@
       out += '<button class="btn btn--ghost btn--sm" data-action="campEnd" data-id="' + id + '">End sending</button>';
     }
 
+    out += (c.status === 'completed' || c.status === 'ended')
+      ? ''
+      : '<button class="btn btn--ghost btn--sm" data-action="campZoomHost" data-id="' + id + '">' +
+        (c.zoomUserId ? 'Change Zoom host' : 'Add Zoom host') + '</button>';
     out += (c.status === 'completed' || c.status === 'ended')
       ? ''
       : '<button class="btn btn--ghost btn--sm" data-action="campDeadline" data-id="' + id + '">' +
@@ -2851,6 +2846,7 @@
         '<div class="conn__main">' +
           '<div class="conn__head"><span class="conn__name">' + esc(c.name) + '</span>' + campStatusChip(c.status) +
             '<span class="chip chip--neutral">' + esc(spreadLabel(c.distribution.mode)) + '</span>' +
+            (c.zoomUserId ? '<span class="chip chip--neutral">Zoom: ' + esc(zoomAccountLabel(c.zoomUserId)) + '</span>' : '') +
             (c.sendByAt ? '<span class="chip chip--neutral">Stop by ' + esc(prettyDate(c.sendByAt)) + '</span>' : '') +
             (counts.failed ? '<span class="chip chip--danger">' + counts.failed + " didn't go through</span>" : '') + '</div>' +
           '<div class="conn__meta"><span class="conn__cal">' + icon('calendar') + esc(campListName(c.listId)) + '</span>' +
@@ -3043,6 +3039,18 @@
       .catch(function (e) { el.textContent = 'Could not check this list: ' + e.message; });
   }
 
+  function zoomAccountLabel(userId) {
+    var a = (zoomAccounts || []).filter(function (x) { return x.userId === userId; })[0];
+    return a ? (a.email || a.userId) : String(userId).slice(0, 8);
+  }
+
+  function zoomAccountOptions(selected) {
+    return (zoomAccounts || []).map(function (a) {
+      return '<option value="' + esc(a.userId) + '"' + (a.userId === selected ? ' selected' : '') + '>' +
+        esc(a.email || a.userId) + '</option>';
+    }).join('');
+  }
+
   function openCampaignWizard() {
     document.getElementById('campList').innerHTML = campLists.length
       ? campLists.map(function (l) {
@@ -3054,6 +3062,8 @@
       campSessions.map(function (s) {
         return '<option value="' + esc(s.id) + '">' + esc(s.title || s.externalId) + '</option>';
       }).join('');
+
+    document.getElementById('campZoomHost').innerHTML = '<option value="">Not set</option>' + zoomAccountOptions();
 
     document.getElementById('campName').value = '';
     document.getElementById('campSummary').value = '';
@@ -3139,6 +3149,7 @@
       listId: listId,
       segments: segments,
       sessionId: document.getElementById('campSession').value || undefined,
+      zoomUserId: document.getElementById('campZoomHost').value || undefined,
       event: {
         summary: summary,
         description: document.getElementById('campDesc').value.trim() || undefined,
@@ -3234,6 +3245,44 @@
         closeModal('campDeadlineModal');
         toast(raw ? 'Stop time saved' : 'Stop time removed', 'success');
         deadlineCampaignId = null;
+        loadCampaigns();
+        if (currentCampaignId === id) openCampaignDetail(id);
+      })
+      .catch(function (e) { toast(e.message, 'error'); });
+  }
+
+  var campZoomId = null;
+
+  function openCampZoomHost(id) {
+    campZoomId = id;
+    var camp = campaignData.filter(function (c) { return c.id === id; })[0];
+
+    var sel = document.getElementById('campZoomSelect');
+    sel.innerHTML = '<option value="">Not set</option>' + zoomAccountOptions(camp && camp.zoomUserId);
+    if (camp && camp.zoomUserId) sel.value = camp.zoomUserId;
+
+    document.getElementById('campZoomNote').textContent = zoomAccounts.length
+      ? 'The chosen host is stamped onto this campaign\'s linked video call, so attendance is read from it.'
+      : 'No Zoom account is connected yet. Use Connect Zoom, then pick it here.';
+    document.getElementById('campZoomConnect').href = '/oauth/zoom/start?campaignId=' + encodeURIComponent(id);
+
+    openModal('campZoomModal');
+  }
+
+  function saveCampZoomHost(btn) {
+    if (!campZoomId) return;
+    var value = document.getElementById('campZoomSelect').value || null;
+    var id = campZoomId;
+
+    withBusy(btn, api('/api/campaigns/' + id + '/zoom', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ zoomUserId: value })
+    }))
+      .then(function () {
+        closeModal('campZoomModal');
+        toast(value ? 'Zoom host saved' : 'Zoom host cleared', 'success');
+        campZoomId = null;
         loadCampaigns();
         if (currentCampaignId === id) openCampaignDetail(id);
       })
@@ -3341,6 +3390,7 @@
         '<span class="chip chip--neutral">' + esc(campListName(c.listId)) + '</span>' +
         (c.includeAlreadyInvited ? '<span class="chip chip--warning">includes repeat invitations</span>' : '') +
         (c.status === 'scheduled' && c.scheduledStartAt ? '<span class="chip chip--neutral">Starts ' + esc(prettyDate(c.scheduledStartAt)) + '</span>' : '') +
+        (c.zoomUserId ? '<span class="chip chip--neutral">Zoom host: ' + esc(zoomAccountLabel(c.zoomUserId)) + '</span>' : '') +
         (c.sendByAt ? '<span class="chip chip--neutral">Stop by ' + esc(prettyDate(c.sendByAt)) + '</span>' : '') + '</div>' +
       '<div class="summary">' +
         '<div class="summary__item"><span class="summary__value">' + counts.total + '</span><span class="summary__label">people</span></div>' +
@@ -3398,6 +3448,7 @@
   $('#campSave').addEventListener('click', function () { saveCampaign(this); });
   $('#campScheduleSave').addEventListener('click', function () { saveCampSchedule(this); });
   $('#campDeadlineSave').addEventListener('click', function () { saveCampDeadline(this); });
+  $('#campZoomSave').addEventListener('click', function () { saveCampZoomHost(this); });
   $('#campStartMode').addEventListener('change', function () {
     document.getElementById('campStartAtWrap').hidden = this.value !== 'later';
     refreshCampPlan();
@@ -3438,6 +3489,7 @@
 
     if (action === 'campSchedule') { openCampSchedule(id); return; }
     if (action === 'campDeadline') { openCampDeadline(id); return; }
+    if (action === 'campZoomHost') { openCampZoomHost(id); return; }
 
     if (action === 'campEnd') {
       var target = campaignData.filter(function (x) { return x.id === id; })[0];

@@ -1,6 +1,12 @@
 import axios from 'axios';
-import { getConnection, saveConnection } from '../domain/connectionStore';
 import { getVideoSettings } from '../domain/videoSettings';
+import {
+  deleteZoomTokens,
+  listZoomAccounts,
+  loadZoomTokens,
+  saveZoomAccount,
+  saveZoomTokens,
+} from '../domain/zoomStore';
 import { refreshZoomToken, isInvalidGrant, zoomErrorDetail } from '../oauth/zoomOAuth';
 import {
   chooseZoomTokenSource,
@@ -8,7 +14,6 @@ import {
   expiryFrom,
   pickZoomAccount,
   tokenUsable,
-  withoutZoomToken,
   type ZoomTokenSource,
 } from './zoomAuth';
 import type {
@@ -24,30 +29,36 @@ import type {
 const BASE = 'https://api.zoom.us/v2';
 
 /**
- * Tokens are cached per identity, not globally: with per-connection Zoom auth a single shared slot
- * would hand one tenant's user token to another tenant's request.
+ * Tokens are cached per Zoom host. With several campaigns sharing one authorised host this avoids a
+ * refresh per campaign, and keying by user id keeps two hosts from ever sharing a slot.
  */
 const tokenCache = new Map<string, { accessToken: string; expiresAt: number }>();
 
-function cacheKey(source: ZoomTokenSource, ctx?: VideoAuthContext): string {
-  return source.kind === 'user' ? `user:${ctx?.connectionId ?? ''}:${source.userId}` : 's2s';
+function cacheKey(source: ZoomTokenSource): string {
+  return source.kind === 'user' ? `user:${source.userId}` : 's2s';
+}
+
+/** Drop a cached token after a disconnect, so the next call cannot keep using it. */
+export function forgetZoomToken(userId: string): void {
+  tokenCache.delete(`user:${userId}`);
 }
 
 async function getAccessToken(ctx?: VideoAuthContext): Promise<string> {
   const settings = await getVideoSettings();
-  const conn = ctx?.connectionId ? await getConnection(ctx.connectionId) : null;
+  const accounts = await listZoomAccounts();
+  const tokens = await loadZoomTokens(accounts);
 
   const source = chooseZoomTokenSource({
     mode: defaultZoomAuthMode(settings.zoomAuthMode),
     requestedUserId: ctx?.zoomUserId,
-    accounts: conn?.zoomAccounts,
-    tokens: conn?.zoomTokens,
+    accounts,
+    tokens,
     s2sConfigured: !!(settings.zoom?.accountId && settings.zoom.clientId && settings.zoom.clientSecret),
     now: Date.now(),
   });
   if (source.kind === 'error') throw new Error(source.error);
 
-  const key = cacheKey(source, ctx);
+  const key = cacheKey(source);
   const cached = tokenCache.get(key);
   if (cached && cached.expiresAt > Date.now() + 60000) return cached.accessToken;
 
@@ -73,34 +84,24 @@ async function getAccessToken(ctx?: VideoAuthContext): Promise<string> {
   }
 
   try {
-    const tokens = await refreshZoomToken(source.refreshToken);
-    const expiresAt = expiryFrom(Date.now(), tokens.expires_in);
-    tokenCache.set(key, { accessToken: tokens.access_token, expiresAt });
+    const refreshed = await refreshZoomToken(source.refreshToken);
+    const expiresAt = expiryFrom(Date.now(), refreshed.expires_in);
+    tokenCache.set(key, { accessToken: refreshed.access_token, expiresAt });
 
-    if (conn && ctx?.connectionId) {
-      conn.zoomTokens = {
-        ...(conn.zoomTokens ?? {}),
-        [source.userId]: {
-          // Zoom may rotate the refresh token; keep the new one when it does.
-          refreshToken: tokens.refresh_token || source.refreshToken,
-          accessToken: tokens.access_token,
-          expiresAt,
-        },
-      };
-      conn.updatedAt = Date.now();
-      await saveConnection(conn);
-    }
+    await saveZoomTokens(source.userId, {
+      // Zoom may rotate the refresh token; keep the new one when it does.
+      refreshToken: refreshed.refresh_token || source.refreshToken,
+      accessToken: refreshed.access_token,
+      expiresAt,
+    });
 
-    return tokens.access_token;
+    return refreshed.access_token;
   } catch (err) {
     if (isInvalidGrant(err)) {
-      // The authorisation is gone for good — drop it so the UI can say "reconnect" instead of
-      // retrying a dead token on every sync.
-      if (conn && ctx?.connectionId) {
-        conn.zoomTokens = withoutZoomToken(conn.zoomTokens, source.userId);
-        conn.updatedAt = Date.now();
-        await saveConnection(conn);
-      }
+      // The authorisation is gone for good. Keep the host listed (campaigns still point at it) but
+      // drop the dead credentials, so the error is "reconnect" rather than a silent retry loop.
+      await deleteZoomTokens(source.userId);
+      tokenCache.delete(key);
       throw new Error(`Zoom needs reconnecting for ${source.email}`);
     }
     throw new Error(`Zoom token refresh failed: ${zoomErrorDetail(err)}`);
@@ -112,19 +113,11 @@ async function rememberReportAccess(
   ctx: VideoAuthContext | undefined,
   access: 'granted' | 'denied',
 ): Promise<void> {
-  if (!ctx?.connectionId) return;
   try {
-    const conn = await getConnection(ctx.connectionId);
-    if (!conn) return;
-
-    const accounts = conn.zoomAccounts ?? [];
-    const target = pickZoomAccount(accounts, ctx.zoomUserId).account;
+    const target = pickZoomAccount(await listZoomAccounts(), ctx?.zoomUserId).account;
     if (!target || target.reportAccess === access) return;
 
-    target.reportAccess = access;
-    conn.zoomAccounts = accounts;
-    conn.updatedAt = Date.now();
-    await saveConnection(conn);
+    await saveZoomAccount({ ...target, reportAccess: access });
   } catch {
     /* never let bookkeeping break a sync */
   }
@@ -255,11 +248,9 @@ function statsFrom(details: Record<string, unknown> | null): Record<string, stri
   return out;
 }
 
-/** The account this session's host authorisation maps to, if any (used for `reportAccess`). */
+/** The host this session is pinned to, if any (used for `reportAccess`). */
 async function accountFor(ctx?: VideoAuthContext) {
-  if (!ctx?.connectionId) return undefined;
-  const conn = await getConnection(ctx.connectionId);
-  return pickZoomAccount(conn?.zoomAccounts, ctx.zoomUserId).account;
+  return pickZoomAccount(await listZoomAccounts(), ctx?.zoomUserId).account;
 }
 
 export const zoomProvider: VideoProviderImpl = {

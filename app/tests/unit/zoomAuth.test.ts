@@ -4,17 +4,14 @@ import {
   defaultZoomAuthMode,
   expiryFrom,
   pickZoomAccount,
-  removeZoomAccount,
   reportAccessFromStatus,
   tokenUsable,
-  upsertZoomAccount,
-  withoutZoomToken,
-  type ZoomAccountLink,
+  type ZoomAccountRecord,
 } from '../../src/video/zoomAuth';
 
 const T = 1_000_000;
 
-function account(userId: string, extra: Partial<ZoomAccountLink> = {}): ZoomAccountLink {
+function account(userId: string, extra: Partial<ZoomAccountRecord> = {}): ZoomAccountRecord {
   return {
     userId,
     email: `${userId}@example.com`,
@@ -65,29 +62,6 @@ describe('pickZoomAccount', () => {
   it('returns nothing when none are connected', () => {
     expect(pickZoomAccount(undefined)).toEqual({});
     expect(pickZoomAccount([])).toEqual({});
-  });
-});
-
-describe('upsertZoomAccount / removeZoomAccount', () => {
-  it('replaces an existing host instead of duplicating it', () => {
-    const out = upsertZoomAccount([account('a', { email: 'old@example.com' })], account('a', { email: 'new@example.com' }));
-    expect(out).toHaveLength(1);
-    expect(out[0].email).toBe('new@example.com');
-  });
-
-  it('adds a new host alongside the others', () => {
-    const out = upsertZoomAccount([account('a')], account('b'));
-    expect(out.map((a) => a.userId)).toEqual(['a', 'b']);
-  });
-
-  it('removes only the named host', () => {
-    expect(removeZoomAccount([account('a'), account('b')], 'a').map((a) => a.userId)).toEqual(['b']);
-  });
-
-  it('drops only the named token', () => {
-    const tokens = { a: { refreshToken: 'ra' }, b: { refreshToken: 'rb' } };
-    expect(Object.keys(withoutZoomToken(tokens, 'a'))).toEqual(['b']);
-    expect(withoutZoomToken(undefined, 'a')).toEqual({});
   });
 });
 

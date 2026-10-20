@@ -3,7 +3,7 @@ import { REDIS_KEYS } from '../config/constants';
 import { env } from '../config/env';
 import { seal, open } from '../lib/crypto';
 import { defaultZoomAuthMode } from '../video/zoomAuth';
-import type { ZoomAuthMode } from './connection';
+import type { ZoomAuthMode } from './zoomStore';
 
 export interface VideoSettings {
   /**

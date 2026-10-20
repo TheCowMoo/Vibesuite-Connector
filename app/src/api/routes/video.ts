@@ -1,10 +1,9 @@
 import type { FastifyInstance } from 'fastify';
-import { getConnection, publicConnection, saveConnection } from '../../domain/connectionStore';
 import { getVideoSettings, saveVideoSettings, publicVideoSettings } from '../../domain/videoSettings';
+import { deleteZoomAccount, getZoomAccount, listZoomAccounts, saveZoomAccount } from '../../domain/zoomStore';
 import { probeZoomReportAccess, zoomOAuthConfigured } from '../../oauth/zoomOAuth';
-import { removeZoomAccount, withoutZoomToken } from '../../video/zoomAuth';
 import { defaultZoomAuthMode } from '../../video/zoomAuth';
-import { zoomAccessToken, zoomProvider } from '../../video';
+import { forgetZoomToken, zoomAccessToken, zoomProvider } from '../../video';
 
 export async function videoRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/video/settings', async () => {
@@ -57,21 +56,22 @@ export async function videoRoutes(app: FastifyInstance): Promise<void> {
     return zoomProvider.test({ connectionId: b.connectionId, zoomUserId: b.zoomUserId });
   });
 
-  /** Disconnect one authorised Zoom host, leaving the connection's other hosts untouched. */
-  app.delete('/api/connections/:id/zoom/accounts/:userId', async (req, reply) => {
-    const { id, userId } = req.params as { id: string; userId: string };
-    const conn = await getConnection(id);
-    if (!conn) {
-      reply.code(404).send({ error: 'connection not found' });
+  app.get('/api/zoom/accounts', async () => {
+    return { accounts: await listZoomAccounts() };
+  });
+
+  /** Disconnect one host. Campaigns that pointed at it will report "reconnect" on their next sync. */
+  app.delete('/api/zoom/accounts/:userId', async (req, reply) => {
+    const { userId } = req.params as { userId: string };
+    if (!(await getZoomAccount(userId))) {
+      reply.code(404).send({ error: 'Zoom account not connected' });
       return;
     }
 
-    conn.zoomAccounts = removeZoomAccount(conn.zoomAccounts, userId);
-    conn.zoomTokens = withoutZoomToken(conn.zoomTokens, userId);
-    conn.updatedAt = Date.now();
-    await saveConnection(conn);
+    await deleteZoomAccount(userId);
+    forgetZoomToken(userId);
 
-    return { ok: true, connection: publicConnection(conn) };
+    return { ok: true, accounts: await listZoomAccounts() };
   });
 
   /**
@@ -81,22 +81,20 @@ export async function videoRoutes(app: FastifyInstance): Promise<void> {
    * app or granting the report scope turns a previously-refused host into a working one, and the
    * operator should not have to disconnect and reconnect to pick that up.
    */
-  app.post('/api/connections/:id/zoom/accounts/:userId/probe', async (req, reply) => {
-    const { id, userId } = req.params as { id: string; userId: string };
-    const conn = await getConnection(id);
-    const account = conn?.zoomAccounts?.find((a) => a.userId === userId);
-    if (!conn || !account) {
-      reply.code(404).send({ error: 'Zoom account not connected for this connection' });
+  app.post('/api/zoom/accounts/:userId/probe', async (req, reply) => {
+    const { userId } = req.params as { userId: string };
+    const account = await getZoomAccount(userId);
+    if (!account) {
+      reply.code(404).send({ error: 'Zoom account not connected' });
       return;
     }
 
     try {
-      const token = await zoomAccessToken({ connectionId: id, zoomUserId: userId });
-      account.reportAccess = await probeZoomReportAccess(token, userId);
-      conn.updatedAt = Date.now();
-      await saveConnection(conn);
+      const token = await zoomAccessToken({ zoomUserId: userId });
+      const reportAccess = await probeZoomReportAccess(token, userId);
+      await saveZoomAccount({ ...account, reportAccess });
 
-      return { ok: true, reportAccess: account.reportAccess, connection: publicConnection(conn) };
+      return { ok: true, reportAccess };
     } catch (err) {
       reply.code(502).send({ error: (err as Error).message });
     }

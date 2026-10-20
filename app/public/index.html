@@ -671,6 +671,7 @@
     <div class="sender__grid">
       <label class="field"><span class="field__label">Which contact list?</span><select id="campList"></select></label>
       <label class="field"><span class="field__label">Which video call? (join link)</span><select id="campSession"><option value="">None</option></select></label>
+      <label class="field"><span class="field__label">Zoom host for this campaign</span><select id="campZoomHost"><option value="">Not set</option></select></label>
       <label class="field"><span class="field__label">How to split it</span><select id="campMode"><option value="even">Split evenly</option><option value="weighted">Use my shares</option></select></label>
       <label class="field"><span class="field__label">Timezone</span><input id="campTz" list="tzList" value="UTC" /></label>
     </div>
@@ -734,6 +735,27 @@
       <span class="spacer"></span>
       <button class="btn btn--ghost" data-close="campDeadlineModal">Cancel</button>
       <button class="btn btn--primary" id="campDeadlineSave">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Campaign Zoom host -->
+<div class="backdrop" id="campZoomModal" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="campZoomTitle">
+    <div class="modal__head">
+      <h2 class="modal__title" id="campZoomTitle">Zoom host for this campaign</h2>
+      <button class="icon-btn" data-close="campZoomModal" aria-label="Close">&times;</button>
+    </div>
+    <label class="field"><span class="field__label">Which Zoom account runs this webinar?</span>
+      <select id="campZoomSelect"><option value="">Not set</option></select>
+    </label>
+    <p class="muted">Attendance is read from this host's Zoom. One campaign has one host; the account is shared, so several campaigns can use the same one.</p>
+    <p class="muted" id="campZoomNote"></p>
+    <div class="modal__foot">
+      <span class="spacer"></span>
+      <a class="btn btn--ghost" id="campZoomConnect" href="#">Connect Zoom</a>
+      <button class="btn btn--ghost" data-close="campZoomModal">Cancel</button>
+      <button class="btn btn--primary" id="campZoomSave">Save</button>
     </div>
   </div>
 </div>

@@ -29,6 +29,8 @@ export const CampaignSchema = z.object({
   listId: z.string().min(1),
   segments: z.array(z.string()).default([]),
   sessionId: z.string().optional(),
+  /** Which authorised Zoom host runs this campaign's webinar. Shared pool, one per campaign. */
+  zoomUserId: z.string().optional(),
   event: CampaignEventSchema,
   senders: z.array(CampaignSenderSchema).min(1),
   distribution: z.object({ mode: z.enum(['even', 'weighted']).default('even') }).default({ mode: 'even' }),

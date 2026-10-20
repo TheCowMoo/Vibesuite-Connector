@@ -23,7 +23,6 @@ function toMeta(conn: StoredConnection): Connection {
     attendanceRules: conn.attendanceRules,
     watchChannelId: conn.watchChannelId,
     watchExpiresAt: conn.watchExpiresAt,
-    zoomAccounts: conn.zoomAccounts,
     createdAt: conn.createdAt,
     updatedAt: conn.updatedAt,
   };
@@ -36,7 +35,6 @@ function toSecrets(conn: StoredConnection): ConnectionSecrets {
     ghlAccessToken: conn.ghlAccessToken,
     ghlRefreshToken: conn.ghlRefreshToken,
     ghlApiToken: conn.ghlApiToken,
-    zoomTokens: conn.zoomTokens,
   };
 }
 
