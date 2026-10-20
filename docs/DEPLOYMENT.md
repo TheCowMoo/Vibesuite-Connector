@@ -335,7 +335,10 @@ Two modes, chosen in **Settings → Video conferencing**:
 2. Management type: **user-managed** (each host authorises their own Zoom user).
 3. **OAuth redirect URL** *and* **OAuth allow list** must both contain
    `https://connect.vibesuite.io/oauth/zoom/callback` — it must match `OAUTH_BASE_URL` +
-   `ZOOM_OAUTH_REDIRECT_PATH` exactly.
+   `ZOOM_OAUTH_REDIRECT_PATH` exactly. For local development also add
+   `http://localhost:3000/oauth/zoom/callback` to the allow list and run the app with
+   `OAUTH_BASE_URL=http://localhost:3000`; the value is built as `OAUTH_BASE_URL` +
+   `ZOOM_OAUTH_REDIRECT_PATH`, so the two must match character for character (no trailing slash).
 4. Scopes: pick the equivalents of **user read**, **meeting read** and **webinar read** in the app's
    scope picker. Zoom now presents granular names (for example `user:read:user`,
    `meeting:read:meeting`, `webinar:read:webinar`) alongside the classic ones (`user:read`,
