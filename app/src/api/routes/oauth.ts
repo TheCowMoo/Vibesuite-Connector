@@ -14,10 +14,11 @@ import {
   zoomErrorDetail,
   zoomOAuthConfigured,
 } from '../../oauth/zoomOAuth';
-import { expiryFrom } from '../../video/zoomAuth';
+import { expiryFrom, scopesFromDenial } from '../../video/zoomAuth';
 import { applyCampaignZoomHost } from '../../domain/campaignZoom';
 import { saveZoomAccount, saveZoomTokens } from '../../domain/zoomStore';
 import { getCampaign } from '../../domain/campaignStore';
+import { forgetZoomToken } from '../../video';
 import { bootstrapConnection } from '../../domain/bootstrap';
 
 const STATE_TTL_SECONDS = 600;
@@ -192,6 +193,10 @@ export async function oauthRoutes(app: FastifyInstance): Promise<void> {
       // rather than showing empty polls later.
       const probe = await probeZoomReportAccess(tokens.access_token, user.id);
 
+      // A fresh authorisation invalidates anything cached against the old token — including the
+      // one-shot "already tried reports" marker — so the next sync verifies from scratch.
+      forgetZoomToken(user.id);
+
       await saveZoomTokens(user.id, {
         refreshToken: tokens.refresh_token,
         accessToken: tokens.access_token,
@@ -204,6 +209,7 @@ export async function oauthRoutes(app: FastifyInstance): Promise<void> {
         connectedAt: Date.now(),
         reportAccess: probe.access,
         reportDetail: probe.detail,
+        reportMissingScopes: scopesFromDenial(probe.detail),
       });
 
       // Authorising from a campaign attaches that host to it, and stamps its linked video call, so

@@ -27,6 +27,8 @@ export interface ZoomAccountRecord {
   reportAccess: 'granted' | 'denied' | 'unknown';
   /** What Zoom said when it refused the report probe (e.g. "does not contain scopes:[...]"). */
   reportDetail?: string;
+  /** Scopes parsed out of that message, ready to show as "add this in Zoom". */
+  reportMissingScopes?: string[];
 }
 
 export interface ZoomTokenRecord {

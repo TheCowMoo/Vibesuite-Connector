@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { getVideoSettings, saveVideoSettings, publicVideoSettings } from '../../domain/videoSettings';
 import { deleteZoomAccount, getZoomAccount, listZoomAccounts, saveZoomAccount } from '../../domain/zoomStore';
 import { probeZoomReportAccess, zoomOAuthConfigured } from '../../oauth/zoomOAuth';
-import { defaultZoomAuthMode } from '../../video/zoomAuth';
+import { defaultZoomAuthMode, scopesFromDenial } from '../../video/zoomAuth';
 import { forgetZoomToken, zoomAccessToken, zoomProvider } from '../../video';
 
 export async function videoRoutes(app: FastifyInstance): Promise<void> {
@@ -92,9 +92,14 @@ export async function videoRoutes(app: FastifyInstance): Promise<void> {
     try {
       const token = await zoomAccessToken({ zoomUserId: userId });
       const probe = await probeZoomReportAccess(token, userId);
-      await saveZoomAccount({ ...account, reportAccess: probe.access, reportDetail: probe.detail });
+      await saveZoomAccount({
+        ...account,
+        reportAccess: probe.access,
+        reportDetail: probe.detail,
+        reportMissingScopes: scopesFromDenial(probe.detail),
+      });
 
-      return { ok: true, reportAccess: probe.access, detail: probe.detail };
+      return { ok: true, reportAccess: probe.access, detail: probe.detail, missingScopes: scopesFromDenial(probe.detail) };
     } catch (err) {
       reply.code(502).send({ error: (err as Error).message });
     }

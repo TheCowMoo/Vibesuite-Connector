@@ -1554,9 +1554,18 @@
       var detail = a.reportDetail
         ? '<div class="muted" style="font-size:0.78rem">Zoom said: ' + esc(a.reportDetail) + '</div>'
         : '';
+      var missing = a.reportMissingScopes || [];
+      var instruction = missing.length
+        ? '<div class="muted" style="font-size:0.8rem">Add in Zoom → Scopes: ' +
+          missing.map(function (s) {
+            return '<code>' + esc(s) + '</code> ' +
+              '<button class="btn btn--ghost btn--sm" data-copy="' + esc(s) + '">Copy</button>';
+          }).join(' ') + '</div>'
+        : '';
       return '<div class="conn__meta"><span class="conn__cal">' + esc(a.email || a.userId) + '</span>' + chip +
         '<button class="btn btn--ghost btn--sm" data-zoom-probe="' + esc(a.userId) + '">Check access</button>' +
         '<button class="btn btn--ghost btn--sm" data-zoom-disconnect="' + esc(a.userId) + '">Disconnect</button></div>' +
+        instruction +
         detail;
     }).join('');
 
@@ -1615,6 +1624,19 @@
     });
 
     document.getElementById('zoomHosts').addEventListener('click', function (e) {
+      var copyBtn = e.target.closest('[data-copy]');
+      if (copyBtn) {
+        var value = copyBtn.dataset.copy;
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(value)
+            .then(function () { toast('Copied ' + value, 'success'); })
+            .catch(function () { toast(value, 'success'); });
+        } else {
+          toast(value, 'success');
+        }
+        return;
+      }
+
       var disconnectBtn = e.target.closest('[data-zoom-disconnect]');
       var probeBtn = e.target.closest('[data-zoom-probe]');
       if (!disconnectBtn && !probeBtn) return;

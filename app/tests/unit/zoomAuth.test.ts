@@ -6,6 +6,8 @@ import {
   isScopeDenied,
   pickZoomAccount,
   reportAccessFromProbe,
+  scopesFromDenial,
+  shouldAttemptReports,
   tokenUsable,
   type ZoomAccountRecord,
 } from '../../src/video/zoomAuth';
@@ -107,6 +109,41 @@ describe('reportAccessFromProbe', () => {
     expect(reportAccessFromProbe(404)).toBe('unknown');
     expect(reportAccessFromProbe(429)).toBe('unknown');
     expect(reportAccessFromProbe(0)).toBe('unknown');
+  });
+});
+
+describe('scopesFromDenial', () => {
+  it('extracts the scope Zoom names', () => {
+    expect(scopesFromDenial('400 Invalid access token, does not contain scopes:[report:read:user:admin].'))
+      .toEqual(['report:read:user:admin']);
+  });
+
+  it('handles several scopes and spacing', () => {
+    expect(scopesFromDenial('does not contain scopes:[report:read:user:admin, meeting:read:meeting]'))
+      .toEqual(['report:read:user:admin', 'meeting:read:meeting']);
+  });
+
+  it('returns nothing for unrelated messages', () => {
+    expect(scopesFromDenial('400 The date range is invalid')).toEqual([]);
+    expect(scopesFromDenial(undefined)).toEqual([]);
+    expect(scopesFromDenial('')).toEqual([]);
+  });
+});
+
+describe('shouldAttemptReports', () => {
+  it('always tries when the verdict is granted or unknown', () => {
+    expect(shouldAttemptReports('granted', false)).toBe(true);
+    expect(shouldAttemptReports('unknown', false)).toBe(true);
+    expect(shouldAttemptReports(undefined, false)).toBe(true);
+  });
+
+  /*
+   * The probe asks /report/users/… while attendance needs /report/meetings/…/participants; a denial
+   * there must not stop us checking the call that actually matters — but only once.
+   */
+  it('allows exactly one verification after a denial', () => {
+    expect(shouldAttemptReports('denied', false)).toBe(true);
+    expect(shouldAttemptReports('denied', true)).toBe(false);
   });
 });
 

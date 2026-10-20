@@ -14,6 +14,8 @@ import {
   expiryFrom,
   isScopeDenied,
   pickZoomAccount,
+  scopesFromDenial,
+  shouldAttemptReports,
   tokenUsable,
   type ZoomTokenSource,
 } from './zoomAuth';
@@ -42,7 +44,17 @@ function cacheKey(source: ZoomTokenSource): string {
 /** Drop a cached token after a disconnect, so the next call cannot keep using it. */
 export function forgetZoomToken(userId: string): void {
   tokenCache.delete(`user:${userId}`);
+  // Also forget the one-shot "reports were refused" marker, so a fresh authorisation re-verifies.
+  reportAttempted.delete(userId);
 }
+
+/**
+ * Hosts whose report access we have already verified once while the cached verdict says denied.
+ *
+ * The connect-time probe asks a different endpoint from the one attendance needs, so one verification
+ * attempt per host per process keeps a wrong "denied" from hiding report data forever.
+ */
+const reportAttempted = new Set<string>();
 
 async function getAccessToken(ctx?: VideoAuthContext): Promise<string> {
   const settings = await getVideoSettings();
@@ -120,7 +132,13 @@ async function rememberReportAccess(
     if (!target) return;
     if (target.reportAccess === access && (!detail || target.reportDetail === detail)) return;
 
-    await saveZoomAccount({ ...target, reportAccess: access, reportDetail: detail ?? target.reportDetail });
+    const nextDetail = access === 'denied' ? (detail ?? target.reportDetail) : undefined;
+    await saveZoomAccount({
+      ...target,
+      reportAccess: access,
+      reportDetail: nextDetail,
+      reportMissingScopes: access === 'denied' ? scopesFromDenial(nextDetail) : [],
+    });
   } catch {
     /* never let bookkeeping break a sync */
   }
@@ -283,12 +301,16 @@ export const zoomProvider: VideoProviderImpl = {
     const notes: string[] = [];
 
     const account = await accountFor(ctx);
-    const reportAllowed = account ? account.reportAccess !== 'denied' : true;
+    const attemptKey = account?.userId ?? 's2s';
+    // A cached "denied" buys one verification attempt, because the probe and the participant call
+    // need different scopes — the probe's verdict must not be the final word.
+    const reportAllowed = shouldAttemptReports(account?.reportAccess, reportAttempted.has(attemptKey));
 
     if (reportAllowed) {
       const participants = await fetchListResult(token, `/report/${seg}/${enc}/participants`, 'participants');
 
       if (participants.status === 200) {
+        reportAttempted.delete(attemptKey);
         await rememberReportAccess(ctx, 'granted');
 
         const absenteesRaw = await fetchList(token, `/report/${seg}/${enc}/absentees`, 'absentees');
@@ -310,6 +332,7 @@ export const zoomProvider: VideoProviderImpl = {
       }
 
       if (isScopeDenied(participants.status, participants.detail)) {
+        reportAttempted.add(attemptKey);
         await rememberReportAccess(ctx, 'denied', participants.detail);
         notes.push(
           'Zoom refused report access for this authorisation, so polls, Q&A and the absentee list are unavailable (they need an admin-managed Zoom app). Attendance still comes from the meeting participant list.',

@@ -89,6 +89,38 @@ export function reportAccessFromProbe(status: number, detail?: string): 'granted
   return 'unknown';
 }
 
+/**
+ * The scopes Zoom names when it refuses: `… does not contain scopes:[report:read:user:admin].`
+ *
+ * Quoting them back as "add this in Zoom → Scopes" is the difference between a 400 string and an
+ * actionable instruction.
+ */
+export function scopesFromDenial(detail?: string): string[] {
+  const match = /scopes?:\s*\[([^\]]*)\]/i.exec(detail ?? '');
+  if (!match) return [];
+  return match[1]
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+/**
+ * Whether a sync should still try the report endpoints.
+ *
+ * The connect-time probe asks a *different* endpoint (`/report/users/{userId}/meetings`, scope
+ * `report:read:user:admin`) from the one attendance needs (`/report/meetings/{id}/participants`), so
+ * its "denied" can be wrong about the call that matters. A denial therefore buys one verification
+ * attempt per host per process: if participants work, the verdict flips to granted; if not, the host
+ * is marked and we stop asking.
+ */
+export function shouldAttemptReports(
+  access: 'granted' | 'denied' | 'unknown' | undefined,
+  alreadyAttempted: boolean,
+): boolean {
+  if (access !== 'denied') return true;
+  return !alreadyAttempted;
+}
+
 export interface ChooseZoomTokenParams {
   mode: ZoomAuthMode;
   requestedUserId?: string;
