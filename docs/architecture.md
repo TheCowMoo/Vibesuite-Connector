@@ -117,13 +117,36 @@ drained. Operators can bypass the pacing (but never the caps) for one mailbox wi
 A campaign can also be **`scheduled`** (begin later) and **`ended`** (stopped for good).
 `campaignTickAction()` (`domain/campaignLifecycle.ts`) is the single place that decision lives, kept
 pure so the edges are testable: a `scheduled` campaign with no start time never fires, an `active`
-campaign with no deadline never auto-ends, and only `active` is subject to the deadline at all.
+campaign with no deadline never auto-ends, and only `active` is subject to the deadline — except that
+a `scheduled` campaign whose deadline lapsed before it ever started (a worker outage spanning the
+whole window) is **ended** rather than activated, because freezing an audience that is no longer
+allowed to receive anything would be pure waste.
 
 The audience is frozen at **activation**, not at scheduling time, so anyone invited elsewhere in the
 meantime is correctly skipped. `runCampaignTick()` applies the lifecycle *before* the send pass, so the
 send pass only ever sees campaigns that should genuinely be sending. A scheduled campaign whose audience
 turns out to be empty when it activates is flipped to `paused` with `lastError` rather than retried
 silently on every tick — a scheduled failure that nobody can see is worse than a visible pause.
+
+**Start and stop are independent.** `resolveSendPlan()` (`domain/campaignLifecycle.ts`) validates the
+pair for both the wizard and the API: a start must be in the future, a stop must be after the start.
+Choosing "as soon as I press Begin sending" still keeps the stop time — it is sent with the create
+call and stored on the draft, so the later Begin sending press is bounded by it. That was the gap that
+made the feature look unfinished: the wizard used to return early on the not-scheduled path and drop
+the stop time entirely.
+
+The deadline can also be set, changed or cleared on its own with
+`POST /api/campaigns/:id/deadline` (`{ sendByAt }`, `null` clears it), for any campaign that has not
+finished. `startCampaign()` and `sendCampaignBatch()` both refuse to run once `sendByAt` has passed
+(`startBlockedByDeadline()`), so a manual batch cannot slip invitations out between the deadline and
+the next tick. `startCampaign()` also clears `scheduledStartAt` and `endCampaign()` clears it, so a
+consumed start never lingers in the UI.
+
+Pace versus deadline is computed server-side by `invitedByDeadline()` (`domain/campaign.ts`) against
+day-end **timestamps**, not date strings: the old `toISOString().slice(0, 10)` comparison moved a late
+evening deadline to the next UTC day and mis-warned by one day. `POST /api/campaigns/plan-preview`
+runs the same `buildAudience()` + `planSchedule()` for a campaign that does not exist yet, which is
+what the wizard's "When it will finish" line shows.
 
 Ending leaves the queues intact: `counts.pending` keeps reporting who never went out, and those people
 stay uninvited (`list:{id}:invited` never recorded them), so a follow-up campaign picks them up. It is

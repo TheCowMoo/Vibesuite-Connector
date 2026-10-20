@@ -174,3 +174,23 @@ export function planSchedule(params: {
     totalDays: days.length,
   };
 }
+
+/**
+ * How many people the plan reaches before a deadline.
+ *
+ * Compares whole day *ends* against the timestamp rather than formatting dates into strings: the old
+ * `toISOString().slice(0, 10)` comparison put a deadline late in the local evening on the next UTC
+ * day, which made the "your stop time cuts people off" warning wrong by a day.
+ */
+export function invitedByDeadline(plan: { days: PlannerDay[] }, sendByAt: number): number {
+  if (!Number.isFinite(sendByAt)) return 0;
+
+  let invited = 0;
+  for (const day of plan.days) {
+    const dayEnd = Date.parse(`${day.date}T00:00:00Z`) + 86400000;
+    if (Number.isNaN(dayEnd)) continue;
+    if (dayEnd > sendByAt) break;
+    invited = day.cumulative;
+  }
+  return invited;
+}

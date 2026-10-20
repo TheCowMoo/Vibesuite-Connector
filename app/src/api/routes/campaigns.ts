@@ -1,9 +1,11 @@
 import type { FastifyInstance } from 'fastify';
 import {
   CampaignSchema,
+  invitedByDeadline,
   planSchedule,
   type Campaign,
 } from '../../domain/campaign';
+import { resolveSendPlan, stopTimeError } from '../../domain/campaignLifecycle';
 import {
   countRecipients,
   createCampaign,
@@ -51,6 +53,16 @@ async function refreshed(id: string): Promise<Record<string, unknown> | null> {
 
 function todayISO(): string {
   return new Date().toISOString().slice(0, 10);
+}
+
+/**
+ * The stop-time rules, applied to whatever is about to be stored.
+ *
+ * Shares `stopTimeError()` with the wizard's `resolveSendPlan()`, so a deadline the API accepts and
+ * one the UI accepts are judged by the same code.
+ */
+function sendByError(c: { sendByAt?: number; scheduledStartAt?: number }, now: number): string | undefined {
+  return stopTimeError(c, now);
 }
 
 export async function campaignRoutes(app: FastifyInstance): Promise<void> {
@@ -121,12 +133,69 @@ export async function campaignRoutes(app: FastifyInstance): Promise<void> {
     );
 
     const plan = planSchedule({ total, senders, startDate });
+    const byDeadline = camp.sendByAt !== undefined ? invitedByDeadline(plan, camp.sendByAt) : null;
     return {
       total,
       startDate,
       dailyCapacity: plan.days.length ? plan.days[0].total : 0,
       ...plan,
+      // Computed here, against timestamps, so the UI does not have to guess at UTC vs local dates.
+      byDeadline,
+      shortfall: byDeadline === null ? 0 : Math.max(0, total - byDeadline),
       spread: camp.distribution.mode,
+    };
+  });
+
+  /**
+   * The same estimate as `/api/campaigns/:id/plan`, for a campaign that does not exist yet.
+   *
+   * Reuses `buildAudience()` (exactly what Begin sending freezes) and `planSchedule()`, so the pace
+   * an operator is shown while filling in the wizard is the pace the send will actually follow.
+   */
+  app.post('/api/campaigns/plan-preview', async (req, reply) => {
+    const b = (req.body || {}) as {
+      listId?: string;
+      segments?: string[];
+      connectionIds?: string[];
+      startDate?: string;
+      stopBy?: number;
+      includeAlreadyInvited?: boolean;
+    };
+
+    if (!b.listId) {
+      reply.code(400).send({ error: 'pick a contact list first' });
+      return;
+    }
+    const list = await getList(b.listId);
+    if (!list || !list.result) {
+      reply.code(400).send({ error: 'list has no segmentation result — run Segment first' });
+      return;
+    }
+
+    const invited = b.includeAlreadyInvited ? new Set<string>() : await getInvitedEmails(b.listId);
+    const audience = buildAudience(list.result, b.segments ?? [], invited);
+    const total = audience.emails.length;
+
+    const senders = await Promise.all(
+      (b.connectionIds ?? [])
+        .filter(Boolean)
+        .map(async (connectionId) => ({ connectionId, profile: await getSenderProfile(connectionId) })),
+    );
+
+    const startDate = b.startDate && /^\d{4}-\d{2}-\d{2}$/.test(b.startDate) ? b.startDate : todayISO();
+    const plan = planSchedule({ total, senders, startDate });
+
+    const stopBy = Number(b.stopBy);
+    const byDeadline = Number.isFinite(stopBy) ? invitedByDeadline(plan, stopBy) : null;
+
+    return {
+      total,
+      startDate,
+      dailyCapacity: plan.days.length ? plan.days[0].total : 0,
+      ...plan,
+      byDeadline,
+      shortfall: byDeadline === null ? 0 : Math.max(0, total - byDeadline),
+      alreadyInvited: audience.alreadyInvited.length,
     };
   });
 
@@ -149,6 +218,14 @@ export async function campaignRoutes(app: FastifyInstance): Promise<void> {
       reply.code(400).send({ error: 'invalid campaign', details: parsed.error.flatten().fieldErrors });
       return;
     }
+
+    // A campaign can be created with a stop time already attached ("begin now, stop on Friday").
+    const stopProblem = sendByError(parsed.data, Date.now());
+    if (stopProblem) {
+      reply.code(400).send({ error: stopProblem });
+      return;
+    }
+
     const camp = await createCampaign(parsed.data);
     return { ok: true, campaign: await withStats(camp) };
   });
@@ -171,6 +248,18 @@ export async function campaignRoutes(app: FastifyInstance): Promise<void> {
       reply.code(400).send({ error: 'invalid campaign', details: parsed.error.flatten().fieldErrors });
       return;
     }
+
+    // Only judge the stop time when this edit actually touched it, so renaming a paused campaign
+    // whose deadline has already lapsed stays possible.
+    const body = (req.body || {}) as Record<string, unknown>;
+    if ('sendByAt' in body || 'scheduledStartAt' in body) {
+      const stopProblem = sendByError(parsed.data, Date.now());
+      if (stopProblem) {
+        reply.code(400).send({ error: stopProblem });
+        return;
+      }
+    }
+
     await saveCampaign(parsed.data);
     return { ok: true, campaign: await withStats(parsed.data) };
   });
@@ -251,31 +340,19 @@ export async function campaignRoutes(app: FastifyInstance): Promise<void> {
     }
 
     const b = (req.body || {}) as { startAt?: number; sendByAt?: number };
-    const startAt = Number(b.startAt);
-    if (!Number.isFinite(startAt)) {
-      reply.code(400).send({ error: 'a start time is required' });
-      return;
-    }
-    if (startAt <= Date.now()) {
-      reply.code(400).send({ error: 'the start time must be in the future' });
+    const plan = resolveSendPlan({
+      startMode: 'later',
+      startAt: b.startAt ?? undefined,
+      stopBy: b.sendByAt ?? undefined,
+      now: Date.now(),
+    });
+    if (plan.error) {
+      reply.code(400).send({ error: plan.error });
       return;
     }
 
-    let sendByAt: number | undefined;
-    if (b.sendByAt !== undefined && b.sendByAt !== null) {
-      sendByAt = Number(b.sendByAt);
-      if (!Number.isFinite(sendByAt)) {
-        reply.code(400).send({ error: 'the stop time is not valid' });
-        return;
-      }
-      if (sendByAt <= startAt) {
-        reply.code(400).send({ error: 'the stop time must be after the start time' });
-        return;
-      }
-    }
-
-    camp.scheduledStartAt = startAt;
-    camp.sendByAt = sendByAt;
+    camp.scheduledStartAt = plan.scheduledStartAt;
+    camp.sendByAt = plan.sendByAt;
     camp.status = 'scheduled';
     camp.lastError = undefined;
     await saveCampaign(camp);
@@ -301,6 +378,49 @@ export async function campaignRoutes(app: FastifyInstance): Promise<void> {
     camp.lastError = undefined;
     await saveCampaign(camp);
 
+    return { ok: true, campaign: await withStats(camp) };
+  });
+
+  /**
+   * Add, change or clear the stop time on its own.
+   *
+   * This is what makes "begin now, stop on Friday" possible: before it, a deadline could only be
+   * attached while scheduling a *future* start, so a running campaign could never be bounded.
+   */
+  app.post('/api/campaigns/:id/deadline', guard, async (req, reply) => {
+    const id = (req.params as { id: string }).id;
+    const camp = await getCampaign(id);
+    if (!camp) {
+      reply.code(404).send({ error: 'campaign not found' });
+      return;
+    }
+    if (camp.status === 'ended' || camp.status === 'completed') {
+      reply.code(400).send({ error: 'this campaign has already finished' });
+      return;
+    }
+
+    const b = (req.body || {}) as { sendByAt?: number | null };
+
+    // Absent or null clears the deadline; the scheduler then simply stops ending the campaign.
+    if (b.sendByAt === undefined || b.sendByAt === null) {
+      camp.sendByAt = undefined;
+      await saveCampaign(camp);
+      return { ok: true, campaign: await withStats(camp) };
+    }
+
+    const sendByAt = Number(b.sendByAt);
+    if (!Number.isFinite(sendByAt)) {
+      reply.code(400).send({ error: 'the stop time is not valid' });
+      return;
+    }
+    const problem = sendByError({ sendByAt, scheduledStartAt: camp.status === 'scheduled' ? camp.scheduledStartAt : undefined }, Date.now());
+    if (problem) {
+      reply.code(400).send({ error: problem });
+      return;
+    }
+
+    camp.sendByAt = sendByAt;
+    await saveCampaign(camp);
     return { ok: true, campaign: await withStats(camp) };
   });
 

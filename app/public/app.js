@@ -2625,6 +2625,10 @@
       out += '<button class="btn btn--ghost btn--sm" data-action="campEnd" data-id="' + id + '">End sending</button>';
     }
 
+    out += (c.status === 'completed' || c.status === 'ended')
+      ? ''
+      : '<button class="btn btn--ghost btn--sm" data-action="campDeadline" data-id="' + id + '">' +
+        (c.sendByAt ? 'Change stop time' : 'Add stop time') + '</button>';
     out += '<button class="btn btn--ghost btn--sm" data-action="campDetail" data-id="' + id + '">Details</button>';
     out += '<button class="btn btn--ghost btn--sm" data-action="campDelete" data-id="' + id + '">Delete</button>';
     return out;
@@ -2678,6 +2682,7 @@
         '<div class="conn__main">' +
           '<div class="conn__head"><span class="conn__name">' + esc(c.name) + '</span>' + campStatusChip(c.status) +
             '<span class="chip chip--neutral">' + esc(spreadLabel(c.distribution.mode)) + '</span>' +
+            (c.sendByAt ? '<span class="chip chip--neutral">Stop by ' + esc(prettyDate(c.sendByAt)) + '</span>' : '') +
             (counts.failed ? '<span class="chip chip--danger">' + counts.failed + " didn't go through</span>" : '') + '</div>' +
           '<div class="conn__meta"><span class="conn__cal">' + icon('calendar') + esc(campListName(c.listId)) + '</span>' +
             '<span class="conn__cal">' + esc(prettyDate(c.event.start)) + '</span></div>' +
@@ -2745,6 +2750,87 @@
     return out;
   }
 
+  function selectedCampSenderIds() {
+    var out = [];
+    $$('.camp-sender', document.getElementById('campSenders')).forEach(function (row) {
+      var pick = row.querySelector('[data-pick]');
+      if (pick && pick.checked) out.push(row.dataset.conn);
+    });
+    return out;
+  }
+
+  /** Local calendar date, so the planner's day 1 is the operator's today, not UTC's. */
+  function campDay(date) {
+    var d = new Date(date);
+    return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate());
+  }
+
+  /**
+   * What the pace will look like, before the campaign exists.
+   *
+   * Same `buildAudience()` + `planSchedule()` the server uses when it actually starts, so the days
+   * and the finish date shown here are what the send will follow. `campPlanSeq` drops out-of-order
+   * responses — typing in a date field can fire several requests.
+   */
+  var campPlanSeq = 0;
+  function refreshCampPlan() {
+    var el = document.getElementById('campPlan');
+    if (!el) return;
+
+    var listId = document.getElementById('campList').value;
+    var connectionIds = selectedCampSenderIds();
+    if (!listId || !connectionIds.length) {
+      el.innerHTML = '<span class="muted">Pick a contact list and at least one sending account to see the pace.</span>';
+      return;
+    }
+
+    var startRaw = document.getElementById('campStartAt').value;
+    var startMode = document.getElementById('campStartMode').value;
+    var stopRaw = document.getElementById('campStopBy').value;
+
+    var body = {
+      listId: listId,
+      segments: selectedCampaignSegments(),
+      connectionIds: connectionIds,
+      startDate: campDay(startMode === 'later' && startRaw ? new Date(startRaw) : new Date()),
+      includeAlreadyInvited: document.getElementById('campIncludeInvited').checked
+    };
+    if (stopRaw) body.stopBy = new Date(stopRaw).getTime();
+
+    var seq = ++campPlanSeq;
+    api('/api/campaigns/plan-preview', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+      .then(function (p) {
+        if (seq !== campPlanSeq || !el) return;
+        el.innerHTML = campPlanHtml(p);
+      })
+      .catch(function (e) {
+        if (seq !== campPlanSeq || !el) return;
+        el.innerHTML = '<span class="muted">Could not estimate the pace: ' + esc(e.message) + '</span>';
+      });
+  }
+
+  function campPlanHtml(p) {
+    if (!p || !p.total) {
+      return '<span class="muted">Nobody to invite on this list with these groups.</span>';
+    }
+
+    var html = pill('people', p.total, 'ok');
+    if (!p.totalDays) {
+      return html + ' <span class="muted">Nothing can send at the moment — check the <strong>Sending accounts</strong> tab.</span>';
+    }
+
+    html += ' <span class="muted">About <strong>' + p.totalDays + '</strong> ' + (p.totalDays === 1 ? 'day' : 'days') +
+      ' at roughly ' + p.dailyCapacity + ' a day — done by ' + esc(prettyDate(p.finishDate)) + '.</span>';
+
+    if (p.byDeadline !== null && p.byDeadline !== undefined) {
+      html += p.shortfall > 0
+        ? '<br><span style="color:var(--warning)">Your stop time would leave <strong>' + p.shortfall + '</strong> of ' + p.total + ' uninvited.</span>'
+        : '<br><span class="muted">Everyone fits in before your stop time.</span>';
+    }
+
+    return html;
+  }
+
   /**
    * Show what a campaign would actually reach, before it is created.
    *
@@ -2759,6 +2845,8 @@
   function refreshCampAudience() {
     var el = document.getElementById('campAudience');
     if (!el) return;
+    // The pace depends on the same inputs as the audience, so both are refreshed from one place.
+    refreshCampPlan();
     var listId = document.getElementById('campList').value;
     if (!listId) {
       el.innerHTML = '<span class="muted">Pick a contact list to see who will be invited.</span>';
@@ -2848,6 +2936,34 @@
       .filter(function (c) { return c.checked; })
       .map(function (c) { return c.dataset.seg; });
 
+    // Start and stop are read up front: the old code returned early for "right away" and never
+    // looked at the stop time at all, so the deadline was silently dropped.
+    var startMode = document.getElementById('campStartMode').value;
+    var startAtRaw = document.getElementById('campStartAt').value;
+    var stopRaw = document.getElementById('campStopBy').value;
+
+    var scheduledStartAt;
+    var sendByAt;
+    if (startMode === 'later') {
+      if (!startAtRaw) { toast('Pick a start time, or choose "As soon as I press Begin sending"', 'error'); return; }
+      scheduledStartAt = new Date(startAtRaw).getTime();
+      if (!Number.isFinite(scheduledStartAt) || scheduledStartAt <= Date.now()) {
+        toast('The start time must be in the future', 'error');
+        return;
+      }
+    }
+    if (stopRaw) {
+      sendByAt = new Date(stopRaw).getTime();
+      if (!Number.isFinite(sendByAt) || sendByAt <= Date.now()) {
+        toast('The stop time must be in the future', 'error');
+        return;
+      }
+      if (scheduledStartAt !== undefined && sendByAt <= scheduledStartAt) {
+        toast('The stop time must be after the start time', 'error');
+        return;
+      }
+    }
+
     var body = {
       name: name,
       status: 'draft',
@@ -2863,32 +2979,25 @@
       },
       senders: senders,
       distribution: { mode: document.getElementById('campMode').value },
-      includeAlreadyInvited: document.getElementById('campIncludeInvited').checked
+      includeAlreadyInvited: document.getElementById('campIncludeInvited').checked,
+      sendByAt: sendByAt
     };
 
     withBusy(btn, api('/api/campaigns', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }))
       .then(function (r) {
         var created = r && r.campaign;
-        var startAt = document.getElementById('campStartAt').value;
 
-        // Scheduled: hand the timestamps to the scheduler instead of starting now.
-        if (document.getElementById('campStartMode').value !== 'later' || !created) {
+        // Scheduled: hand the start time to the scheduler. The stop time is already on the campaign,
+        // so even a failed scheduling call leaves the draft bounded.
+        if (startMode !== 'later' || !created) {
           closeModal('newCampaign');
-          toast('Campaign created', 'success');
+          toast(sendByAt ? 'Campaign created — it will stop on ' + prettyDate(sendByAt) : 'Campaign created', 'success');
           loadCampaigns();
           return null;
         }
 
-        if (!startAt) {
-          closeModal('newCampaign');
-          toast('Saved as a draft — no start time was set', 'error');
-          loadCampaigns();
-          return null;
-        }
-
-        var sched = { startAt: new Date(startAt).getTime() };
-        var stopBy = document.getElementById('campStopBy').value;
-        if (stopBy) sched.sendByAt = new Date(stopBy).getTime();
+        var sched = { startAt: scheduledStartAt };
+        if (sendByAt !== undefined) sched.sendByAt = sendByAt;
 
         return api('/api/campaigns/' + created.id + '/schedule', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(sched) })
           .then(function () {
@@ -2906,6 +3015,7 @@
   }
 
   var scheduleCampaignId = null;
+  var deadlineCampaignId = null;
 
   function openCampSchedule(id) {
     scheduleCampaignId = id;
@@ -2933,6 +3043,30 @@
         toast('Campaign scheduled', 'success');
         scheduleCampaignId = null;
         loadCampaigns();
+      })
+      .catch(function (e) { toast(e.message, 'error'); });
+  }
+
+  function openCampDeadline(id) {
+    var camp = campaignData.filter(function (c) { return c.id === id; })[0];
+    deadlineCampaignId = id;
+    document.getElementById('campDeadlineAt').value = camp && camp.sendByAt ? campLocalInput(new Date(camp.sendByAt)) : '';
+    openModal('campDeadlineModal');
+  }
+
+  function saveCampDeadline(btn) {
+    if (!deadlineCampaignId) return;
+    var raw = document.getElementById('campDeadlineAt').value;
+    var body = { sendByAt: raw ? new Date(raw).getTime() : null };
+    var id = deadlineCampaignId;
+
+    withBusy(btn, api('/api/campaigns/' + id + '/deadline', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }))
+      .then(function () {
+        closeModal('campDeadlineModal');
+        toast(raw ? 'Stop time saved' : 'Stop time removed', 'success');
+        deadlineCampaignId = null;
+        loadCampaigns();
+        if (currentCampaignId === id) openCampaignDetail(id);
       })
       .catch(function (e) { toast(e.message, 'error'); });
   }
@@ -2977,25 +3111,30 @@
       return 'Finished — everyone in the audience has been invited.';
     }
 
-    // If a stop time is set, check whether the pace actually reaches everyone before it. plan.days
-    // carries a running cumulative, so this costs nothing extra.
-    if (c.sendByAt && plan && plan.days && plan.days.length) {
-      var deadlineDay = new Date(c.sendByAt).toISOString().slice(0, 10);
-      var byDeadline = 0;
-      plan.days.forEach(function (d) { if (d.date <= deadlineDay) byDeadline = d.cumulative; });
-      if (byDeadline < total) {
-        return 'At this pace only about <strong>' + byDeadline + '</strong> of <strong>' + total +
-          '</strong> will go out before the stop time (' + esc(prettyDate(c.sendByAt)) +
-          '). Raise the account limits or move the stop time.';
-      }
-    }
+    // Whether the pace reaches everyone before the stop time. The server computes this against
+    // timestamps (`plan.byDeadline`); doing the date maths here put a deadline late in the local
+    // evening on the next UTC day and made the warning wrong by one.
+    var shortfall = (c.sendByAt && plan && plan.byDeadline !== null && plan.byDeadline !== undefined && plan.total)
+      ? plan.total - plan.byDeadline
+      : 0;
 
-    // A scheduled campaign has no frozen audience yet, so it has no pace to report either.
+    // A scheduled campaign has no frozen audience yet, so its pace is a projection, not progress.
     if (c.status === 'scheduled') {
-      return 'Scheduled to start ' +
+      var scheduled = 'Scheduled to start ' +
         (c.scheduledStartAt ? esc(prettyDate(c.scheduledStartAt)) : 'a time that has not been set') +
         (c.sendByAt ? ', stopping ' + esc(prettyDate(c.sendByAt)) : '') +
         '. Nobody is invited before then, and the audience is fixed at that moment.';
+      if (shortfall > 0) {
+        scheduled += ' At this pace only about <strong>' + plan.byDeadline + '</strong> of <strong>' + total +
+          '</strong> would go out before the stop time.';
+      }
+      return scheduled;
+    }
+
+    if (shortfall > 0) {
+      return 'At this pace only about <strong>' + plan.byDeadline + '</strong> of <strong>' + total +
+        '</strong> will go out before the stop time (' + esc(prettyDate(c.sendByAt)) +
+        '). Raise the account limits or move the stop time.';
     }
 
     if (c.status === 'draft') {
@@ -3089,9 +3228,17 @@
   if (campIncludeBox) campIncludeBox.addEventListener('change', refreshCampAudience);
   $('#campSave').addEventListener('click', function () { saveCampaign(this); });
   $('#campScheduleSave').addEventListener('click', function () { saveCampSchedule(this); });
+  $('#campDeadlineSave').addEventListener('click', function () { saveCampDeadline(this); });
   $('#campStartMode').addEventListener('change', function () {
     document.getElementById('campStartAtWrap').hidden = this.value !== 'later';
+    refreshCampPlan();
   });
+  ['campStartAt', 'campStopBy'].forEach(function (id) {
+    var field = document.getElementById(id);
+    if (field) field.addEventListener('change', refreshCampPlan);
+  });
+  var campSenderBox = document.getElementById('campSenders');
+  if (campSenderBox) campSenderBox.addEventListener('change', refreshCampPlan);
 
   $('#campSendNow').addEventListener('click', function () {
     if (!currentCampaignId) return;
@@ -3121,6 +3268,7 @@
     }
 
     if (action === 'campSchedule') { openCampSchedule(id); return; }
+    if (action === 'campDeadline') { openCampDeadline(id); return; }
 
     if (action === 'campEnd') {
       var target = campaignData.filter(function (x) { return x.id === id; })[0];

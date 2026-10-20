@@ -678,7 +678,7 @@
     <div class="invite-row">
       <label class="field"><span class="field__label">Start sending</span>
         <select id="campStartMode">
-          <option value="now">Right away</option>
+          <option value="now">As soon as I press Begin sending</option>
           <option value="later">At a specific time</option>
         </select>
       </label>
@@ -686,6 +686,7 @@
       <label class="field"><span class="field__label">Stop sending by (optional)</span><input type="datetime-local" id="campStopBy" /></label>
     </div>
     <div class="field"><span class="field__label">Who this will reach</span><div id="campAudience" aria-live="polite"><span class="muted">Pick a contact list to see who will be invited.</span></div></div>
+    <div class="field"><span class="field__label">When it will finish</span><div id="campPlan" aria-live="polite"><span class="muted">Pick a contact list and at least one sending account to see the pace.</span></div></div>
     <div class="invite-row">
       <label class="field"><span class="field__label">Email subject</span><input id="campSummary" placeholder="Webinar: ..." /></label>
       <label class="field"><span class="field__label">Starts</span><input type="datetime-local" id="campStart" /></label>
@@ -715,6 +716,23 @@
       <span class="spacer"></span>
       <button class="btn btn--ghost" data-close="campScheduleModal">Cancel</button>
       <button class="btn btn--primary" id="campScheduleSave">Schedule</button>
+    </div>
+  </div>
+</div>
+
+<!-- Campaign stop time -->
+<div class="backdrop" id="campDeadlineModal" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="campDeadlineTitle">
+    <div class="modal__head">
+      <h2 class="modal__title" id="campDeadlineTitle">Stop sending invites by</h2>
+      <button class="icon-btn" data-close="campDeadlineModal" aria-label="Close">&times;</button>
+    </div>
+    <label class="field"><span class="field__label">Stop time (leave empty to remove it)</span><input type="datetime-local" id="campDeadlineAt" /></label>
+    <p class="muted" id="campDeadlineNote">Sending stops at this time even if people are still waiting. Invitations already sent are not recalled, and anyone left out stays uninvited for a future campaign.</p>
+    <div class="modal__foot">
+      <span class="spacer"></span>
+      <button class="btn btn--ghost" data-close="campDeadlineModal">Cancel</button>
+      <button class="btn btn--primary" id="campDeadlineSave">Save</button>
     </div>
   </div>
 </div>

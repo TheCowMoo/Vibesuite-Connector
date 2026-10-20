@@ -35,6 +35,7 @@ import {
   tryClaimRecipient,
 } from './campaignStore';
 import { allocateEmails, type Campaign, type CampaignSender, type RecipientRecord } from './campaign';
+import { startBlockedByDeadline } from './campaignLifecycle';
 import { dueForNextBatch, senderReadiness } from './campaignSchedule';
 import { sessionJoinUrl } from './joinLink';
 
@@ -65,6 +66,11 @@ export async function startCampaign(
 }> {
   const camp = await getCampaign(id);
   if (!camp) throw new Error('campaign not found');
+
+  // Freezing an audience for a campaign that is already out of time would queue work the next tick
+  // immediately throws away; refusing up front tells the operator what to fix instead.
+  const blocked = startBlockedByDeadline(camp, Date.now());
+  if (blocked) throw new Error(blocked);
 
   const list = await getList(camp.listId);
   if (!list || !list.result) throw new Error('list has no segmentation result — run Segment first');
@@ -103,6 +109,9 @@ export async function startCampaign(
   camp.status = 'active';
   camp.startedAt = Date.now();
   camp.completedAt = undefined;
+  // The start time has been consumed — whether the scheduler fired it or an operator pressed
+  // "Begin now" early — so it must not linger and describe a start that already happened.
+  camp.scheduledStartAt = undefined;
   await saveCampaign(camp);
 
   return {
@@ -301,6 +310,7 @@ export async function endCampaign(id: string, reason?: string): Promise<Campaign
 
   camp.status = 'ended';
   camp.completedAt = Date.now();
+  camp.scheduledStartAt = undefined;
   if (reason) camp.lastError = reason;
   await saveCampaign(camp);
   return camp;
@@ -363,6 +373,11 @@ export async function sendCampaignBatch(campaignId: string, maxPerSender = 200):
   const camp = await getCampaign(campaignId);
   if (!camp) throw new Error('campaign not found');
   if (camp.status !== 'active') throw new Error('campaign is not active');
+
+  // A manual batch must respect the stop time too, otherwise it can slip invitations out between the
+  // deadline passing and the next scheduler tick ending the campaign.
+  const blocked = startBlockedByDeadline(camp, Date.now());
+  if (blocked) throw new Error(blocked);
 
   const perSender: SenderBatchResult[] = [];
   let sent = 0;

@@ -3,8 +3,10 @@ import {
   addDays,
   allocateEmails,
   computeAllocation,
+  invitedByDeadline,
   planSchedule,
   type CampaignSender,
+  type PlannerDay,
 } from '../../src/domain/campaign';
 import type { SenderProfile } from '../../src/domain/senderLoad';
 
@@ -131,5 +133,39 @@ describe('planSchedule', () => {
     const plan = planSchedule({ total: 10000, senders: [{ connectionId: 's1', profile: profile() }], startDate: '2026-10-01', maxDays: 2 });
     expect(plan.totalDays).toBe(2);
     expect(plan.days[1].cumulative).toBe(80);
+  });
+});
+
+describe('invitedByDeadline', () => {
+  function day(n: number, total: number, cumulative: number): PlannerDay {
+    return { day: n, date: addDays('2026-10-01', n - 1), perSender: {}, total, cumulative };
+  }
+  const plan = { days: [day(1, 40, 40), day(2, 40, 80), day(3, 20, 100)] };
+
+  it('counts a day only once it has fully passed', () => {
+    expect(invitedByDeadline(plan, Date.parse('2026-10-01T12:00:00Z'))).toBe(0);
+    expect(invitedByDeadline(plan, Date.parse('2026-10-02T00:00:00Z'))).toBe(40);
+  });
+
+  it('uses the running cumulative across several days', () => {
+    expect(invitedByDeadline(plan, Date.parse('2026-10-03T00:00:00Z'))).toBe(80);
+  });
+
+  it('caps at the whole audience when the deadline is after the finish', () => {
+    expect(invitedByDeadline(plan, Date.parse('2026-12-31T00:00:00Z'))).toBe(100);
+  });
+
+  /*
+   * The old UI turned the deadline into a UTC date string and compared that to `day.date`. A deadline
+   * late in the local evening became the next UTC day, so the "stop time cuts people off" warning
+   * claimed a day of progress that would never happen.
+   */
+  it('does not credit a day whose window the deadline lands inside', () => {
+    expect(invitedByDeadline(plan, Date.parse('2026-10-02T23:30:00Z'))).toBe(40);
+  });
+
+  it('handles a deadline before the plan starts, and a garbage timestamp', () => {
+    expect(invitedByDeadline(plan, Date.parse('2026-09-01T00:00:00Z'))).toBe(0);
+    expect(invitedByDeadline(plan, Number.NaN)).toBe(0);
   });
 });
