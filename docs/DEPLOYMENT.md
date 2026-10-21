@@ -368,11 +368,13 @@ inside the URL builder.
 - Connect a host once in **Settings → Video conferencing**, then choose it per campaign — in the
   campaign wizard's **Zoom host** field, or later with **Add / Change Zoom host** on the campaign card.
   The card shows which host the campaign is using.
-- A **user-managed** app cannot hold the admin-only report scope, so once a sync or **Check access** has
-  run the host shows **Attendance only — Zoom refused report access**, with Zoom's own words underneath
-  and an *“Add in Zoom → Scopes: …”* line naming the exact scope that call wants. Attendance still
-  syncs from the past-meeting participant list; polls, Q&A and absentees need the admin-managed upgrade
-  below.
+- A **user-managed** app cannot hold the admin-only report scope, so after a sync or **Check access** the
+  host reports which endpoints were refused and names the scope each one wants. Attendance still syncs
+  from the past-meeting participant list; polls, Q&A and absentees need the admin-managed upgrade below.
+- **Check access** replays the newest finished Zoom call against every report endpoint and lists the
+  result under the host — participants / absentees / polls / Q&A, each **available**, **nothing on that
+  call**, **no such report for that call**, or **refused** with a copyable scope. That is what separates a
+  missing scope from a missing plan feature from a meeting that simply ran no polls.
 - **Check access** re-probes a host after the app's scopes change — no reconnect needed for a granted
   scope, but see the upgrade note about existing authorisations.
 - **Disconnect** removes the host from the pool; campaigns that were using it report "needs
@@ -396,9 +398,9 @@ its siblings) is only offered to **admin-managed** apps — a user-managed app w
    at account level, so one admin covers everyone on that account.
 4. In this panel: **Disconnect** the host, then **Connect Zoom** again. A refresh token never gains
    new scopes, so the old authorisation keeps reporting a refusal until it is replaced.
-5. **Check access** should now read **Reports OK — polls, Q&A and absentees available**. It replays the
-   newest finished Zoom call, so there must be at least one past session; otherwise it says to sync one
-   first rather than guessing.
+5. **Check access** → the matrix under the host should show participants, absentees, polls and Q&A as
+   **available** (or *nothing on that call* when that particular meeting ran none). It replays the newest
+   finished Zoom call, so there must be at least one past session.
 
 Customers on other Zoom accounts will each need their own account admin to install the app, and the
 app must pass Zoom's review before it can be installed outside your account.

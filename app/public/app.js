@@ -1562,10 +1562,42 @@
               '<button class="btn btn--ghost btn--sm" data-copy="' + esc(s) + '">Copy</button>';
           }).join(' ') + '</div>'
         : '';
+
+      // Per-endpoint verdicts: tells "add a scope" apart from "this call had no polls".
+      var caps = a.capabilities || null;
+      var capBlock = '';
+      if (caps) {
+        var CAP_LABELS = { participants: 'participants', absentees: 'absentees', polls: 'polls', qa: 'Q&A' };
+        capBlock = '<div style="font-size:0.8rem;margin:0.15rem 0 0.35rem">' +
+          Object.keys(CAP_LABELS).map(function (key) {
+            var c = caps[key];
+            if (!c) return '';
+
+            var text;
+            var cls;
+            if (c.status === 'available') { text = 'available'; cls = 'chip--success'; }
+            else if (c.status === 'empty') { text = 'nothing on that call'; cls = 'chip--neutral'; }
+            else if (c.status === 'missing') { text = 'no such report for that call'; cls = 'chip--neutral'; }
+            else if (c.status === 'denied') { text = 'refused'; cls = 'chip--warning'; }
+            else { text = 'could not check'; cls = 'chip--neutral'; }
+
+            var scope = '';
+            if ((c.missingScopes || []).length) {
+              var joined = c.missingScopes.join(', ');
+              scope = ' <code>' + esc(joined) + '</code> ' +
+                '<button class="btn btn--ghost btn--sm" data-copy="' + esc(joined) + '">Copy</button>';
+            }
+
+            return '<div>' + esc(CAP_LABELS[key]) + ': <span class="chip ' + cls + '">' + esc(text) + '</span>' + scope + '</div>';
+          }).join('') +
+          '</div>';
+      }
+
       return '<div class="conn__meta"><span class="conn__cal">' + esc(a.email || a.userId) + '</span>' + chip +
         '<button class="btn btn--ghost btn--sm" data-zoom-probe="' + esc(a.userId) + '">Check access</button>' +
         '<button class="btn btn--ghost btn--sm" data-zoom-disconnect="' + esc(a.userId) + '">Disconnect</button></div>' +
         instruction +
+        capBlock +
         detail;
     }).join('');
 
@@ -1658,18 +1690,27 @@
 
       withBusy(btn, api(base + '/probe', { method: 'POST' }))
         .then(function (r) {
+          var caps = r.capabilities || {};
+          var keys = Object.keys(caps);
+          var denied = keys.filter(function (k) { return caps[k].status === 'denied'; });
+          var working = keys.filter(function (k) { return caps[k].status === 'available' || caps[k].status === 'empty'; });
+
           var message;
           var tone;
-          if (r.reportAccess === 'granted') {
-            message = 'Reports OK — polls, Q&A and absentees are available';
-            tone = 'success';
-          } else if (r.reportAccess === 'denied') {
-            message = r.detail ? 'Zoom refused: ' + r.detail : 'Zoom refused report access for this host';
+          if (!keys.length) {
+            message = r.detail || 'Report access is not verified yet';
+            tone = 'info';
+          } else if (denied.length) {
+            message = denied.length + ' of ' + keys.length + ' report endpoints refused — see the scopes under the host';
             tone = 'error';
+          } else if (working.length) {
+            message = working.length + ' of ' + keys.length + ' report endpoints available';
+            tone = 'success';
           } else {
             message = r.detail || 'Report access is not verified yet';
             tone = 'info';
           }
+
           toast(message, tone);
           loadHosts();
         })

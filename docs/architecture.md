@@ -229,12 +229,17 @@ automatically — "Check access" re-probes without reconnecting.
 Report access is judged by the **participants** call attendance actually makes, never by
 `/report/users/{id}/meetings` — that endpoint needs `report:read:user:admin`, a scope nothing else uses,
 and asking for it made the UI demand a scope the app might not even offer. Connecting therefore stores
-`reportAccess: 'unknown'`; the first sync — or **Check access**, which replays the newest finished
-session — records the real verdict. A cached denial still buys exactly one verification attempt per host
-per process (`shouldAttemptReports()`), a successful participant read flips the verdict to granted, and
-verdicts left behind by the retired probe (`isProbeEraDenial()`) are presented as unknown rather than
-contradicting reality. Zoom's refusal text is parsed by `scopesFromDenial()` into `reportMissingScopes`,
-which the UI renders as *“Add in Zoom → Scopes: …”* with a copy button.
+`reportAccess: 'unknown'`; the first sync, or **Check access**, records the real verdict.
+
+`Check access` runs `probeZoomCapabilities()` against the newest finished call and records one entry per
+endpoint (`participants`, `absentees`, `polls`, `qa`) on the account. `classifyCapability()` labels each
+as **available**, **empty** (that call had none), **missing** (404 — no such report for that kind of call,
+e.g. Q&A on a plain meeting), **denied** (scope refused, with the scope Zoom names) or **unknown** (retry
+later). The UI shows that matrix under the host, so “add a scope”, “your plan has no Q&A” and “that meeting
+ran no polls” are visibly different answers. A cached denial still buys exactly one verification attempt
+per host per process (`shouldAttemptReports()`), verdicts left by the retired probe (`isProbeEraDenial()`)
+are presented as unknown rather than contradicting reality, and `scopesFromDenial()` turns Zoom's refusal
+into a copyable scope.
 
 The link a calendar invite carries comes from `sessionJoinUrl()` (`domain/joinLink.ts`), in priority
 order:

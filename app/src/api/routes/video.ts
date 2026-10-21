@@ -1,10 +1,10 @@
 import type { FastifyInstance } from 'fastify';
 import { getVideoSettings, saveVideoSettings, publicVideoSettings } from '../../domain/videoSettings';
-import { deleteZoomAccount, getZoomAccount, listZoomAccounts } from '../../domain/zoomStore';
+import { deleteZoomAccount, getZoomAccount, listZoomAccounts, saveZoomAccount } from '../../domain/zoomStore';
 import { listSessions } from '../../domain/sessionStore';
 import { zoomOAuthConfigured } from '../../oauth/zoomOAuth';
 import { defaultZoomAuthMode } from '../../video/zoomAuth';
-import { forgetZoomToken, probeReportsFor, zoomProvider } from '../../video';
+import { forgetZoomToken, probeZoomCapabilities, zoomProvider } from '../../video';
 
 export async function videoRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/video/settings', async () => {
@@ -100,20 +100,38 @@ export async function videoRoutes(app: FastifyInstance): Promise<void> {
         ok: true,
         reportAccess: account.reportAccess ?? 'unknown',
         detail: 'Sync a finished video call to verify report access — there is no past Zoom call to ask about yet.',
+        capabilities: account.capabilities,
       };
     }
 
     try {
-      const result = await probeReportsFor(candidate.externalId, candidate.sessionType ?? 'meeting', {
+      const result = await probeZoomCapabilities(candidate.externalId, candidate.sessionType ?? 'meeting', {
         connectionId: candidate.connectionId,
         zoomUserId: userId,
       });
 
+      const participants = result.participants;
+      const access: 'granted' | 'denied' | 'unknown' =
+        participants.status === 'denied'
+          ? 'denied'
+          : participants.status === 'available' || participants.status === 'empty'
+            ? 'granted'
+            : 'unknown';
+
+      await saveZoomAccount({
+        ...account,
+        capabilities: result.capabilities,
+        reportAccess: access,
+        reportDetail: access === 'denied' ? participants.detail : undefined,
+        reportMissingScopes: access === 'denied' ? participants.missingScopes ?? [] : [],
+      });
+
       return {
         ok: true,
-        reportAccess: result.access,
-        detail: result.detail,
-        missingScopes: result.missingScopes ?? account.reportMissingScopes,
+        reportAccess: access,
+        detail: participants.detail,
+        missingScopes: participants.missingScopes,
+        capabilities: result.capabilities,
       };
     } catch (err) {
       reply.code(502).send({ error: (err as Error).message });

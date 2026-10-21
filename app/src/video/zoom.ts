@@ -10,16 +10,17 @@ import {
 import { refreshZoomToken, isInvalidGrant, zoomErrorDetail } from '../oauth/zoomOAuth';
 import {
   chooseZoomTokenSource,
+  classifyCapability,
   defaultZoomAuthMode,
   expiryFrom,
   isScopeDenied,
   pickZoomAccount,
-  reportAccessFromProbe,
   scopesFromDenial,
   shouldAttemptReports,
   tokenUsable,
   type ZoomTokenSource,
 } from './zoomAuth';
+import type { ZoomCapability, ZoomCapabilityResult } from '../domain/zoomStore';
 import type {
   AttendeeRecord,
   PollResult,
@@ -259,36 +260,45 @@ const DETAIL_KEYS = [
 ];
 
 /**
- * Verify report access against the endpoint attendance actually uses.
+ * Ask every report endpoint about one finished call, and record what each said.
  *
- * The old connect-time probe asked `/report/users/{userId}/meetings`, whose scope is unrelated to the
- * participant/absentee/poll calls — it could refuse a token that works, and demanded a scope the app
- * may not even offer. This tests the participants call itself and records the verdict.
+ * One vocabulary for all four: available / empty / missing / denied / unknown. That is what separates
+ * "add this scope" from "this plan has no Q&A" from "that meeting ran no polls" — three problems that
+ * used to look identical.
  */
-export async function probeReportsFor(
+export async function probeZoomCapabilities(
   externalId: string,
   sessionType: SessionType = 'meeting',
   ctx?: VideoAuthContext,
-): Promise<{ access: 'granted' | 'denied' | 'unknown'; detail?: string; missingScopes?: string[] }> {
+): Promise<{ capabilities: Record<ZoomCapability, ZoomCapabilityResult>; participants: ZoomCapabilityResult }> {
   const token = await getAccessToken(ctx);
   const seg = sessionType === 'webinar' ? 'webinars' : 'meetings';
-  const participants = await fetchListResult(
-    token,
-    `/report/${seg}/${encodeURIComponent(externalId)}/participants`,
-    'participants',
-  );
+  const enc = encodeURIComponent(externalId);
+  const checkedAt = Date.now();
 
-  const access = reportAccessFromProbe(participants.status, participants.detail);
-  if (access === 'granted') {
-    await rememberReportAccess(ctx, 'granted');
-    return { access };
-  }
-  if (access === 'denied') {
-    await rememberReportAccess(ctx, 'denied', participants.detail);
-    return { access, detail: participants.detail, missingScopes: scopesFromDenial(participants.detail) };
+  const targets: Array<{ key: ZoomCapability; path: string; listKey: string }> = [
+    { key: 'participants', path: `/report/${seg}/${enc}/participants`, listKey: 'participants' },
+    { key: 'absentees', path: `/report/${seg}/${enc}/absentees`, listKey: 'absentees' },
+    { key: 'polls', path: `/report/${seg}/${enc}/polls`, listKey: 'polls' },
+    { key: 'qa', path: `/report/${seg}/${enc}/qa`, listKey: 'questions' },
+  ];
+
+  const capabilities = {} as Record<ZoomCapability, ZoomCapabilityResult>;
+
+  for (const target of targets) {
+    const res = await fetchListResult(token, target.path, target.listKey);
+    const verdict = classifyCapability(res.status, res.rows.length, res.detail);
+
+    capabilities[target.key] = {
+      status: verdict.status,
+      httpStatus: res.status,
+      detail: res.detail,
+      missingScopes: verdict.missingScopes,
+      checkedAt,
+    };
   }
 
-  return { access, detail: participants.detail };
+  return { capabilities, participants: capabilities.participants };
 }
 
 function statsFrom(details: Record<string, unknown> | null): Record<string, string> {

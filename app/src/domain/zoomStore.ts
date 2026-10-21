@@ -30,12 +30,35 @@ export interface ZoomAccountRecord {
   reportDetail?: string;
   /** Scopes parsed out of that message, ready to show as "add this in Zoom". */
   reportMissingScopes?: string[];
+  /** Per-endpoint answer for the newest finished call, so the cause is never guessed at. */
+  capabilities?: Partial<Record<ZoomCapability, ZoomCapabilityResult>>;
 }
 
 export interface ZoomTokenRecord {
   refreshToken: string;
   accessToken?: string;
   expiresAt?: number;
+}
+
+/** The report endpoints we can use for a finished call, each with its own admin scope. */
+export type ZoomCapability = 'participants' | 'absentees' | 'polls' | 'qa';
+
+/**
+ * - `available` — the call answered with data
+ * - `empty`     — the call answered, but that meeting had none (e.g. no polls were run)
+ * - `missing`   — no such report for that kind of call (404), e.g. Q&A on a plain meeting
+ * - `denied`    — Zoom refused for scope/permission reasons; `missingScopes` says what to add
+ * - `unknown`   — rate limit, timeout or a 5xx; worth retrying later
+ */
+export type CapabilityStatus = 'available' | 'empty' | 'missing' | 'denied' | 'unknown';
+
+export interface ZoomCapabilityResult {
+  status: CapabilityStatus;
+  httpStatus?: number;
+  /** Zoom's own message on a refusal. */
+  detail?: string;
+  missingScopes?: string[];
+  checkedAt: number;
 }
 
 /**

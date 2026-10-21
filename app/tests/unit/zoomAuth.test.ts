@@ -1,12 +1,12 @@
 import { describe, it, expect } from 'vitest';
 import {
   chooseZoomTokenSource,
+  classifyCapability,
   defaultZoomAuthMode,
   expiryFrom,
   isProbeEraDenial,
   isScopeDenied,
   pickZoomAccount,
-  reportAccessFromProbe,
   scopesFromDenial,
   shouldAttemptReports,
   tokenUsable,
@@ -95,21 +95,27 @@ describe('isScopeDenied', () => {
   });
 });
 
-describe('reportAccessFromProbe', () => {
-  it('treats a successful report call as granted', () => {
-    expect(reportAccessFromProbe(200)).toBe('granted');
+describe('classifyCapability', () => {
+  it('reports data as available and no data as empty', () => {
+    expect(classifyCapability(200, 3)).toEqual({ status: 'available' });
+    expect(classifyCapability(200, 0)).toEqual({ status: 'empty' });
   });
 
-  it('maps every refusal shape to denied', () => {
-    expect(reportAccessFromProbe(401)).toBe('denied');
-    expect(reportAccessFromProbe(403)).toBe('denied');
-    expect(reportAccessFromProbe(400, 'does not contain scopes:[report:read:admin]')).toBe('denied');
+  /* A 404 means "no such report for that call", e.g. Q&A on a plain meeting — not a permission problem. */
+  it('treats 404 as missing rather than denied', () => {
+    expect(classifyCapability(404, 0)).toEqual({ status: 'missing' });
   });
 
-  it('keeps genuinely unclear answers unknown, so they are retried', () => {
-    expect(reportAccessFromProbe(404)).toBe('unknown');
-    expect(reportAccessFromProbe(429)).toBe('unknown');
-    expect(reportAccessFromProbe(0)).toBe('unknown');
+  it('treats a scope refusal as denied and names the scope', () => {
+    expect(classifyCapability(403, 0)).toEqual({ status: 'denied', missingScopes: [] });
+    expect(classifyCapability(400, 0, 'does not contain scopes:[report:read:list_absentees:admin]'))
+      .toEqual({ status: 'denied', missingScopes: ['report:read:list_absentees:admin'] });
+  });
+
+  it('keeps rate limits and transport failures unknown, so they are retried', () => {
+    expect(classifyCapability(429, 0).status).toBe('unknown');
+    expect(classifyCapability(0, 0).status).toBe('unknown');
+    expect(classifyCapability(502, 0).status).toBe('unknown');
   });
 });
 

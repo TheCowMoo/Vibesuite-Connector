@@ -1,4 +1,4 @@
-import type { ZoomAccountRecord, ZoomAuthMode, ZoomTokenRecord } from '../domain/zoomStore';
+import type { CapabilityStatus, ZoomAccountRecord, ZoomAuthMode, ZoomTokenRecord } from '../domain/zoomStore';
 
 export type { ZoomAccountRecord, ZoomAuthMode, ZoomTokenRecord } from '../domain/zoomStore';
 
@@ -80,13 +80,26 @@ export function isScopeDenied(status: number, detail?: string): boolean {
 }
 
 /**
- * What Zoom's answer to a report probe means. Anything genuinely unexplained (429, a timeout, an odd
- * 5xx) stays `unknown` so it is retried rather than cached as a refusal.
+ * What one report endpoint's answer means for that capability.
+ *
+ * The five answers are deliberately distinct, because they call for different actions: add a scope
+ * (`denied`), accept that the plan or the call has no such report (`missing`), accept that nothing was
+ * recorded (`empty`), or retry later (`unknown`). Collapsing them into "reports broken" is what made
+ * this take so long to diagnose.
  */
-export function reportAccessFromProbe(status: number, detail?: string): 'granted' | 'denied' | 'unknown' {
-  if (status >= 200 && status < 300) return 'granted';
-  if (isScopeDenied(status, detail)) return 'denied';
-  return 'unknown';
+export function classifyCapability(
+  status: number,
+  rowCount: number,
+  detail?: string,
+): { status: CapabilityStatus; missingScopes?: string[] } {
+  if (status >= 200 && status < 300) {
+    return { status: rowCount > 0 ? 'available' : 'empty' };
+  }
+  if (status === 404) return { status: 'missing' };
+  if (isScopeDenied(status, detail)) {
+    return { status: 'denied', missingScopes: scopesFromDenial(detail) };
+  }
+  return { status: 'unknown' };
 }
 
 /**
