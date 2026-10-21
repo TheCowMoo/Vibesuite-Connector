@@ -405,6 +405,29 @@ its siblings) is only offered to **admin-managed** apps — a user-managed app w
 Customers on other Zoom accounts will each need their own account admin to install the app, and the
 app must pass Zoom's review before it can be installed outside your account.
 
+### If the panel says "Invalid access token"
+
+That is a **401 from Zoom**, not a scope problem: the token belongs to an earlier version of the app
+(recreated app, rotated secret, changed management type or scopes) or the server clock is skewed.
+
+1. `docker compose exec app-api printenv ZOOM_OAUTH_CLIENT_ID` — must match the app you are looking at,
+   and be the same credential set (development vs production) that issued the token.
+2. `date -u` — should be within a minute of real time.
+3. Panel → **Disconnect**, then **Connect Zoom** as the account admin.
+
+The app now drops a token Zoom rejects and tells you to reconnect, instead of echoing Zoom's terse
+message. The host stays listed so campaigns keep pointing at it.
+
+### If the panel still says `report:read:user:admin`
+
+That string came from a probe removed in `d799716`. Seeing it means the server is running an **old
+build**:
+
+```bash
+git log --oneline -1                                   # expect aaf57a4 or later
+grep -c probeZoomCapabilities app/src/video/zoom.ts    # must not be 0
+```
+
 ## Related docs
 
 - [`architecture.md`](architecture.md) — design decisions, data flow, Redis key map.

@@ -241,6 +241,12 @@ per host per process (`shouldAttemptReports()`), verdicts left by the retired pr
 are presented as unknown rather than contradicting reality, and `scopesFromDenial()` turns Zoom's refusal
 into a copyable scope.
 
+Zoom answers a **401** when the token itself is dead — the usual cause is an app that was recreated, a
+rotated secret, or scopes/management type that changed after authorising, since a refresh token cannot
+survive any of those. `isInvalidToken()` routes that case away from the scope logic: the host's tokens are
+dropped (the account stays listed, so campaigns still point at it) and the error asks for
+Disconnect → Connect rather than echoing "Invalid access token".
+
 The link a calendar invite carries comes from `sessionJoinUrl()` (`domain/joinLink.ts`), in priority
 order:
 

@@ -4,6 +4,7 @@ import {
   classifyCapability,
   defaultZoomAuthMode,
   expiryFrom,
+  isInvalidToken,
   isProbeEraDenial,
   isScopeDenied,
   pickZoomAccount,
@@ -92,6 +93,20 @@ describe('isScopeDenied', () => {
   it('leaves rate limits and transport failures alone', () => {
     expect(isScopeDenied(429, 'Too Many Requests')).toBe(false);
     expect(isScopeDenied(0, 'timeout of 20000ms exceeded')).toBe(false);
+  });
+});
+
+describe('isInvalidToken', () => {
+  /* A 401 is the token itself: revoked, replaced by a new app, or clock-skewed. */
+  it('treats 401 as a dead token', () => {
+    expect(isInvalidToken(401)).toBe(true);
+  });
+
+  it('does not confuse a scope refusal or a rate limit with a dead token', () => {
+    expect(isInvalidToken(400)).toBe(false);
+    expect(isInvalidToken(403)).toBe(false);
+    expect(isInvalidToken(429)).toBe(false);
+    expect(isInvalidToken(0)).toBe(false);
   });
 });
 

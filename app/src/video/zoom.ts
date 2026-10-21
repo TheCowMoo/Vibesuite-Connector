@@ -13,6 +13,7 @@ import {
   classifyCapability,
   defaultZoomAuthMode,
   expiryFrom,
+  isInvalidToken,
   isScopeDenied,
   pickZoomAccount,
   scopesFromDenial,
@@ -120,6 +121,31 @@ async function getAccessToken(ctx?: VideoAuthContext): Promise<string> {
       throw new Error(`Zoom needs reconnecting for ${source.email}`);
     }
     throw new Error(`Zoom token refresh failed: ${zoomErrorDetail(err)}`);
+  }
+}
+
+/**
+ * Zoom rejected the token outright.
+ *
+ * Keep the host listed — campaigns still point at it — but bin the dead credentials so the UI says
+ * "reconnect" instead of retrying a token that can never work. A refresh token cannot be revived after
+ * an app's scopes or credentials change, which is the usual cause.
+ */
+async function invalidateZoomAuthorisation(userId: string): Promise<void> {
+  forgetZoomToken(userId);
+  try {
+    await deleteZoomTokens(userId);
+    const target = pickZoomAccount(await listZoomAccounts(), userId).account;
+    if (target) {
+      await saveZoomAccount({
+        ...target,
+        reportAccess: 'unknown',
+        reportDetail: undefined,
+        reportMissingScopes: [],
+      });
+    }
+  } catch {
+    /* best effort: the reconnect message matters more than the bookkeeping */
   }
 }
 
@@ -348,6 +374,14 @@ export const zoomProvider: VideoProviderImpl = {
     if (reportAllowed) {
       const participants = await fetchListResult(token, `/report/${seg}/${enc}/participants`, 'participants');
 
+      if (isInvalidToken(participants.status)) {
+        const target = await accountFor(ctx);
+        if (target) await invalidateZoomAuthorisation(target.userId);
+        throw new Error(
+          `Zoom has invalidated this authorisation${target ? ` for ${target.email}` : ''} — use Disconnect, then Connect Zoom again.`,
+        );
+      }
+
       if (participants.status === 200) {
         reportAttempted.delete(attemptKey);
         await rememberReportAccess(ctx, 'granted');
@@ -445,6 +479,19 @@ export const zoomProvider: VideoProviderImpl = {
       await axios.get(`${BASE}/users/me`, { headers: { Authorization: `Bearer ${token}` }, timeout: 20000 });
       return { ok: true };
     } catch (err) {
+      const status = (err as { response?: { status?: number } })?.response?.status ?? 0;
+      const account = await accountFor(ctx).catch(() => undefined);
+
+      // 401 means the token itself is dead (app recreated, secret rotated, scopes changed). Say so,
+      // and drop it, rather than echoing Zoom's terse "Invalid access token".
+      if (account && isInvalidToken(status)) {
+        await invalidateZoomAuthorisation(account.userId);
+        return {
+          ok: false,
+          detail: `Zoom has invalidated this authorisation for ${account.email} — use Disconnect, then Connect Zoom again.`,
+        };
+      }
+
       const e = err as { response?: { data?: { message?: string } }; message?: string };
       return { ok: false, detail: e?.response?.data?.message || e?.message || 'unknown error' };
     }

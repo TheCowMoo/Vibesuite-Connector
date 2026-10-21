@@ -135,6 +135,17 @@ export function shouldAttemptReports(
 }
 
 /**
+ * Whether Zoom rejected the token itself.
+ *
+ * Zoom answers a revoked, replaced or clock-skewed token with **401**; a missing scope is a **400**
+ * naming the scope. They need different advice — reconnect versus add a scope — so they never share a
+ * code path.
+ */
+export function isInvalidToken(status: number): boolean {
+  return status === 401;
+}
+
+/**
  * Was this denial produced by the old connect-time probe?
  *
  * That probe asked `/report/users/{userId}/meetings` (scope `report:read:user:admin`), an endpoint
