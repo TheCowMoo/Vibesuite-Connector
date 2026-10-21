@@ -368,11 +368,11 @@ inside the URL builder.
 - Connect a host once in **Settings → Video conferencing**, then choose it per campaign — in the
   campaign wizard's **Zoom host** field, or later with **Add / Change Zoom host** on the campaign card.
   The card shows which host the campaign is using.
-- A **user-managed** app cannot hold the admin-only report scope, so a connected host shows
-  **Attendance only — Zoom refused report access**, with Zoom's own words underneath and an
-  *“Add in Zoom → Scopes: …”* line naming the exact scope to grant (usually
-  `report:read:user:admin`). Attendance still syncs from the past-meeting participant list; polls, Q&A
-  and absentees need the admin-managed upgrade below.
+- A **user-managed** app cannot hold the admin-only report scope, so once a sync or **Check access** has
+  run the host shows **Attendance only — Zoom refused report access**, with Zoom's own words underneath
+  and an *“Add in Zoom → Scopes: …”* line naming the exact scope that call wants. Attendance still
+  syncs from the past-meeting participant list; polls, Q&A and absentees need the admin-managed upgrade
+  below.
 - **Check access** re-probes a host after the app's scopes change — no reconnect needed for a granted
   scope, but see the upgrade note about existing authorisations.
 - **Disconnect** removes the host from the pool; campaigns that were using it report "needs
@@ -388,14 +388,17 @@ its siblings) is only offered to **admin-managed** apps — a user-managed app w
 1. Zoom Marketplace → your app → **Basic Information** → change the app to **Admin-managed**, save.
    Zoom asks you to reconfirm features and scopes afterwards; the redirect URL and allow list are
    unchanged.
-2. **Scopes** → add the report scope(s), keeping the user/meeting/webinar read scopes. The panel names
-   the exact one Zoom asked for — for the users report that is `report:read:user:admin`; add the
-   meeting/webinar report scopes as well so attendance, polls and Q&A are all covered.
+2. **Scopes** → add the meeting and webinar report scopes (search “report”, including the
+   past-participant, absentee, poll and Q&A ones), keeping the user/meeting/webinar read scopes. The
+   panel names the exact scope Zoom asks for once a sync or **Check access** has run — those two test
+   the participant call attendance uses, so no scope is ever guessed at.
 3. **Local Test → Add App Now**, authorised by a Zoom account admin. Admin-managed apps are installed
    at account level, so one admin covers everyone on that account.
 4. In this panel: **Disconnect** the host, then **Connect Zoom** again. A refresh token never gains
    new scopes, so the old authorisation keeps reporting a refusal until it is replaced.
-5. **Check access** should now read **Reports OK — polls, Q&A and absentees available**.
+5. **Check access** should now read **Reports OK — polls, Q&A and absentees available**. It replays the
+   newest finished Zoom call, so there must be at least one past session; otherwise it says to sync one
+   first rather than guessing.
 
 Customers on other Zoom accounts will each need their own account admin to install the app, and the
 app must pass Zoom's review before it can be installed outside your account.

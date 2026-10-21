@@ -1658,10 +1658,19 @@
 
       withBusy(btn, api(base + '/probe', { method: 'POST' }))
         .then(function (r) {
-          var message = r.reportAccess === 'granted'
-            ? 'Reports OK — polls, Q&A and absentees are available'
-            : (r.detail ? 'Zoom refused: ' + r.detail : 'Zoom still refuses report access for this host');
-          toast(message, r.reportAccess === 'granted' ? 'success' : 'error');
+          var message;
+          var tone;
+          if (r.reportAccess === 'granted') {
+            message = 'Reports OK — polls, Q&A and absentees are available';
+            tone = 'success';
+          } else if (r.reportAccess === 'denied') {
+            message = r.detail ? 'Zoom refused: ' + r.detail : 'Zoom refused report access for this host';
+            tone = 'error';
+          } else {
+            message = r.detail || 'Report access is not verified yet';
+            tone = 'info';
+          }
+          toast(message, tone);
           loadHosts();
         })
         .catch(function (err) { toast(err.message, 'error'); });

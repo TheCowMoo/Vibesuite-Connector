@@ -10,11 +10,10 @@ import {
   buildZoomAuthUrl,
   exchangeZoomCode,
   fetchZoomUser,
-  probeZoomReportAccess,
   zoomErrorDetail,
   zoomOAuthConfigured,
 } from '../../oauth/zoomOAuth';
-import { expiryFrom, scopesFromDenial } from '../../video/zoomAuth';
+import { expiryFrom } from '../../video/zoomAuth';
 import { applyCampaignZoomHost } from '../../domain/campaignZoom';
 import { saveZoomAccount, saveZoomTokens } from '../../domain/zoomStore';
 import { getCampaign } from '../../domain/campaignStore';
@@ -189,12 +188,9 @@ export async function oauthRoutes(app: FastifyInstance): Promise<void> {
       }
 
       const user = await fetchZoomUser(tokens.access_token);
-      // Ask once, up front: a non-admin host is refused report access, and the UI needs to know now
-      // rather than showing empty polls later.
-      const probe = await probeZoomReportAccess(tokens.access_token, user.id);
 
-      // A fresh authorisation invalidates anything cached against the old token — including the
-      // one-shot "already tried reports" marker — so the next sync verifies from scratch.
+      // No report probe here on purpose: the users-report endpoint needs a scope attendance never
+      // uses. The first sync's participants call decides, and records Zoom's own reason if refused.
       forgetZoomToken(user.id);
 
       await saveZoomTokens(user.id, {
@@ -207,9 +203,7 @@ export async function oauthRoutes(app: FastifyInstance): Promise<void> {
         email: user.email,
         displayName: user.displayName,
         connectedAt: Date.now(),
-        reportAccess: probe.access,
-        reportDetail: probe.detail,
-        reportMissingScopes: scopesFromDenial(probe.detail),
+        reportAccess: 'unknown',
       });
 
       // Authorising from a campaign attaches that host to it, and stamps its linked video call, so

@@ -226,12 +226,15 @@ invited − attended (`domain/attendance.ts`); the report's absentee list is inf
 that *are* account admins, or whose app has been granted the report scope, get the rich path
 automatically — "Check access" re-probes without reconnecting.
 
-The connect-time probe is a **hint, not a verdict**. It asks `/report/users/{userId}/meetings` (scope
-`report:read:user:admin`), while attendance needs `/report/meetings/{id}/participants`, which can be a
-different scope — so a denial buys exactly one verification attempt per host per process
-(`shouldAttemptReports()`), and a successful participant read flips `reportAccess` back to granted.
-Zoom's refusal text is parsed by `scopesFromDenial()` and stored as `reportMissingScopes`, which the UI
-renders as *“Add in Zoom → Scopes: …”* with a copy button.
+Report access is judged by the **participants** call attendance actually makes, never by
+`/report/users/{id}/meetings` — that endpoint needs `report:read:user:admin`, a scope nothing else uses,
+and asking for it made the UI demand a scope the app might not even offer. Connecting therefore stores
+`reportAccess: 'unknown'`; the first sync — or **Check access**, which replays the newest finished
+session — records the real verdict. A cached denial still buys exactly one verification attempt per host
+per process (`shouldAttemptReports()`), a successful participant read flips the verdict to granted, and
+verdicts left behind by the retired probe (`isProbeEraDenial()`) are presented as unknown rather than
+contradicting reality. Zoom's refusal text is parsed by `scopesFromDenial()` into `reportMissingScopes`,
+which the UI renders as *“Add in Zoom → Scopes: …”* with a copy button.
 
 The link a calendar invite carries comes from `sessionJoinUrl()` (`domain/joinLink.ts`), in priority
 order:

@@ -2,6 +2,7 @@ import { redis } from '../queue/connection';
 import { REDIS_KEYS } from '../config/constants';
 import { env } from '../config/env';
 import { seal, open } from '../lib/crypto';
+import { isProbeEraDenial } from '../video/zoomAuth';
 
 export type ZoomAuthMode = 's2s' | 'user';
 
@@ -37,6 +38,18 @@ export interface ZoomTokenRecord {
   expiresAt?: number;
 }
 
+/**
+ * Present a stale verdict from the retired users-report probe as `unknown`.
+ *
+ * That probe demanded `report:read:user:admin`, a scope attendance never uses, so its refusal says
+ * nothing about the calls that matter. Normalising on read clears the misleading chip without needing
+ * a Redis migration; the next real participants call writes a verdict that means something.
+ */
+function normaliseAccount(rec: ZoomAccountRecord): ZoomAccountRecord {
+  if (!isProbeEraDenial(rec.reportAccess, rec.reportMissingScopes)) return rec;
+  return { ...rec, reportAccess: 'unknown', reportDetail: undefined, reportMissingScopes: [] };
+}
+
 export async function listZoomAccounts(): Promise<ZoomAccountRecord[]> {
   const ids = await redis.smembers(REDIS_KEYS.zoomAccountsIndex());
   const records = await Promise.all(ids.map((id) => getZoomAccount(id)));
@@ -49,7 +62,7 @@ export async function getZoomAccount(userId: string): Promise<ZoomAccountRecord 
   const raw = await redis.get(REDIS_KEYS.zoomAccount(userId));
   if (!raw) return null;
   try {
-    return JSON.parse(raw) as ZoomAccountRecord;
+    return normaliseAccount(JSON.parse(raw) as ZoomAccountRecord);
   } catch {
     return null;
   }

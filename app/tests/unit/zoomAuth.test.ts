@@ -3,6 +3,7 @@ import {
   chooseZoomTokenSource,
   defaultZoomAuthMode,
   expiryFrom,
+  isProbeEraDenial,
   isScopeDenied,
   pickZoomAccount,
   reportAccessFromProbe,
@@ -144,6 +145,25 @@ describe('shouldAttemptReports', () => {
   it('allows exactly one verification after a denial', () => {
     expect(shouldAttemptReports('denied', false)).toBe(true);
     expect(shouldAttemptReports('denied', true)).toBe(false);
+  });
+});
+
+describe('isProbeEraDenial', () => {
+  /* The retired probe's scope; a denial naming it says nothing about the participants call. */
+  it('recognises a denial caused by the users-report scope', () => {
+    expect(isProbeEraDenial('denied', ['report:read:user:admin'])).toBe(true);
+    expect(isProbeEraDenial('denied', ['report:read:user:admin', 'meeting:read:meeting'])).toBe(true);
+  });
+
+  it('leaves a real participants-call denial alone', () => {
+    expect(isProbeEraDenial('denied', ['report:read:list_past_participants:admin'])).toBe(false);
+    expect(isProbeEraDenial('denied', [])).toBe(false);
+    expect(isProbeEraDenial('denied')).toBe(false);
+  });
+
+  it('only applies to a denial', () => {
+    expect(isProbeEraDenial('granted', ['report:read:user:admin'])).toBe(false);
+    expect(isProbeEraDenial('unknown', ['report:read:user:admin'])).toBe(false);
   });
 });
 

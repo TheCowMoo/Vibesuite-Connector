@@ -14,6 +14,7 @@ import {
   expiryFrom,
   isScopeDenied,
   pickZoomAccount,
+  reportAccessFromProbe,
   scopesFromDenial,
   shouldAttemptReports,
   tokenUsable,
@@ -257,9 +258,37 @@ const DETAIL_KEYS = [
   'type',
 ];
 
-/** Exposed so the account probe route can call Zoom without duplicating token resolution. */
-export async function zoomAccessToken(ctx?: VideoAuthContext): Promise<string> {
-  return getAccessToken(ctx);
+/**
+ * Verify report access against the endpoint attendance actually uses.
+ *
+ * The old connect-time probe asked `/report/users/{userId}/meetings`, whose scope is unrelated to the
+ * participant/absentee/poll calls — it could refuse a token that works, and demanded a scope the app
+ * may not even offer. This tests the participants call itself and records the verdict.
+ */
+export async function probeReportsFor(
+  externalId: string,
+  sessionType: SessionType = 'meeting',
+  ctx?: VideoAuthContext,
+): Promise<{ access: 'granted' | 'denied' | 'unknown'; detail?: string; missingScopes?: string[] }> {
+  const token = await getAccessToken(ctx);
+  const seg = sessionType === 'webinar' ? 'webinars' : 'meetings';
+  const participants = await fetchListResult(
+    token,
+    `/report/${seg}/${encodeURIComponent(externalId)}/participants`,
+    'participants',
+  );
+
+  const access = reportAccessFromProbe(participants.status, participants.detail);
+  if (access === 'granted') {
+    await rememberReportAccess(ctx, 'granted');
+    return { access };
+  }
+  if (access === 'denied') {
+    await rememberReportAccess(ctx, 'denied', participants.detail);
+    return { access, detail: participants.detail, missingScopes: scopesFromDenial(participants.detail) };
+  }
+
+  return { access, detail: participants.detail };
 }
 
 function statsFrom(details: Record<string, unknown> | null): Record<string, string> {

@@ -121,6 +121,17 @@ export function shouldAttemptReports(
   return !alreadyAttempted;
 }
 
+/**
+ * Was this denial produced by the old connect-time probe?
+ *
+ * That probe asked `/report/users/{userId}/meetings` (scope `report:read:user:admin`), an endpoint
+ * attendance never uses. Its verdicts are stale and must not keep a host marked as refusing reports,
+ * so they are presented as `unknown` until a real participants call decides.
+ */
+export function isProbeEraDenial(access: string | undefined, missingScopes?: string[]): boolean {
+  return access === 'denied' && !!missingScopes?.includes('report:read:user:admin');
+}
+
 export interface ChooseZoomTokenParams {
   mode: ZoomAuthMode;
   requestedUserId?: string;

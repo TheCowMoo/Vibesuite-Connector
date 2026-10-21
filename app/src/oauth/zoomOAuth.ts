@@ -1,6 +1,5 @@
 import axios from 'axios';
 import { env } from '../config/env';
-import { reportAccessFromProbe } from '../video/zoomAuth';
 
 const AUTHORIZE_URL = 'https://zoom.us/oauth/authorize';
 const TOKEN_URL = 'https://zoom.us/oauth/token';
@@ -107,41 +106,6 @@ export async function fetchZoomUser(accessToken: string): Promise<ZoomUser> {
     email: String(d.email ?? ''),
     displayName: d.display_name ? String(d.display_name) : undefined,
   };
-}
-
-export interface ZoomReportProbe {
-  access: 'granted' | 'denied' | 'unknown';
-  /** What Zoom actually said, when it refused — surfaced in the UI so "refused" is never a mystery. */
-  detail?: string;
-}
-
-/**
- * Ask Zoom whether this authorisation may read account reports.
- *
- * A user-managed app authorised by a non-admin host is refused here, and that is the normal outcome —
- * attendance still works from the past-meetings participant list, only polls/Q&A/absentees do not.
- * Probing once at connect time is what lets the UI explain that instead of showing empty sections.
- */
-export async function probeZoomReportAccess(
-  accessToken: string,
-  userId: string,
-): Promise<ZoomReportProbe> {
-  const iso = (d: Date): string => d.toISOString().slice(0, 10);
-  const to = new Date();
-  const from = new Date(to.getTime() - 30 * 86400000);
-
-  try {
-    const res = await axios.get(`${API_BASE}/report/users/${encodeURIComponent(userId)}/meetings`, {
-      headers: { Authorization: `Bearer ${accessToken}` },
-      params: { from: iso(from), to: iso(to), page_size: 1 },
-      timeout: 20000,
-    });
-    return { access: reportAccessFromProbe(res.status) };
-  } catch (err) {
-    const status = (err as { response?: { status?: number } })?.response?.status ?? 0;
-    const detail = zoomErrorDetail(err);
-    return { access: reportAccessFromProbe(status, detail), detail };
-  }
 }
 
 /** Zoom answers a revoked/rotated token with this, which means the host must authorise again. */

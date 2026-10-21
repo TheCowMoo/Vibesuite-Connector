@@ -1,9 +1,10 @@
 import type { FastifyInstance } from 'fastify';
 import { getVideoSettings, saveVideoSettings, publicVideoSettings } from '../../domain/videoSettings';
-import { deleteZoomAccount, getZoomAccount, listZoomAccounts, saveZoomAccount } from '../../domain/zoomStore';
-import { probeZoomReportAccess, zoomOAuthConfigured } from '../../oauth/zoomOAuth';
-import { defaultZoomAuthMode, scopesFromDenial } from '../../video/zoomAuth';
-import { forgetZoomToken, zoomAccessToken, zoomProvider } from '../../video';
+import { deleteZoomAccount, getZoomAccount, listZoomAccounts } from '../../domain/zoomStore';
+import { listSessions } from '../../domain/sessionStore';
+import { zoomOAuthConfigured } from '../../oauth/zoomOAuth';
+import { defaultZoomAuthMode } from '../../video/zoomAuth';
+import { forgetZoomToken, probeReportsFor, zoomProvider } from '../../video';
 
 export async function videoRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/video/settings', async () => {
@@ -75,11 +76,11 @@ export async function videoRoutes(app: FastifyInstance): Promise<void> {
   });
 
   /**
-   * Re-ask Zoom whether this host may read reports.
+   * Re-verify report access for a host.
    *
-   * Worth its own route because the answer changes outside the app: an account admin approving the
-   * app or granting the report scope turns a previously-refused host into a working one, and the
-   * operator should not have to disconnect and reconnect to pick that up.
+   * Judged by the **participants** call attendance actually uses (the old users-report probe needed a
+   * scope nothing else did), which means it needs a real, finished meeting. Prefer one hosted by this
+   * account; fall back to any finished Zoom session.
    */
   app.post('/api/zoom/accounts/:userId/probe', async (req, reply) => {
     const { userId } = req.params as { userId: string };
@@ -89,17 +90,31 @@ export async function videoRoutes(app: FastifyInstance): Promise<void> {
       return;
     }
 
+    const finished = (await listSessions()).filter(
+      (s) => s.provider === 'zoom' && s.externalId && Date.parse(s.endTime) < Date.now(),
+    );
+    const candidate = finished.find((s) => s.zoomUserId === userId) ?? finished[0];
+
+    if (!candidate) {
+      return {
+        ok: true,
+        reportAccess: account.reportAccess ?? 'unknown',
+        detail: 'Sync a finished video call to verify report access — there is no past Zoom call to ask about yet.',
+      };
+    }
+
     try {
-      const token = await zoomAccessToken({ zoomUserId: userId });
-      const probe = await probeZoomReportAccess(token, userId);
-      await saveZoomAccount({
-        ...account,
-        reportAccess: probe.access,
-        reportDetail: probe.detail,
-        reportMissingScopes: scopesFromDenial(probe.detail),
+      const result = await probeReportsFor(candidate.externalId, candidate.sessionType ?? 'meeting', {
+        connectionId: candidate.connectionId,
+        zoomUserId: userId,
       });
 
-      return { ok: true, reportAccess: probe.access, detail: probe.detail, missingScopes: scopesFromDenial(probe.detail) };
+      return {
+        ok: true,
+        reportAccess: result.access,
+        detail: result.detail,
+        missingScopes: result.missingScopes ?? account.reportMissingScopes,
+      };
     } catch (err) {
       reply.code(502).send({ error: (err as Error).message });
     }
