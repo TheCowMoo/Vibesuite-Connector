@@ -2852,9 +2852,15 @@
       });
   }
 
+  /**
+   * Card actions. Only the action for the current state stays visible; everything occasional — Zoom
+   * host, stop time, ending, deleting — moves into the overflow menu the rest of the app already uses.
+   * Seven buttons per card made every campaign look equally urgent and put Delete next to Send.
+   */
   function campaignActions(c) {
-    var out = '';
     var id = esc(c.id);
+    var out = '';
+    var items = '';
 
     if (c.status === 'draft') {
       out += '<button class="btn btn--primary btn--sm" data-action="campStart" data-id="' + id + '">Begin sending</button>';
@@ -2863,25 +2869,28 @@
       out += '<button class="btn btn--primary btn--sm" data-action="campStart" data-id="' + id + '">Begin now</button>';
       out += '<button class="btn btn--ghost btn--sm" data-action="campUnschedule" data-id="' + id + '">Cancel schedule</button>';
     } else if (c.status === 'active') {
-      out += '<button class="btn btn--outline btn--sm" data-action="campSend" data-id="' + id + '">Send the next batch</button>';
-      out += '<button class="btn btn--ghost btn--sm" data-action="campPause" data-id="' + id + '">Pause</button>';
-      out += '<button class="btn btn--ghost btn--sm" data-action="campEnd" data-id="' + id + '">End sending</button>';
+      out += '<button class="btn btn--outline btn--sm" data-action="campPause" data-id="' + id + '">Pause</button>';
+      out += '<button class="btn btn--ghost btn--sm" data-action="campSend" data-id="' + id + '">Send a batch</button>';
     } else if (c.status === 'paused') {
-      out += '<button class="btn btn--outline btn--sm" data-action="campSend" data-id="' + id + '">Send the next batch</button>';
-      out += '<button class="btn btn--ghost btn--sm" data-action="campResume" data-id="' + id + '">Resume</button>';
-      out += '<button class="btn btn--ghost btn--sm" data-action="campEnd" data-id="' + id + '">End sending</button>';
+      out += '<button class="btn btn--primary btn--sm" data-action="campResume" data-id="' + id + '">Resume</button>';
+      out += '<button class="btn btn--ghost btn--sm" data-action="campSend" data-id="' + id + '">Send a batch</button>';
     }
 
-    out += (c.status === 'completed' || c.status === 'ended')
-      ? ''
-      : '<button class="btn btn--ghost btn--sm" data-action="campZoomHost" data-id="' + id + '">' +
-        (c.zoomUserId ? 'Change Zoom host' : 'Add Zoom host') + '</button>';
-    out += (c.status === 'completed' || c.status === 'ended')
-      ? ''
-      : '<button class="btn btn--ghost btn--sm" data-action="campDeadline" data-id="' + id + '">' +
-        (c.sendByAt ? 'Change stop time' : 'Add stop time') + '</button>';
+    var live = c.status !== 'completed' && c.status !== 'ended';
+    if (live) {
+      items += menuBtn('campZoomHost', c.zoomUserId ? 'Change Zoom host' : 'Add Zoom host', 'video', c.id);
+      items += menuBtn('campDeadline', c.sendByAt ? 'Change stop time' : 'Add stop time', 'calendar', c.id);
+    }
+    if (c.status === 'active' || c.status === 'paused') {
+      items += menuBtn('campEnd', 'End sending', 'x', c.id, true);
+    }
+    items += menuBtn('campDelete', 'Delete', 'trash', c.id, true);
+
     out += '<button class="btn btn--ghost btn--sm" data-action="campDetail" data-id="' + id + '">Details</button>';
-    out += '<button class="btn btn--ghost btn--sm" data-action="campDelete" data-id="' + id + '">Delete</button>';
+    out += '<div class="menu-wrap">' +
+      '<button class="btn btn--menu btn--sm" data-menu-btn aria-label="More actions" aria-haspopup="menu" title="More actions">' + icon('more') + '</button>' +
+      '<div class="menu" data-menu role="menu">' + items + '</div>' +
+      '</div>';
     return out;
   }
 
@@ -3685,8 +3694,12 @@
   });
 
   $('#campaignsList').addEventListener('click', function (e) {
+    var toggle = e.target.closest('[data-menu-btn]');
+    if (toggle) { e.stopPropagation(); toggleMenu(toggle); return; }
+
     var btn = e.target.closest('[data-action]');
     if (!btn) return;
+    closeAllMenus();
     var id = btn.dataset.id;
     var action = btn.dataset.action;
 
