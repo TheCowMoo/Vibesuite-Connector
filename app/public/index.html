@@ -156,9 +156,9 @@
             <textarea id="inviteDescription" rows="4" placeholder="What's this event about?"></textarea>
           </div>
           <div class="invite-row">
-            <label class="field"><span class="field__label">Start</span><input type="datetime-local" id="inviteStart" /></label>
-            <label class="field"><span class="field__label">End</span><input type="datetime-local" id="inviteEnd" /></label>
-            <label class="field"><span class="field__label">Timezone</span><input id="inviteTimezone" list="tzList" placeholder="e.g. America/New_York" /></label>
+            <label class="field"><span class="field__label">Start</span><input type="datetime-local" id="inviteStart" /><span class="field__hint" data-hint-for="inviteStart"></span></label>
+            <label class="field"><span class="field__label">End</span><input type="datetime-local" id="inviteEnd" /><span class="field__hint" data-hint-for="inviteEnd"></span></label>
+            <label class="field"><span class="field__label">Timezone for the invite</span><input id="inviteTimezone" list="tzList" placeholder="e.g. America/New_York" /></label>
           </div>
           <div class="invite-event-preview" id="inviteEventPreview"></div>
           <label class="field"><span class="field__label">Location / meeting link</span><input id="inviteLocation" placeholder="Optional" /></label>
@@ -553,8 +553,8 @@
       <label class="field"><span class="field__label">Video call name</span><input name="title" placeholder="e.g. Product webinar" /></label>
       <label class="field"><span class="field__label">Join link (optional)</span><input name="joinUrl" placeholder="Leave blank and we'll look it up in Zoom" /></label>
       <div class="invite-row">
-        <label class="field"><span class="field__label">Start</span><input type="datetime-local" name="startTime" /></label>
-        <label class="field"><span class="field__label">End</span><input type="datetime-local" name="endTime" /></label>
+        <label class="field"><span class="field__label">Start</span><input type="datetime-local" name="startTime" id="sessionStart" /><span class="field__hint" data-hint-for="sessionStart"></span></label>
+        <label class="field"><span class="field__label">End</span><input type="datetime-local" name="endTime" id="sessionEnd" /><span class="field__hint" data-hint-for="sessionEnd"></span></label>
       </div>
       <label class="field"><span class="field__label">Google account</span><select name="connectionId" id="sessionConnection"></select></label>
       <label class="field" id="sessionZoomHostWrap" hidden><span class="field__label">Zoom host</span><select name="zoomUserId" id="sessionZoomHost"><option value="">Automatic</option></select></label>
@@ -673,7 +673,7 @@
       <label class="field"><span class="field__label">Which video call? (join link)</span><select id="campSession"><option value="">None</option></select></label>
       <label class="field"><span class="field__label">Zoom host for this campaign</span><select id="campZoomHost"><option value="">Not set</option></select></label>
       <label class="field"><span class="field__label">How to split it</span><select id="campMode"><option value="even">Split evenly</option><option value="weighted">Use my shares</option></select></label>
-      <label class="field"><span class="field__label">Timezone</span><input id="campTz" list="tzList" value="UTC" /></label>
+      <label class="field"><span class="field__label">Timezone for the calendar invite</span><input id="campTz" list="tzList" value="UTC" /></label>
     </div>
     <div class="field"><span class="field__label">Which groups to include (leave empty for all)</span><div class="daychks" id="campSegments"></div></div>
     <div class="field"><label class="daychk"><input type="checkbox" id="campIncludeInvited" /><span>Also invite people who were already invited</span></label></div>
@@ -684,16 +684,23 @@
           <option value="later">At a specific time</option>
         </select>
       </label>
-      <label class="field" id="campStartAtWrap" hidden><span class="field__label">Start at</span><input type="datetime-local" id="campStartAt" /></label>
-      <label class="field"><span class="field__label">Stop sending by (optional)</span><input type="datetime-local" id="campStopBy" /></label>
+      <label class="field" id="campStartAtWrap" hidden><span class="field__label">Start at</span><input type="datetime-local" id="campStartAt" /><span class="field__hint" data-hint-for="campStartAt"></span></label>
+      <label class="field"><span class="field__label">Stop sending by (optional)</span><input type="datetime-local" id="campStopBy" /><span class="field__hint" data-hint-for="campStopBy"></span>
+        <span class="preset-row" data-preset-target="campStopBy">
+          <button type="button" class="btn btn--ghost btn--sm" data-preset-days="1">+1 day</button>
+          <button type="button" class="btn btn--ghost btn--sm" data-preset-days="3">+3 days</button>
+          <button type="button" class="btn btn--ghost btn--sm" data-preset-days="7">+1 week</button>
+        </span>
+      </label>
     </div>
     <div class="field"><span class="field__label">Who this will reach</span><div id="campAudience" aria-live="polite"><span class="muted">Pick a contact list to see who will be invited.</span></div></div>
     <div class="field"><span class="field__label">When it will finish</span><div id="campPlan" aria-live="polite"><span class="muted">Pick a contact list and at least one sending account to see the pace.</span></div></div>
+    <label class="field"><span class="field__label">Email subject</span><input id="campSummary" placeholder="Webinar: ..." /></label>
     <div class="invite-row">
-      <label class="field"><span class="field__label">Email subject</span><input id="campSummary" placeholder="Webinar: ..." /></label>
-      <label class="field"><span class="field__label">Starts</span><input type="datetime-local" id="campStart" /></label>
-      <label class="field"><span class="field__label">Ends</span><input type="datetime-local" id="campEnd" /></label>
+      <label class="field"><span class="field__label">Event starts</span><input type="datetime-local" id="campStart" /><span class="field__hint" data-hint-for="campStart"></span></label>
+      <label class="field"><span class="field__label">Event ends</span><input type="datetime-local" id="campEnd" /><span class="field__hint" data-hint-for="campEnd"></span></label>
     </div>
+    <p class="field__hint" id="campTzHint"></p>
     <label class="field"><span class="field__label">Description</span><textarea id="campDesc" rows="2" placeholder="Agenda, speaker, what to expect..."></textarea></label>
     <div class="field"><span class="field__label">Which Google accounts send this</span><div id="campSenders"></div></div>
     <div class="modal__foot">
@@ -711,8 +718,14 @@
       <h2 class="modal__title" id="campScheduleTitle">Schedule this campaign</h2>
       <button class="icon-btn" data-close="campScheduleModal" aria-label="Close">&times;</button>
     </div>
-    <label class="field"><span class="field__label">Start sending at</span><input type="datetime-local" id="campScheduleStart" /></label>
-    <label class="field"><span class="field__label">Stop sending by (optional)</span><input type="datetime-local" id="campScheduleStop" /></label>
+    <label class="field"><span class="field__label">Start sending at</span><input type="datetime-local" id="campScheduleStart" /><span class="field__hint" data-hint-for="campScheduleStart"></span></label>
+    <label class="field"><span class="field__label">Stop sending by (optional)</span><input type="datetime-local" id="campScheduleStop" /><span class="field__hint" data-hint-for="campScheduleStop"></span>
+      <span class="preset-row" data-preset-target="campScheduleStop">
+        <button type="button" class="btn btn--ghost btn--sm" data-preset-days="1">+1 day</button>
+        <button type="button" class="btn btn--ghost btn--sm" data-preset-days="3">+3 days</button>
+        <button type="button" class="btn btn--ghost btn--sm" data-preset-days="7">+1 week</button>
+      </span>
+    </label>
     <p class="muted" id="campScheduleNote">Nobody is invited until the start time. The audience is fixed at that moment, so anyone already invited elsewhere is skipped.</p>
     <div class="modal__foot">
       <span class="spacer"></span>
@@ -729,7 +742,13 @@
       <h2 class="modal__title" id="campDeadlineTitle">Stop sending invites by</h2>
       <button class="icon-btn" data-close="campDeadlineModal" aria-label="Close">&times;</button>
     </div>
-    <label class="field"><span class="field__label">Stop time (leave empty to remove it)</span><input type="datetime-local" id="campDeadlineAt" /></label>
+    <label class="field"><span class="field__label">Stop time (leave empty to remove it)</span><input type="datetime-local" id="campDeadlineAt" /><span class="field__hint" data-hint-for="campDeadlineAt"></span>
+      <span class="preset-row" data-preset-target="campDeadlineAt">
+        <button type="button" class="btn btn--ghost btn--sm" data-preset-days="1">+1 day</button>
+        <button type="button" class="btn btn--ghost btn--sm" data-preset-days="3">+3 days</button>
+        <button type="button" class="btn btn--ghost btn--sm" data-preset-days="7">+1 week</button>
+      </span>
+    </label>
     <p class="muted" id="campDeadlineNote">Sending stops at this time even if people are still waiting. Invitations already sent are not recalled, and anyone left out stays uninvited for a future campaign.</p>
     <div class="modal__foot">
       <span class="spacer"></span>

@@ -1383,6 +1383,15 @@
   function openNewSession() {
     document.getElementById('newSessionForm').reset();
     populateSessionSelects();
+
+    // A blank date pair is a dead end on a phone; start at the next full hour, one hour long.
+    var start = new Date(Date.now() + 3600000);
+    start.setMinutes(0, 0, 0);
+    document.getElementById('sessionStart').value = campLocalInput(start);
+    document.getElementById('sessionEnd').value = campLocalInput(new Date(start.getTime() + 3600000));
+
+    refreshTimeLimits();
+    refreshTimeHints();
     openModal('newSession');
   }
 
@@ -2790,7 +2799,9 @@
   var DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
   function prettyDate(value) {
-    var t = Date.parse(String(value || ''));
+    // Accepts an ISO/date string *or* an epoch number. `Date.parse(String(1759…))` is NaN, which used
+    // to make "Stop by …" chips print a raw timestamp.
+    var t = typeof value === 'number' ? value : Date.parse(String(value || ''));
     if (!t) return String(value || '');
     var d = new Date(t);
     var out = DAYS[d.getDay()] + ' ' + d.getDate() + ' ' + MONTHS[d.getMonth()];
@@ -2939,6 +2950,117 @@
   function campLocalInput(d) {
     return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()) + 'T' + pad2(d.getHours()) + ':' + pad2(d.getMinutes());
   }
+
+  /* ---- Shared date/time affordances ----
+   * Native datetime-local inputs are serviceable but give no feedback: you cannot tell whether
+   * "25/10/2026 17:00" is tomorrow or last month, and nothing stops an end before its start. These
+   * helpers add a relative hint under every date field, keep `min` honest, and make the end follow
+   * the start when it would otherwise be invalid.
+   */
+  var TIME_HINT_IDS = [
+    'inviteStart', 'inviteEnd',
+    'campStart', 'campEnd', 'campStartAt', 'campStopBy',
+    'campScheduleStart', 'campScheduleStop', 'campDeadlineAt',
+    'sessionStart', 'sessionEnd',
+  ];
+
+  function parseTimeInput(value) {
+    if (!value) return null;
+    var t = new Date(value).getTime();
+    return Number.isNaN(t) ? null : t;
+  }
+
+  function relativeTimeLabel(ts) {
+    var diff = ts - Date.now();
+    var minutes = Math.round(Math.abs(diff) / 60000);
+    if (minutes < 1) return 'now';
+
+    var text;
+    if (minutes < 60) text = minutes + (minutes === 1 ? ' minute' : ' minutes');
+    else if (minutes < 1440) {
+      var hours = Math.round(minutes / 60);
+      text = hours + (hours === 1 ? ' hour' : ' hours');
+    } else {
+      var days = Math.round(minutes / 1440);
+      text = days + (days === 1 ? ' day' : ' days');
+    }
+    return diff > 0 ? 'in ' + text : text + ' ago';
+  }
+
+  function refreshTimeHints() {
+    TIME_HINT_IDS.forEach(function (id) {
+      var input = document.getElementById(id);
+      var hint = document.querySelector('[data-hint-for="' + id + '"]');
+      if (!input || !hint) return;
+      var ts = parseTimeInput(input.value);
+      hint.textContent = ts === null ? '' : prettyDate(ts) + ' · ' + relativeTimeLabel(ts);
+    });
+  }
+
+  function refreshTimeLimits() {
+    var now = Date.now();
+    ['inviteStart', 'campStart', 'campStartAt', 'campStopBy', 'campScheduleStart', 'campDeadlineAt']
+      .forEach(function (id) {
+        var el = document.getElementById(id);
+        if (el) el.min = campLocalInput(new Date(now));
+      });
+
+    [['campStart', 'campEnd'], ['inviteStart', 'inviteEnd'],
+      ['campScheduleStart', 'campScheduleStop'], ['sessionStart', 'sessionEnd']]
+      .forEach(function (pair) {
+        var startEl = document.getElementById(pair[0]);
+        var endEl = document.getElementById(pair[1]);
+        if (!startEl || !endEl) return;
+        var start = parseTimeInput(startEl.value);
+        if (start !== null) endEl.min = campLocalInput(new Date(start));
+      });
+  }
+
+  function ensureEndAfterStart(startId, endId, durationMs) {
+    var startEl = document.getElementById(startId);
+    var endEl = document.getElementById(endId);
+    if (!startEl || !endEl) return;
+    var start = parseTimeInput(startEl.value);
+    if (start === null) return;
+    var end = parseTimeInput(endEl.value);
+    if (end === null || end <= start) endEl.value = campLocalInput(new Date(start + durationMs));
+  }
+
+  /** "+1 day" style shortcuts: same time tomorrow at 17:00, or relative to what is already typed. */
+  function applyTimePreset(targetId, days) {
+    var input = document.getElementById(targetId);
+    if (!input) return;
+    var base = parseTimeInput(input.value);
+    var next = new Date((base === null ? Date.now() : base) + days * 86400000);
+    next.setHours(17, 0, 0, 0);
+    input.value = campLocalInput(next);
+    refreshTimeLimits();
+    refreshTimeHints();
+  }
+
+  TIME_HINT_IDS.forEach(function (id) {
+    var input = document.getElementById(id);
+    if (!input) return;
+    input.addEventListener('change', function () {
+      if (id === 'campStart') ensureEndAfterStart('campStart', 'campEnd', 3600000);
+      if (id === 'inviteStart') ensureEndAfterStart('inviteStart', 'inviteEnd', 3600000);
+      if (id === 'sessionStart') ensureEndAfterStart('sessionStart', 'sessionEnd', 3600000);
+      refreshTimeLimits();
+      refreshTimeHints();
+    });
+    // Typing a date should update the relative hint without waiting for blur.
+    input.addEventListener('input', refreshTimeHints);
+  });
+
+  document.addEventListener('click', function (e) {
+    var btn = e.target.closest ? e.target.closest('[data-preset-days]') : null;
+    if (!btn) return;
+    var row = btn.closest('[data-preset-target]');
+    if (!row) return;
+    e.preventDefault();
+    applyTimePreset(row.dataset.presetTarget, Number(btn.dataset.presetDays));
+  });
+
 
   function renderCampSenderRows() {
     var el = document.getElementById('campSenders');
@@ -3159,6 +3281,16 @@
 
     renderCampSenderRows();
     loadCampaignSegments();
+
+    var tzHint = document.getElementById('campTzHint');
+    if (tzHint) {
+      tzHint.textContent = 'Event times are in your local timezone (' +
+        ((Intl.DateTimeFormat().resolvedOptions().timeZone) || 'UTC') +
+        '). The calendar invite itself uses the timezone field above.';
+    }
+    refreshTimeLimits();
+    refreshTimeHints();
+
     openModal('newCampaign');
   }
 
@@ -3281,6 +3413,8 @@
     start.setMinutes(0, 0, 0);
     document.getElementById('campScheduleStart').value = campLocalInput(start);
     document.getElementById('campScheduleStop').value = camp && camp.sendByAt ? campLocalInput(new Date(camp.sendByAt)) : '';
+    refreshTimeLimits();
+    refreshTimeHints();
     openModal('campScheduleModal');
   }
 
@@ -3307,6 +3441,8 @@
     var camp = campaignData.filter(function (c) { return c.id === id; })[0];
     deadlineCampaignId = id;
     document.getElementById('campDeadlineAt').value = camp && camp.sendByAt ? campLocalInput(new Date(camp.sendByAt)) : '';
+    refreshTimeLimits();
+    refreshTimeHints();
     openModal('campDeadlineModal');
   }
 
