@@ -327,6 +327,36 @@ Apply resolves the label back to the real id, mutates the sender profile or camp
 recommendation `applied` and appends a line to the append-only `advisor:applyLog`. "Ask a
 follow-up" is grounded on the stored snapshot and is ephemeral — the server keeps no transcript.
 
+## Statistics
+
+`GET /api/stats/overview?days=30` answers "how is outreach going overall?" from data that already
+exists: `collectStatsOverview()` reads campaigns, recipient rows, attendance reports and sessions,
+and `buildStatsOverview()` (pure, unit-tested) does all the arithmetic. Nothing new is tracked, so the
+dashboard cannot quietly disagree with the campaign detail view.
+
+The window is the last N calendar days **including today**, clamped to 1–365. Two different windows
+live in one payload on purpose:
+
+| Metric | Window | Why |
+|---|---|---|
+| Invitations sent | recipient `sentAt` inside the window | "Last 7 days" has to mean exactly that |
+| Replies (accepted / declined / maybe / no reply) | whole funnel of any campaign that sent in the window | RSVP status is a campaign aggregate, not a per-recipient timestamp |
+| Pending / failed | current, unwindowed | something still waiting is still waiting |
+| Sessions, attendances, no-shows | session `startTime` inside the window | one row per call |
+
+Wording is deliberate. **Invitations** counts recipient rows across campaigns, so someone invited to
+three campaigns is three invitations — which is why the UI never says "people". **Attendances** counts
+check-ins rather than unique humans, for the same reason. Acceptance rate is `accepted / sent` over the
+included campaigns; attendance rate is `attended / (attended + noShow)`. Both are `0`, never `NaN`,
+when the denominator is empty. Opens and bounces are absent because nothing tracks them, and the card
+says "answers only" instead of implying a delivery funnel.
+
+When an account has never sent an invitation and has no sessions at all, the client renders a labelled
+`SAMPLE_OVERVIEW` ("Sample data — nothing here is real") instead of a wall of zeros. It is built in
+the browser for the requested period, never persisted, and disappears automatically once real
+activity exists — the `hasActivity` flag is computed across all campaigns and sessions, so an empty
+*period* on an established account still shows honest zeros rather than samples.
+
 ## Security model
 
 - **Webhook authentication**: the only reliable Google push validation is the
@@ -394,7 +424,7 @@ deliberately leaves `#campaignNew` visible, because that is the tour's opening t
 
 Navigation lives in a **left rail** (`.rail`, `--rail-w: 224px`) grouped by plain labels: Campaigns
 and Invitations first, then *Set up* (Google accounts, Contact lists, Sending accounts, Documents),
-*Insights* (Who attended, Assistant) and *Workspace* (People, Settings). A slim `.topbar` carries
+*Insights* (Statistics, Who attended, Assistant) and *Workspace* (People, Settings). A slim `.topbar` carries
 only the brand and the help/account menus. Below 900px the rail flattens into a horizontal scrolling
 strip and the group labels hide.
 
@@ -471,6 +501,7 @@ API routes and Redis keys keep their original names, so use this table when read
 | Documents | `knowledge`, `/api/knowledge` |
 | Invitations | `invite`, `/api/invites`, `list:{id}:invited` |
 | Who attended | `session`, `attendance`, `/api/sessions`, `attendance:{sessionId}` |
+| Statistics | `stats`, `/api/stats/overview`, `statsOverview` |
 | Campaigns | `campaign`, `/api/campaigns`, `campaign:{id}` |
 | Sending accounts | `sender`, `/api/senders`, `sender:*` |
 | Assistant | `advisor`, `/api/advisor`, `advisor:analysis` |

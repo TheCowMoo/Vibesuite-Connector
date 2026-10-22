@@ -118,6 +118,14 @@ cd app
 npm test
 ```
 
+## Dashboard
+
+`app/public` ships a single-page operator console served at `/`: Google account health, contact
+lists, one-off invitations, campaigns, and who attended each call. The **Statistics** tab rolls
+every campaign and session into one view — invitations per day, reply mix, per-mailbox results and
+top campaigns — and shows clearly-labelled sample data on a brand-new account instead of a wall of
+zeros (nothing is stored).
+
 ## Docker (VPS deployment)
 
 ```bash
@@ -167,6 +175,7 @@ Key counters: `webhook_received_total`, `webhook_rejected_total`, `jobs_enqueued
 | GET | `/oauth/google/callback` | complete Google OAuth |
 | GET | `/oauth/ghl/start?connectionId=` | redirect to GHL OAuth |
 | GET | `/oauth/ghl/callback` | complete GHL OAuth |
+| GET | `/api/stats/overview?days=30` | cross-campaign statistics (1–365 days) |
 
 ## Notes & caveats
 

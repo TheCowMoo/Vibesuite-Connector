@@ -48,6 +48,7 @@
     $('#view-lists').hidden = name !== 'lists';
     $('#view-knowledge').hidden = name !== 'knowledge';
     $('#view-invites').hidden = name !== 'invites';
+    $('#view-stats').hidden = name !== 'stats';
     $('#view-attendance').hidden = name !== 'attendance';
     $('#view-advisor').hidden = name !== 'advisor';
     $('#view-campaigns').hidden = name !== 'campaigns';
@@ -58,6 +59,7 @@
     if (name === 'lists') loadLists();
     if (name === 'knowledge') loadKnowledge();
     if (name === 'invites') loadInvitesView();
+    if (name === 'stats') loadStatsOverview();
     if (name === 'attendance') loadAttendance();
     if (name === 'advisor') loadAdvisor();
     if (name === 'campaigns') loadCampaigns();
@@ -4146,6 +4148,230 @@
   $('#helpHowItWorks').addEventListener('click', openHowItWorks);
   $('#howItWorksTour').addEventListener('click', function () { closeModal('howItWorks'); tourStart(true); });
   $('#emptyTourCta').addEventListener('click', function () { tourStart(true); });
+
+  /* ---- Cross-campaign statistics ---- */
+  var statsDays = 30;
+  var statsTicket = 0;
+
+  /**
+   * A brand-new account has nothing to chart, and a wall of zeros looks broken rather than new.
+   * This is a client-side stand-in: never sent to the server, never stored, and replaced the moment
+   * real invitations or sessions exist.
+   */
+  function sampleDaily(days) {
+    var shape = [4, 9, 14, 7, 0, 0, 11, 18, 22, 16, 9, 3, 0, 6, 13, 19, 24, 21, 15, 8, 2, 0, 7, 12, 17, 20, 14, 9, 5, 3];
+    var out = [];
+    var today = Date.now();
+    for (var i = days - 1; i >= 0; i--) {
+      out.push({
+        date: new Date(today - i * 86400000).toISOString().slice(0, 10),
+        sent: shape[(days - 1 - i) % shape.length]
+      });
+    }
+    return out;
+  }
+
+  function sampleOverview(days) {
+    var daily = sampleDaily(days);
+    var invitations = daily.reduce(function (a, d) { return a + d.sent; }, 0);
+    var accepted = Math.round(invitations * 0.38);
+    var declined = Math.round(invitations * 0.11);
+    var tentative = Math.round(invitations * 0.06);
+    var first = Math.round(invitations * 0.52);
+    var second = Math.round(invitations * 0.31);
+    var third = invitations - first - second;
+    var mailboxes = [
+      {
+        name: 'maya@yourcompany.com', sent: first,
+        accepted: Math.round(first * 0.41), declined: Math.round(first * 0.09),
+        tentative: Math.round(first * 0.06), attended: Math.round(first * 0.3), noShow: 44
+      },
+      {
+        name: 'theo@yourcompany.com', sent: second,
+        accepted: Math.round(second * 0.35), declined: Math.round(second * 0.14),
+        tentative: Math.round(second * 0.05), attended: Math.round(second * 0.24), noShow: 28
+      },
+      {
+        name: 'sam@yourcompany.com', sent: third,
+        accepted: Math.round(third * 0.32), declined: Math.round(third * 0.1),
+        tentative: 4, attended: 18, noShow: 12
+      }
+    ];
+    var attendances = mailboxes.reduce(function (a, m) { return a + m.attended; }, 0);
+    var noShows = mailboxes.reduce(function (a, m) { return a + m.noShow; }, 0);
+    return {
+      days: days,
+      totals: {
+        campaigns: 5,
+        activeCampaigns: 2,
+        invitations: invitations,
+        pending: 214,
+        failed: 6,
+        sessions: 3,
+        attendances: attendances,
+        noShows: noShows,
+        acceptanceRate: 38,
+        attendanceRate: Math.round((attendances / (attendances + noShows)) * 1000) / 10
+      },
+      rsvp: {
+        accepted: accepted,
+        declined: declined,
+        tentative: tentative,
+        noResponse: invitations - accepted - declined - tentative
+      },
+      daily: daily,
+      byMailbox: mailboxes,
+      topCampaigns: (function () {
+        var specs = [
+          { id: 'sample-1', name: 'October product webinar', status: 'active', share: 0.42, rate: 0.41, show: 0.76 },
+          { id: 'sample-2', name: 'Partner briefing', status: 'completed', share: 0.26, rate: 0.33, show: 0.72 },
+          { id: 'sample-3', name: 'Customer roundtable', status: 'completed', share: 0.18, rate: 0.36, show: 0.7 },
+          { id: 'sample-4', name: 'Beta invitations', status: 'paused', share: 0.09, rate: 0.28, show: 0.65 },
+          { id: 'sample-5', name: 'Re-engagement', status: 'draft', share: 0.05, rate: 0.2, show: 0.5 }
+        ];
+        return specs.map(function (s) {
+          var sent = Math.round(invitations * s.share);
+          var accepted = Math.round(sent * s.rate);
+          return {
+            id: s.id, name: s.name, status: s.status,
+            sent: sent, accepted: accepted, attended: Math.round(accepted * s.show)
+          };
+        });
+      })()
+    };
+  }
+
+  function statCard(label, value, note, tone) {
+    return '<div class="stat' + (tone ? ' stat--' + tone : '') + '">' +
+      '<div class="stat__value">' + esc(value) + '</div>' +
+      '<div class="stat__label">' + esc(label) + '</div>' +
+      (note ? '<div class="stat__label">' + esc(note) + '</div>' : '') +
+      '</div>';
+  }
+
+  function loadStatsOverview() {
+    var kpis = document.getElementById('statsKpis');
+    if (!kpis) return Promise.resolve();
+
+    // A slow reply for a period the user already moved away from must not overwrite the newer one.
+    statsTicket += 1;
+    var ticket = statsTicket;
+
+    var statSkeleton = '<div class="skeleton skel-stat"></div>';
+    kpis.innerHTML = statSkeleton + statSkeleton + statSkeleton + statSkeleton;
+    document.getElementById('statsBanner').innerHTML = '';
+    ['statsDaily', 'statsRsvp', 'statsMailboxes', 'statsCampaigns'].forEach(function (id) {
+      document.getElementById(id).innerHTML = '<div class="skeleton skel-card"></div>';
+    });
+
+    return api('/api/stats/overview?days=' + statsDays).then(function (data) {
+      if (ticket !== statsTicket) return;
+      var empty = data.hasActivity === false ||
+        (data.hasActivity === undefined && !data.totals.invitations && !data.totals.sessions);
+      renderStatsOverview(empty ? sampleOverview(data.days) : data, empty);
+    }).catch(function (e) {
+      if (ticket !== statsTicket) return;
+      kpis.innerHTML = '';
+      document.getElementById('statsBanner').innerHTML =
+        '<div class="sample-banner"><div>Could not load statistics: ' + esc(e.message) + '</div></div>';
+    });
+  }
+
+  function renderStatsOverview(data, sample) {
+    var t = data.totals;
+    var r = data.rsvp;
+
+    document.getElementById('statsBanner').innerHTML = sample
+      ? '<div class="sample-banner"><div><strong>Sample data — nothing here is real.</strong> ' +
+        'It shows what this page looks like once invitations go out. As soon as your first invitation ' +
+        'is sent, your own numbers replace it automatically.</div></div>'
+      : '';
+
+    document.getElementById('statsKpis').innerHTML =
+      statCard('Invitations sent', t.invitations, t.campaigns + ' in period · ' + t.activeCampaigns + ' active now') +
+      statCard('Accepted', r.accepted, t.acceptanceRate + '% acceptance', 'success') +
+      statCard('Attendances', t.attendances, t.sessions + ' session' + (t.sessions === 1 ? '' : 's') + ' · ' + t.noShows + ' no-shows', 'success') +
+      statCard('Still waiting', t.pending, t.failed + ' failed to send', 'warning');
+
+    var daily = data.daily || [];
+    var max = daily.reduce(function (m, d) { return Math.max(m, d.sent); }, 1);
+    var bars = daily.map(function (d) {
+      var height = Math.max(d.sent ? 4 : 1, Math.round((d.sent / max) * 100));
+      var title = d.date + ': ' + d.sent + ' invitation' + (d.sent === 1 ? '' : 's');
+      return '<div class="chart__col" title="' + esc(title) + '">' +
+        '<div class="chart__bar" style="height:' + height + '%' + (d.sent ? '' : ';opacity:.22') + '"></div></div>';
+    }).join('');
+    document.getElementById('statsDaily').innerHTML = daily.length
+      ? '<div class="chart">' + bars + '</div>' +
+        '<div class="chart__axis"><span>' + esc(daily[0].date) + '</span><span>' +
+        esc(daily[daily.length - 1].date) + '</span></div>'
+      : '<p class="muted">Nothing to chart yet.</p>';
+
+    var replies = r.accepted + r.declined + r.tentative + r.noResponse;
+    function rsvpSegment(n, color) {
+      if (!replies || !n) return '';
+      return '<span style="width:' + (n / replies * 100).toFixed(2) + '%;background:' + color + '"></span>';
+    }
+    function rsvpLegend(n, label, color) {
+      var pct = replies ? Math.round((n / replies) * 100) : 0;
+      return '<span><i class="rsvp-dot" style="background:' + color + '"></i>' + esc(label) +
+        ' <strong>' + n + '</strong> (' + pct + '%)</span>';
+    }
+    document.getElementById('statsRsvp').innerHTML = replies
+      ? '<div class="rsvp-bar">' +
+          rsvpSegment(r.accepted, 'var(--success)') +
+          rsvpSegment(r.tentative, 'var(--warning)') +
+          rsvpSegment(r.declined, 'var(--danger)') +
+          rsvpSegment(r.noResponse, '#A9B1C2') +
+        '</div>' +
+        '<div class="rsvp-legend">' +
+          rsvpLegend(r.accepted, 'Accepted', 'var(--success)') +
+          rsvpLegend(r.tentative, 'Maybe', 'var(--warning)') +
+          rsvpLegend(r.declined, 'Declined', 'var(--danger)') +
+          rsvpLegend(r.noResponse, 'No reply', '#A9B1C2') +
+        '</div>' +
+        '<p class="muted stats-note">Answers only — opens and bounces are not tracked yet.</p>'
+      : '<p class="muted">No replies yet. RSVP answers appear here as soon as people respond.</p>';
+
+    renderStatsTables(data);
+  }
+
+  function renderStatsTables(data) {
+    var mailboxRows = (data.byMailbox || []).map(function (m) {
+      var name = m.name || connName(m.connectionId);
+      return '<tr><td>' + esc(name) + '</td>' +
+        '<td>' + m.sent + '</td>' +
+        '<td>' + m.accepted + '</td>' +
+        '<td>' + m.declined + '</td>' +
+        '<td>' + m.tentative + '</td>' +
+        '<td>' + m.attended + '</td>' +
+        '<td>' + m.noShow + '</td></tr>';
+    }).join('');
+    document.getElementById('statsMailboxes').innerHTML = mailboxRows
+      ? '<div class="table-scroll"><table class="map"><thead><tr>' +
+        '<th>Sending account</th><th>Sent</th><th>Yes</th><th>No</th><th>Maybe</th>' +
+        '<th>Attended</th><th>No-show</th>' +
+        '</tr></thead><tbody>' + mailboxRows + '</tbody></table></div>'
+      : '<p class="muted">No invitations went out in this period.</p>';
+
+    var topRows = (data.topCampaigns || []).map(function (c) {
+      return '<tr><td>' + esc(c.name) + '</td><td>' + campStatusChip(c.status) + '</td>' +
+        '<td>' + c.sent + '</td><td>' + c.accepted + '</td><td>' + c.attended + '</td></tr>';
+    }).join('');
+    document.getElementById('statsCampaigns').innerHTML = topRows
+      ? '<div class="table-scroll"><table class="map"><thead><tr>' +
+        '<th>Campaign</th><th>Status</th><th>Sent</th><th>Accepted</th><th>Attended</th>' +
+        '</tr></thead><tbody>' + topRows + '</tbody></table></div>'
+      : '<p class="muted">No campaigns sent invitations in this period.</p>';
+  }
+
+  var statsRangeEl = document.getElementById('statsRange');
+  if (statsRangeEl) {
+    statsRangeEl.addEventListener('change', function () {
+      statsDays = Number(this.value) || 30;
+      loadStatsOverview();
+    });
+  }
 
   /* ---- Init ---- */
   refreshTourCta();

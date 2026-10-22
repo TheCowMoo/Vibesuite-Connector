@@ -56,6 +56,7 @@
       <button class="rail__link" data-view="knowledge"><span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg></span>Documents</button>
 
       <div class="rail__group">Insights</div>
+      <button class="rail__link" data-view="stats"><span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="21" x2="21" y2="21"/><rect x="5" y="11" width="4" height="10"/><rect x="11" y="6" width="4" height="15"/><rect x="17" y="14" width="4" height="7"/></svg></span>Statistics</button>
       <button class="rail__link" data-view="attendance"><span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg></span>Who attended</button>
       <button class="rail__link" data-view="advisor" data-role="admin" hidden><span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1"/><circle cx="12" cy="12" r="2.5"/></svg></span>Assistant</button>
 
@@ -234,6 +235,47 @@
       <button class="btn btn--primary" id="advisorAnalyze">Check my setup</button>
     </div>
     <div id="advisorBody"></div>
+  </section>
+
+  <!-- Statistics -->
+  <section id="view-stats" class="view" hidden>
+    <div class="page-head">
+      <div>
+        <h1 class="page-head__title">Statistics</h1>
+        <p class="page-head__sub">How your invitations, replies and attendance are going.</p>
+      </div>
+      <label class="field stats-range"><span class="field__label">Period</span>
+        <select id="statsRange">
+          <option value="7">Last 7 days</option>
+          <option value="30" selected>Last 30 days</option>
+          <option value="90">Last 90 days</option>
+        </select>
+      </label>
+    </div>
+
+    <div id="statsBanner"></div>
+    <div class="stats" id="statsKpis"></div>
+
+    <div class="cards-2col">
+      <div class="card">
+        <h3 class="card__title">Invitations per day</h3>
+        <div id="statsDaily"></div>
+      </div>
+      <div class="card">
+        <h3 class="card__title">Replies</h3>
+        <div id="statsRsvp"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3 class="card__title">By sending account</h3>
+      <div id="statsMailboxes"></div>
+    </div>
+
+    <div class="card">
+      <h3 class="card__title">Top campaigns</h3>
+      <div id="statsCampaigns"></div>
+    </div>
   </section>
 
   <!-- Campaigns -->

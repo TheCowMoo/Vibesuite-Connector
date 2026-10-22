@@ -225,6 +225,75 @@ input[type="datetime-local"], input[type="date"] { font-variant-numeric: tabular
 .stat__value { font-size: 1.7rem; font-weight: 700; color: var(--navy); line-height: 1.1; font-variant-numeric: tabular-nums; }
 .stat__label { color: var(--ink-muted); font-size: 0.85rem; }
 
+/* ---- Statistics dashboard ---- */
+.stats-range { min-width: 150px; margin: 0; }
+.sample-banner {
+  display: flex;
+  gap: 0.6rem;
+  align-items: flex-start;
+  background: var(--warning-tint);
+  border: 1px solid #EFD6AC;
+  color: var(--warning);
+  border-radius: var(--radius);
+  padding: 0.65rem 0.85rem;
+  margin-bottom: 1rem;
+  font-size: 0.86rem;
+}
+.sample-banner strong { color: var(--warning); }
+.chart {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 150px;
+  padding-top: 0.4rem;
+}
+.chart__col {
+  flex: 1;
+  height: 100%;
+  min-width: 3px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+}
+.chart__bar {
+  background: var(--navy);
+  border-radius: 3px 3px 0 0;
+  min-height: 2px;
+  transition: background 0.12s ease;
+}
+.chart__col:hover .chart__bar { background: var(--royal); }
+.chart__axis {
+  display: flex;
+  justify-content: space-between;
+  color: var(--ink-muted);
+  font-size: 0.72rem;
+  margin-top: 0.35rem;
+}
+.rsvp-bar {
+  display: flex;
+  height: 22px;
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--neutral-tint);
+}
+.rsvp-bar span { display: block; height: 100%; }
+.rsvp-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.9rem;
+  margin-top: 0.7rem;
+  font-size: 0.8rem;
+  color: var(--ink-muted);
+}
+.rsvp-dot {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  margin-right: 0.35rem;
+}
+.stats-note { margin: 0.75rem 0 0; font-size: 0.8rem; }
+
 /* ---- Connection cards ---- */
 .conn {
   background: #fff;
@@ -633,6 +702,8 @@ fieldset.field legend { margin-bottom: 0.4rem; }
   .conn__actions { justify-content: flex-start; }
   .page-head { align-items: flex-start; flex-direction: column; }
   .invite-row { grid-template-columns: 1fr; }
+  .stats-range { width: 100%; }
+  .chart { height: 110px; }
 }
 
 /* ---- Icons (monoline) ---- */
