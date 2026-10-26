@@ -1574,35 +1574,51 @@
           }).join(' ') + '</div>'
         : '';
 
-      // Per-endpoint verdicts: tells "add a scope" apart from "this call had no polls".
-      var caps = a.capabilities || null;
-      var capBlock = '';
-      if (caps) {
-        var CAP_LABELS = { participants: 'participants', absentees: 'absentees', polls: 'polls', qa: 'Q&A' };
-        capBlock = '<div style="font-size:0.8rem;margin:0.15rem 0 0.35rem">' +
-          Object.keys(CAP_LABELS).map(function (key) {
-            var c = caps[key];
-            if (!c) return '';
+      // Per-endpoint verdicts, as a matrix: tells "add a scope" apart from "this call had no polls".
+      // All four rows always render — an endpoint that was never checked has to be visible as
+      // "not checked", otherwise the table quietly implies Zoom has nothing to say about it.
+      var caps = a.capabilities || {};
+      var CAP_ROWS = [
+        { key: 'participants', label: 'Participants' },
+        { key: 'absentees', label: 'Absentees' },
+        { key: 'polls', label: 'Polls' },
+        { key: 'qa', label: 'Q&A' }
+      ];
+      var capChecked = 0;
+      var capRows = CAP_ROWS.map(function (row) {
+        var c = caps[row.key];
+        var text;
+        var cls = 'chip--neutral';
+        if (!c) {
+          text = 'not checked';
+        } else {
+          if (c.checkedAt && c.checkedAt > capChecked) capChecked = c.checkedAt;
+          if (c.status === 'available') { text = 'available'; cls = 'chip--success'; }
+          else if (c.status === 'empty') { text = 'nothing on that call'; }
+          else if (c.status === 'missing') { text = 'no such report for that call'; }
+          else if (c.status === 'denied') { text = 'refused'; cls = 'chip--warning'; }
+          else { text = 'could not check'; }
+        }
 
-            var text;
-            var cls;
-            if (c.status === 'available') { text = 'available'; cls = 'chip--success'; }
-            else if (c.status === 'empty') { text = 'nothing on that call'; cls = 'chip--neutral'; }
-            else if (c.status === 'missing') { text = 'no such report for that call'; cls = 'chip--neutral'; }
-            else if (c.status === 'denied') { text = 'refused'; cls = 'chip--warning'; }
-            else { text = 'could not check'; cls = 'chip--neutral'; }
+        var scopes = (c && c.missingScopes) || [];
+        var scopeCell = scopes.length
+          ? scopes.map(function (s) {
+            return '<code>' + esc(s) + '</code> ' +
+              '<button class="btn btn--ghost btn--sm" data-copy="' + esc(s) + '">Copy</button>';
+          }).join(' ')
+          : '<span class="muted">—</span>';
 
-            var scope = '';
-            if ((c.missingScopes || []).length) {
-              var joined = c.missingScopes.join(', ');
-              scope = ' <code>' + esc(joined) + '</code> ' +
-                '<button class="btn btn--ghost btn--sm" data-copy="' + esc(joined) + '">Copy</button>';
-            }
+        return '<tr><td>' + esc(row.label) + '</td>' +
+          '<td><span class="chip ' + cls + '">' + esc(text) + '</span></td>' +
+          '<td>' + scopeCell + '</td></tr>';
+      }).join('');
 
-            return '<div>' + esc(CAP_LABELS[key]) + ': <span class="chip ' + cls + '">' + esc(text) + '</span>' + scope + '</div>';
-          }).join('') +
-          '</div>';
-      }
+      var capBlock = '<div class="cap-block">' +
+        '<div class="table-scroll"><table class="map cap-table">' +
+        '<thead><tr><th>Report</th><th>Result</th><th>Scope to add</th></tr></thead>' +
+        '<tbody>' + capRows + '</tbody></table></div>' +
+        (capChecked ? '<p class="muted cap-table__note">Last checked ' + esc(prettyDate(capChecked)) + '.</p>' : '') +
+        '</div>';
 
       return '<div class="conn__meta"><span class="conn__cal">' + esc(a.email || a.userId) + '</span>' + chip +
         '<button class="btn btn--ghost btn--sm" data-zoom-probe="' + esc(a.userId) + '">Check access</button>' +
@@ -2053,12 +2069,16 @@
 
   /* ---- Modal helpers ---- */
   var openStack = [];
-  var lastFocus = null;
+  // One saved origin per open modal. A single variable was enough until a dialog could be opened from
+  // inside another one (confirm dialogs, campaign detail → automations): closing the inner dialog then
+  // overwrote the outer dialog's origin, so the page underneath got focus back instead of the dialog.
+  var focusStack = [];
 
   function openModal(id) {
     var el = $('#' + id);
     if (!el) return;
-    lastFocus = document.activeElement;
+    var origin = document.activeElement;
+    focusStack.push(origin && origin !== document.body ? origin : null);
     el.hidden = false;
     requestAnimationFrame(function () {
       el.classList.add('is-open');
@@ -2072,11 +2092,15 @@
   function closeModal(id) {
     var el = $('#' + id);
     if (!el) return;
+    var wasOpen = openStack.indexOf(id) !== -1;
     el.classList.remove('is-open');
     setTimeout(function () { el.hidden = true; }, 160);
     openStack = openStack.filter(function (x) { return x !== id; });
     if (!openStack.length) document.body.classList.remove('no-scroll');
-    if (lastFocus && typeof lastFocus.focus === 'function') lastFocus.focus();
+    // Only touch the stack for a modal that was actually open, so a stray close cannot swallow the
+    // next dialog's origin.
+    var back = wasOpen ? focusStack.pop() : null;
+    if (back && document.contains(back) && typeof back.focus === 'function') back.focus();
   }
 
   document.addEventListener('keydown', function (e) {

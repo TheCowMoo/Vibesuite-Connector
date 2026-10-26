@@ -235,8 +235,10 @@ and asking for it made the UI demand a scope the app might not even offer. Conne
 endpoint (`participants`, `absentees`, `polls`, `qa`) on the account. `classifyCapability()` labels each
 as **available**, **empty** (that call had none), **missing** (404 — no such report for that kind of call,
 e.g. Q&A on a plain meeting), **denied** (scope refused, with the scope Zoom names) or **unknown** (retry
-later). The UI shows that matrix under the host, so “add a scope”, “your plan has no Q&A” and “that meeting
-ran no polls” are visibly different answers. A cached denial still buys exactly one verification attempt
+later). The UI renders that matrix under the host as four fixed rows — Report, Result, Scope to add — so
+“add a scope”, “your plan has no Q&A” and “that meeting ran no polls” are visibly different answers.
+A row that was never probed says **not checked** rather than disappearing, and the newest `checkedAt`
+is printed underneath. A cached denial still buys exactly one verification attempt
 per host per process (`shouldAttemptReports()`), verdicts left by the retired probe (`isProbeEraDenial()`)
 are presented as unknown rather than contradicting reality, and `scopesFromDenial()` turns Zoom's refusal
 into a copyable scope.
