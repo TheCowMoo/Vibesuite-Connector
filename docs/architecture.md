@@ -1,7 +1,8 @@
 # Architecture Notes
 
 See the top-level README for an overview. This file records the design decisions and the
-spec-to-implementation mapping.
+spec-to-implementation mapping. For how to *use* the panel (setup, invitations, campaigns,
+reading the numbers), see [`USING.md`](USING.md).
 
 ## Multi-tenancy model
 

@@ -432,4 +432,5 @@ grep -c probeZoomCapabilities app/src/video/zoom.ts    # must not be 0
 
 - [`architecture.md`](architecture.md) — design decisions, data flow, Redis key map.
 - [`runbook.md`](runbook.md) — first-deploy checklist and operations/troubleshooting tables.
+- [`USING.md`](USING.md) — operator guide: setup, one-off invitations, campaigns, and reading the numbers.
 

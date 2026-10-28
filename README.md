@@ -126,6 +126,9 @@ every campaign and session into one view — invitations per day, reply mix, per
 top campaigns — and shows clearly-labelled sample data on a brand-new account instead of a wall of
 zeros (nothing is stored).
 
+For a task-by-task walkthrough — what a campaign is for, how to start one, what the statuses mean, and
+how to read the numbers — see [`docs/USING.md`](docs/USING.md).
+
 ## Docker (VPS deployment)
 
 ```bash
