@@ -100,6 +100,8 @@ export async function sessionRoutes(app: FastifyInstance): Promise<void> {
       sessionType?: SessionType;
       externalId?: string;
       zoomUserId?: string | null;
+      listId?: string | null;
+      connectionId?: string | null;
     };
 
     let changed = false;
@@ -158,6 +160,20 @@ export async function sessionRoutes(app: FastifyInstance): Promise<void> {
       syncRelevant = true;
     }
 
+    if (b.listId !== undefined) {
+      session.listId = b.listId ? String(b.listId) : undefined;
+      changed = true;
+      syncRelevant = true;
+    }
+
+    if (b.connectionId !== undefined) {
+      session.connectionId = b.connectionId ? String(b.connectionId) : undefined;
+      // Delivery now targets a different account; let the roster reach its new endpoint.
+      session.rosterRevision = undefined;
+      changed = true;
+      syncRelevant = true;
+    }
+
     if (syncRelevant) {
       session.status = 'pending';
       session.lastSyncedAt = undefined;
@@ -187,7 +203,8 @@ export async function sessionRoutes(app: FastifyInstance): Promise<void> {
   app.post('/api/sessions/:id/dispatch', async (req, reply) => {
     const id = (req.params as { id: string }).id;
     try {
-      const res = await dispatchSession(id);
+      const b = (req.body || {}) as { rosterOnly?: boolean; forceRoster?: boolean };
+      const res = await dispatchSession(id, { rosterOnly: !!b.rosterOnly, forceRoster: !!b.forceRoster });
       return { ok: true, ...res };
     } catch (err) {
       reply.code(500).send({ error: (err as Error).message });

@@ -2,6 +2,9 @@ import type { AttendeeRecord, PollResult, QaEntry } from '../video/types';
 
 export type AttendanceStatus = 'attended' | 'no_show' | 'partial';
 
+/** Where the invited set for a call came from. */
+export type InvitedSource = 'campaign' | 'invitation' | 'list' | 'none';
+
 export interface AttendancePerson {
   email?: string;
   name?: string;
@@ -23,6 +26,8 @@ export interface AttendanceReport {
   provider: string;
   sessionTitle?: string;
   sessionType?: string;
+  /** Where the invited set came from — carried into payloads so a no-show is explainable. */
+  invitedSource?: InvitedSource;
   invitedCount: number;
   attendedCount: number;
   noShowCount: number;
@@ -47,6 +52,7 @@ export interface BuildReportParams {
   provider: string;
   sessionTitle?: string;
   sessionType?: string;
+  invitedSource?: InvitedSource;
   invitedEmails: string[];
   attendees: AttendeeRecord[];
   absentees?: string[];
@@ -120,6 +126,7 @@ export function buildReport(params: BuildReportParams): AttendanceReport {
     provider,
     sessionTitle: params.sessionTitle,
     sessionType: params.sessionType,
+    invitedSource: params.invitedSource,
     invitedCount,
     attendedCount,
     noShowCount: noShow.length,

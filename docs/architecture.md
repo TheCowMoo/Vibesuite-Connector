@@ -299,6 +299,43 @@ session as `syncDiagnostics` and shown under **"What the last sync tried"** when
 `sessionType`, `externalId` and `zoomUserId` are editable through `PATCH /api/sessions/:id`; changing one of
 them resets the sync state so the scheduler retries with the new values (renaming a call does not).
 
+### Attendance delivery: four segments, two channels
+
+`buildAttendanceSegments()` (`domain/attendanceSegments.ts`) is pure: it splits the stored report into
+`attended` (met `ATTENDANCE_MIN_SECONDS`), `partial`, `no_show` (invited, absent) and `not_invited` (joined,
+not on the list), with counts and an attendance percentage. Every list is sorted by email/name so a roster
+revision is stable.
+
+The invited list is resolved by `resolveInvitedEmails()` in this order:
+
+1. campaigns that link the session — their `status: 'sent'` recipient rows (exact);
+2. the linked invitation — the **calendar attendees of the events it created** (`InviteRecord.batches` →
+   `stateStore.getStates()` for each sender account), ignoring resource/group calendars, falling back to
+   the selected list groups when the event has not synced;
+3. a list attached to the session (`session.listId`, set through `PATCH /api/sessions/:id`);
+4. none — then every joiner is `not_invited`, and no no-shows are invented.
+
+`dispatchSession()` delivers two ways:
+
+- **Per person** — a GHL tag from the per-connection `attendanceTags` (a blank partial falls back to the
+  attended tag, so existing workflows do not change; env `GHL_TAG_ATTENDED` / `GHL_TAG_NO_SHOW` /
+  `GHL_TAG_NOT_INVITED` are the defaults), an optional `attendanceCustomFieldId`, and `attendanceRules`
+  webhooks whose context now exposes `segment`, `invited`, `invitedSource`, `attendedFullCount`,
+  `partialCount` and `notInvitedCount`. The payload gains `event`, `segment`, `invited`, `invitedSource`,
+  `minutes` and `segmentCounts`.
+- **Roster** — `buildRosterPayloads()` (`domain/attendanceRoster.ts`) emits one POST per non-empty segment
+  (`attendance.segment`) or one snapshot (`attendance.session`), with `counts`, `generatedAt` and a
+  `revision` that hashes the content without the timestamp. `deliverRoster()` skips an unchanged revision,
+  retries transient failures, stores `rosterRevision` / `rosterSentAt` / `rosterError` on the session, and
+  supports a bearer token plus `X-Vibesuite-Event` / `X-Vibesuite-Revision` headers. The token is stored with
+  the encrypted connection secrets and never returned by the API; `attendanceRosterTokenSet` tells the UI
+  whether one exists.
+- **Dedupe** — matched outcomes keep the pre-segment dispatch key, so deploying this does not replay every
+  past attendee; walk-ins get their own key. Per-person failures release their claim and are counted, not
+  fatal.
+- **API** — `POST /api/sessions/:id/dispatch` accepts `{ rosterOnly, forceRoster }`; the response reports
+  `dispatched`, `failed`, the segment counts and a `roster` block (`sent`, `skipped`, `reason`, `error`).
+
 The link a calendar invite carries comes from `sessionJoinUrl()` (`domain/joinLink.ts`), in priority
 order:
 

@@ -95,7 +95,7 @@ if you leave it blank), start/end, the Google account it belongs to, an optional
 link back to an invitation.
 
 Attendance syncs on its own after the call, and **Sync now** forces a refresh. **Details** shows who
-attended and who did not, and **Send results to GHL** pushes those results to your CRM.
+attended and who did not, and **Send to GHL** pushes those results to your CRM.
 
 A call linked to a campaign inherits that campaign's **frozen recipients** as its invited list, so
 attendance matches the people who were actually emailed. A standalone call has no invited list: the people
@@ -110,6 +110,39 @@ Zoom host that asked, the HTTP status of the report and of the past-call fallbac
 **Edit call** corrects the type, ID or host without deleting the call, and saving re-syncs immediately. The
 panel also retries the other call type and the other connected hosts on its own when the first answer is a
 404.
+
+### Sending attendance to GHL and your own endpoint
+
+**Google accounts → ⋯ → Attendance automations** controls delivery for that account:
+
+- **Contact tags** — one per segment: attended, partial, no-show, not invited. A blank partial tag falls
+  back to the attended tag, so existing workflows do not change.
+- **Segment custom field** — optional GHL field ID that receives `attended` / `partial` / `no_show` /
+  `not_invited`.
+- **Rules** — per-person webhook rules. Conditions can now target `segment`, `invited` and
+  `invitedSource`, alongside minutes watched and session fields.
+- **Roster webhook** — optional URL that receives each whole segment, or one snapshot containing all
+  segments. Every request carries a `revision`; an unchanged result is not resent. Add an optional bearer
+  token if your endpoint expects one — it is stored encrypted, and leaving the field blank keeps the
+  current token.
+
+The four segments are:
+
+| Segment | Meaning |
+|---|---|
+| attended | Invited and watched at least the minimum minutes |
+| partial | Invited and watched less than the minimum |
+| no_show | Invited but never joined |
+| not_invited | Joined but not on the invited list (walk-ins) |
+
+The invited list is cross-referenced automatically: a campaign-linked call uses the campaign's sent
+recipients, a one-off invitation uses the attendee list of the calendar event it created, and a standalone
+call can name a list with **Edit call**. If none is linked, everyone who joined is `not_invited` and no
+no-shows are invented.
+
+**Send to GHL** delivers per contact. **Send roster** forces the roster even when it is unchanged. The same
+delivery runs automatically after a successful sync; the roster is skipped when its content has not
+changed.
 
 ### Replies in GoHighLevel
 
@@ -359,6 +392,7 @@ Server-side failures (deploy, Redis, worker restarts) are covered in [`DEPLOYMEN
 |---|---|
 | Campaign schema, allocation, pace planner | `app/src/domain/campaign.ts` |
 | Zoom ID normalisation and call recovery | `app/src/video/zoomId.ts`, `app/src/video/zoom.ts` |
+| Attendance segments and roster payloads | `app/src/domain/attendanceSegments.ts`, `attendanceRoster.ts` |
 | Status machine, start/stop validation | `app/src/domain/campaignLifecycle.ts` |
 | Freeze, send, redistribution, end | `app/src/domain/campaignDispatch.ts` |
 | Who gets invited (dedupe) | `app/src/domain/audience.ts` |

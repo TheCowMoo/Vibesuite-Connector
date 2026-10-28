@@ -21,6 +21,10 @@ function toMeta(conn: StoredConnection): Connection {
     rules: conn.rules,
     attendanceDeliveryMode: conn.attendanceDeliveryMode,
     attendanceRules: conn.attendanceRules,
+    attendanceTags: conn.attendanceTags,
+    attendanceCustomFieldId: conn.attendanceCustomFieldId,
+    attendanceRoster: conn.attendanceRoster,
+    attendanceRosterTokenSet: !!conn.attendanceRosterToken,
     watchChannelId: conn.watchChannelId,
     watchExpiresAt: conn.watchExpiresAt,
     createdAt: conn.createdAt,
@@ -35,6 +39,7 @@ function toSecrets(conn: StoredConnection): ConnectionSecrets {
     ghlAccessToken: conn.ghlAccessToken,
     ghlRefreshToken: conn.ghlRefreshToken,
     ghlApiToken: conn.ghlApiToken,
+    attendanceRosterToken: conn.attendanceRosterToken,
   };
 }
 

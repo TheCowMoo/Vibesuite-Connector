@@ -58,6 +58,14 @@ function uniqueEmails(values: string[]): string[] {
 }
 
 /**
+ * Calendar rooms and groups are attendees on the event, but nobody "attends" a webinar as a room.
+ * Counting them would invent a no-show for every meeting booked in a resource calendar.
+ */
+export function isCalendarResource(email: string): boolean {
+  return /@(resource|group)\.calendar\.google\.com$/i.test(email.trim());
+}
+
+/**
  * Why a call has people on it but no invited list, in words an operator can act on.
  *
  * Returns `undefined` when there is nothing to explain: someone was invited, or nobody joined.

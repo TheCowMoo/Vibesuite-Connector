@@ -66,6 +66,7 @@ const EnvSchema = z.object({
   ATTENDANCE_MATCH_MODE: z.enum(['email', 'email_or_name']).default('email'),
   GHL_TAG_ATTENDED: z.string().default('attended'),
   GHL_TAG_NO_SHOW: z.string().default('no-show'),
+  GHL_TAG_NOT_INVITED: z.string().default('not-invited'),
   AUTH_ENABLED: z.enum(['true', 'false']).default('false').transform((v) => v === 'true'),
   AUTH_COOKIE_NAME: z.string().default('vibesuite_session'),
   SESSION_TTL_DAYS: z.coerce.number().int().positive().default(30),

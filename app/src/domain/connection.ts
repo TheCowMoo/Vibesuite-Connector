@@ -10,6 +10,21 @@ export interface WebhookUrls {
 
 export type DeliveryMode = 'api' | 'webhook' | 'both';
 
+/** Which GHL tag each attendance segment gets. Blank falls back to the env defaults. */
+export interface AttendanceTags {
+  attended?: string;
+  partial?: string;
+  noShow?: string;
+  notInvited?: string;
+}
+
+export interface AttendanceRosterSettings {
+  /** Where the segmented roster is POSTed. Empty disables roster delivery. */
+  url?: string;
+  /** One request per segment, or one request containing every segment. */
+  shape?: 'segments' | 'session';
+}
+
 export type ConditionField =
   | 'responseStatus'
   | 'email'
@@ -68,6 +83,14 @@ export interface Connection {
   rules?: AutomationRule[];
   attendanceDeliveryMode?: DeliveryMode;
   attendanceRules?: AutomationRule[];
+  /** Per-segment GHL tags; env defaults fill the blanks. */
+  attendanceTags?: AttendanceTags;
+  /** Optional GHL custom field that receives the segment name. */
+  attendanceCustomFieldId?: string;
+  /** External roster webhook for the full segmented result. */
+  attendanceRoster?: AttendanceRosterSettings;
+  /** True when a roster bearer token is stored (the token itself is encrypted, never returned). */
+  attendanceRosterTokenSet?: boolean;
   watchChannelId?: string;
   watchExpiresAt?: number;
   createdAt: number;
@@ -80,6 +103,8 @@ export interface ConnectionSecrets {
   ghlAccessToken?: string;
   ghlRefreshToken?: string;
   ghlApiToken?: string;
+  /** Never leaves the server; `publicConnection` only exposes whether it is set. */
+  attendanceRosterToken?: string;
 }
 
 export type StoredConnection = Connection & ConnectionSecrets;

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { missingAudienceNote, pickInvitedEmails } from '../../src/domain/sessionAudience';
+import { isCalendarResource, missingAudienceNote, pickInvitedEmails } from '../../src/domain/sessionAudience';
 
 describe('pickInvitedEmails', () => {
   it('prefers the campaign recipients over every fallback', () => {
@@ -33,6 +33,14 @@ describe('pickInvitedEmails', () => {
   it('reports no audience when every source is empty', () => {
     expect(pickInvitedEmails({ campaignEmails: [], inviteEmails: [], listEmails: [] }))
       .toEqual({ emails: [], source: 'none' });
+  });
+});
+
+describe('isCalendarResource', () => {
+  it('recognises Google resource and group calendars, case-insensitively', () => {
+    expect(isCalendarResource('Room 4@resource.calendar.google.com')).toBe(true);
+    expect(isCalendarResource('team@group.calendar.google.com')).toBe(true);
+    expect(isCalendarResource('ada@example.com')).toBe(false);
   });
 });
 

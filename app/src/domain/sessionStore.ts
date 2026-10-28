@@ -26,6 +26,11 @@ export interface SessionRecord {
   warnings?: string[];
   /** What the last sync tried, so a session that will not sync can explain itself in the panel. */
   syncDiagnostics?: SyncDiagnostics;
+  /** Last roster revision delivered successfully; an unchanged result is not resent. */
+  rosterRevision?: string;
+  rosterSentAt?: number;
+  /** Why the last roster delivery failed — surfaced so it is not a silent loss. */
+  rosterError?: string;
   samplePayload?: unknown;
   createdAt: number;
 }

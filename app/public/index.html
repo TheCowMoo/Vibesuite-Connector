@@ -564,7 +564,8 @@
     <div id="sessionDetailBody"></div>
     <div class="modal__foot">
       <button class="btn btn--outline" id="sessionEdit">Edit call</button>
-      <button class="btn btn--outline" id="sessionDispatch">Send results to GHL</button>
+      <button class="btn btn--outline" id="sessionDispatch">Send to GHL</button>
+      <button class="btn btn--outline" id="sessionRoster">Send roster</button>
       <span class="spacer"></span>
       <button class="btn btn--ghost" data-close="sessionDetail">Close</button>
     </div>
@@ -587,6 +588,14 @@
     <label class="field"><span class="field__label">Meeting or webinar ID</span>
       <input id="editSessionId" placeholder="ID or Zoom join link" />
       <span class="field__hint">Paste the numeric ID or the join link. A /w/ link automatically means webinar.</span>
+    </label>
+    <label class="field"><span class="field__label">Which list was invited? (optional)</span>
+      <select id="editSessionList"><option value="">None</option></select>
+      <span class="field__hint">Lets the panel cross-reference a standalone call against the people you invited.</span>
+    </label>
+    <label class="field"><span class="field__label">Google account</span>
+      <select id="editSessionConnection"><option value="">None</option></select>
+      <span class="field__hint">Attendance delivery uses this account's GHL connection and webhook settings.</span>
     </label>
     <label class="field" id="editSessionHostWrap" hidden><span class="field__label">Zoom host</span>
       <select id="editSessionHost"><option value="">Automatic</option></select>
@@ -655,6 +664,26 @@
         <label class="radio"><input type="radio" name="attendanceDeliveryMode" value="webhook" /> Webhooks only</label>
       </fieldset>
 
+      <h3 class="detail__sub">Contact tags</h3>
+      <p class="hint">One tag per outcome. Blank uses the server defaults; a blank partial tag falls back to the attended tag, so existing workflows keep working.</p>
+      <div class="sender__grid">
+        <label class="field"><span class="field__label">Attended</span><input id="attTagAttended" placeholder="attended" /></label>
+        <label class="field"><span class="field__label">Partial</span><input id="attTagPartial" placeholder="attended" /></label>
+        <label class="field"><span class="field__label">No-show</span><input id="attTagNoShow" placeholder="no-show" /></label>
+        <label class="field"><span class="field__label">Not invited</span><input id="attTagNotInvited" placeholder="not-invited" /></label>
+      </div>
+      <label class="field"><span class="field__label">Segment custom field ID (optional)</span><input id="attCustomField" placeholder="GHL custom field id" /></label>
+
+      <h3 class="detail__sub">Roster webhook</h3>
+      <p class="hint">Optional. Sends each segment (or one snapshot) to your own endpoint, with a revision so an unchanged result is not resent.</p>
+      <label class="field"><span class="field__label">Roster URL (optional)</span><input id="attRosterUrl" placeholder="https://hooks.example.com/attendance" /></label>
+      <div class="sender__grid">
+        <label class="field"><span class="field__label">Shape</span><select id="attRosterShape"><option value="segments">One request per segment</option><option value="session">One request per session</option></select></label>
+        <label class="field"><span class="field__label">Bearer token (optional)</span><input id="attRosterToken" placeholder="Leave blank to keep the current token" /></label>
+      </div>
+      <p class="muted" id="attRosterTokenState"></p>
+      <label class="daychk"><input type="checkbox" id="attRosterClearToken" /><span>Remove the stored token</span></label>
+
       <h3 class="detail__sub">Rules</h3>
       <p class="hint">Each rule fires its webhook when ALL of its conditions match an attendee outcome. Fields and values come from the video-attendance catalog.</p>
       <div id="attendanceRulesList"></div>
@@ -662,6 +691,8 @@
 
       <h3 class="detail__sub">Example of what gets sent</h3>
       <pre class="snapshot" id="attendanceSnapshot">…</pre>
+      <h3 class="detail__sub">Example roster payload</h3>
+      <pre class="snapshot" id="attendanceRosterSnapshot">…</pre>
     </div>
     <div class="modal__foot">
       <span class="spacer"></span>

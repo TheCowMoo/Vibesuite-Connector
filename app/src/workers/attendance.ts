@@ -3,27 +3,52 @@ import { logger } from '../lib/logger';
 import { inc } from '../lib/metrics';
 import { getSession, saveSession, type SessionRecord } from '../domain/sessionStore';
 import { saveAttendance, getAttendance } from '../domain/attendanceStore';
-import { buildReport, normalizeEmail, type AttendanceReport, type AttendancePerson } from '../domain/attendance';
+import { buildReport, normalizeEmail, type AttendanceReport, type InvitedSource } from '../domain/attendance';
 import { getProvider } from '../video';
 import { getList } from '../domain/listStore';
 import { getInvite } from '../domain/inviteStore';
 import { extractRecipients } from '../domain/invite';
 import { getConnection } from '../domain/connectionStore';
 import { getRecipients, listCampaigns } from '../domain/campaignStore';
-import { missingAudienceNote, pickInvitedEmails } from '../domain/sessionAudience';
+import { isCalendarResource, missingAudienceNote, pickInvitedEmails } from '../domain/sessionAudience';
+import { stateStore } from '../domain/stateStore';
 import { REPORT_RETRY_WINDOW_MS, syncOutcome } from '../domain/sessionSync';
-import { lookupContactByEmail, addTags } from '../ghl/contacts';
+import { lookupContactByEmail, addTags, updateCustomField } from '../ghl/contacts';
 import { postWebhook } from '../ghl/webhooks';
 import { matchingRules, type ConditionContext } from '../domain/condition';
 import { tryClaimAttendanceDispatch, releaseAttendanceDispatch } from '../domain/attendanceDispatch';
+import {
+  buildAttendanceSegments,
+  segmentEntries,
+  segmentTag,
+  type AttendanceSegment,
+  type AttendanceSegments,
+  type SegmentPerson,
+} from '../domain/attendanceSegments';
+import {
+  buildRosterPayloads,
+  stableRevision,
+  type RosterDeliveryResult,
+  type RosterPayload,
+} from '../domain/attendanceRoster';
+import type { AttendanceRosterSettings, StoredConnection } from '../domain/connection';
+import axios from 'axios';
 
-function buildContext(session: SessionRecord, p: AttendancePerson, report: AttendanceReport): ConditionContext {
+function buildContext(
+  session: SessionRecord,
+  p: SegmentPerson,
+  report: AttendanceReport,
+  segment: AttendanceSegment,
+  segments: AttendanceSegments,
+): ConditionContext {
   const ctx: ConditionContext = {};
 
   // Per attendee
   ctx.email = p.email ?? '';
   ctx.name = p.name ?? '';
   ctx.attendanceStatus = p.status;
+  ctx.segment = segment;
+  ctx.invited = segment === 'not_invited' ? 'false' : 'true';
   ctx.attendanceMinutes = p.durationSec !== undefined ? String(Math.round(p.durationSec / 60)) : '';
   ctx.durationSec = p.durationSec !== undefined ? String(p.durationSec) : '';
   ctx.joinedAt = p.joinedAt ?? '';
@@ -50,7 +75,7 @@ function buildContext(session: SessionRecord, p: AttendancePerson, report: Atten
   ctx.sessionHostEmail = stats.host_email ?? '';
   ctx.sessionDept = stats.dept ?? '';
 
-  // Report rollups
+  // Report rollups — the original names keep their meaning, the segment counts are additive.
   ctx.invitedCount = String(report.invitedCount);
   ctx.attendedCount = String(report.attendedCount);
   ctx.noShowCount = String(report.noShowCount);
@@ -59,6 +84,10 @@ function buildContext(session: SessionRecord, p: AttendancePerson, report: Atten
   ctx.attendanceRate = String(Math.round((report.attendanceRate ?? 0) * 100));
   ctx.pollCount = String((report.polls || []).length);
   ctx.qaCount = String((report.qa || []).length);
+  ctx.attendedFullCount = String(segments.counts.attended);
+  ctx.partialCount = String(segments.counts.partial);
+  ctx.notInvitedCount = String(segments.counts.notInvited);
+  ctx.invitedSource = report.invitedSource ?? 'none';
 
   // Passthrough for anything else the provider reported.
   for (const k of Object.keys(stats)) {
@@ -68,15 +97,26 @@ function buildContext(session: SessionRecord, p: AttendancePerson, report: Atten
   return ctx;
 }
 
-function buildPayload(session: SessionRecord, p: AttendancePerson, report: AttendanceReport): Record<string, unknown> {
+function buildPayload(
+  session: SessionRecord,
+  p: SegmentPerson,
+  report: AttendanceReport,
+  segment: AttendanceSegment,
+  segments: AttendanceSegments,
+): Record<string, unknown> {
   return {
+    event: 'attendance.result',
     sessionId: session.id,
     provider: session.provider,
     sessionType: session.sessionType ?? 'meeting',
     title: session.title,
+    segment,
+    invited: segment !== 'not_invited',
+    invitedSource: report.invitedSource ?? 'none',
     email: p.email ?? null,
     name: p.name ?? null,
     status: p.status,
+    minutes: p.minutes ?? null,
     joinedAt: p.joinedAt ?? null,
     leftAt: p.leftAt ?? null,
     durationSec: p.durationSec ?? null,
@@ -85,10 +125,14 @@ function buildPayload(session: SessionRecord, p: AttendancePerson, report: Atten
     registrantId: p.registrantId ?? null,
     invitedCount: report.invitedCount,
     attendedCount: report.attendedCount,
+    attendedFullCount: segments.counts.attended,
+    partialCount: segments.counts.partial,
     noShowCount: report.noShowCount,
+    notInvitedCount: segments.counts.notInvited,
     registrantCount: report.registrantCount ?? 0,
     absenteeCount: (report.absentees || []).length,
     attendanceRate: Math.round((report.attendanceRate ?? 0) * 100),
+    segmentCounts: segments.counts,
     pollCount: (report.polls || []).length,
     qaCount: (report.qa || []).length,
     sessionStats: report.sessionStats ?? {},
@@ -114,7 +158,37 @@ async function campaignInvitedEmails(session: SessionRecord): Promise<{ emails: 
 async function inviteInvitedEmails(session: SessionRecord): Promise<string[]> {
   if (!session.inviteId) return [];
   const invite = await getInvite(session.inviteId);
-  if (!invite || !invite.listId) return [];
+  if (!invite) return [];
+
+  // Exact audience: the calendar events this invitation created. Their attendee lists are already
+  // stored by the calendar sync, so no Google call is needed — and people whose email never went
+  // out are excluded, instead of being counted as no-shows.
+  const eventIds = (invite.batches ?? []).map((b) => b.eventId).filter((id): id is string => !!id);
+  const connectionIds = Array.from(
+    new Set(
+      [invite.connectionId, ...(invite.senders ?? []).map((s) => s.connectionId)].filter(
+        (id): id is string => !!id,
+      ),
+    ),
+  );
+
+  if (eventIds.length && connectionIds.length) {
+    const emails: string[] = [];
+    for (const connectionId of connectionIds) {
+      const states = await stateStore.getStates(connectionId);
+      for (const eventId of eventIds) {
+        const attendees = states.get(eventId);
+        if (!attendees) continue;
+        for (const email of Object.keys(attendees)) {
+          if (!isCalendarResource(email)) emails.push(email);
+        }
+      }
+    }
+    if (emails.length) return emails;
+  }
+
+  // The invite event has not synced yet (or predates event batches): fall back to the list groups.
+  if (!invite.listId) return [];
   const list = await getList(invite.listId);
   return list && list.result ? extractRecipients(list.result, invite.segments).emails : [];
 }
@@ -134,20 +208,33 @@ async function listInvitedEmails(session: SessionRecord): Promise<string[]> {
  * campaign-linked call with an empty invited set — Zoom's participants then all landed in
  * `attendedNotInvited` and the panel showed a flat zero.
  */
-async function resolveInvitedEmails(session: SessionRecord): Promise<{ emails: string[]; linkedCampaigns: number }> {
+async function resolveInvitedEmails(
+  session: SessionRecord,
+): Promise<{ emails: string[]; linkedCampaigns: number; source: InvitedSource }> {
   const campaigns = await campaignInvitedEmails(session);
   if (campaigns.emails.length) {
     return {
       emails: pickInvitedEmails({ campaignEmails: campaigns.emails, inviteEmails: [], listEmails: [] }).emails,
       linkedCampaigns: campaigns.campaigns,
+      source: 'campaign',
     };
   }
 
   const inviteEmails = await inviteInvitedEmails(session);
-  const listEmails = inviteEmails.length ? [] : await listInvitedEmails(session);
+  if (inviteEmails.length) {
+    return {
+      emails: pickInvitedEmails({ campaignEmails: [], inviteEmails, listEmails: [] }).emails,
+      linkedCampaigns: campaigns.campaigns,
+      source: 'invitation',
+    };
+  }
+
+  const listEmails = await listInvitedEmails(session);
+  const picked = pickInvitedEmails({ campaignEmails: [], inviteEmails: [], listEmails });
   return {
-    emails: pickInvitedEmails({ campaignEmails: [], inviteEmails, listEmails }).emails,
+    emails: picked.emails,
     linkedCampaigns: campaigns.campaigns,
+    source: picked.emails.length ? 'list' : 'none',
   };
 }
 
@@ -191,6 +278,7 @@ export async function syncSession(sessionId: string): Promise<AttendanceReport> 
       provider: session.provider,
       sessionTitle: session.title,
       sessionType: session.sessionType ?? 'meeting',
+      invitedSource: invited.source,
       invitedEmails: invited.emails,
       attendees: fetched.attendees,
       absentees: fetched.absentees,
@@ -221,9 +309,9 @@ export async function syncSession(sessionId: string): Promise<AttendanceReport> 
     // said yes was a no-show while Zoom is still preparing the data.
     if (outcome === 'synced') {
       await saveAttendance(report);
-      const samplePerson: AttendancePerson =
-        report.attended[0] ?? report.attendedNotInvited[0] ?? { email: 'person@example.com', name: 'Example', status: 'attended' };
-      session.samplePayload = buildPayload(session, samplePerson, report);
+      const sampleSegments = buildAttendanceSegments(report);
+      const sample = pickSampleSegment(sampleSegments);
+      session.samplePayload = buildPayload(session, sample.person, report, sample.segment, sampleSegments);
     }
 
     session.status = outcome;
@@ -244,64 +332,208 @@ export async function syncSession(sessionId: string): Promise<AttendanceReport> 
   }
 }
 
-export async function dispatchSession(sessionId: string): Promise<{ dispatched: number }> {
+export interface DispatchOptions {
+  /** Skip the per-person pass and only deliver the roster. */
+  rosterOnly?: boolean;
+  /** Resend the roster even when its revision has not changed. */
+  forceRoster?: boolean;
+}
+
+export interface DispatchResult {
+  dispatched: number;
+  failed: number;
+  segments: AttendanceSegments['counts'];
+  roster: RosterDeliveryResult;
+}
+
+/**
+ * Deliver a session's attendance.
+ *
+ * Two channels: per-person (GHL tag/custom field + condition webhooks) and an optional roster
+ * webhook carrying a whole segment. Walk-ins are dispatched too, and never counted as no-shows.
+ */
+export async function dispatchSession(
+  sessionId: string,
+  opts: DispatchOptions = {},
+): Promise<DispatchResult> {
   const session = await getSession(sessionId);
   if (!session) throw new Error('session not found');
   const report = await getAttendance(sessionId);
   if (!report) throw new Error('no attendance report yet — run sync first');
 
+  const segments = buildAttendanceSegments(report);
   const conn = session.connectionId ? await getConnection(session.connectionId) : null;
-  if (!conn) {
-    logger.info({ sessionId }, 'no connection linked; skipping GHL dispatch');
-    return { dispatched: 0 };
+  let dispatched = 0;
+  let failed = 0;
+
+  if (opts.rosterOnly) {
+    const roster = await deliverRoster(session, report, segments, conn, opts.forceRoster === true);
+    return { dispatched: 0, failed: 0, segments: segments.counts, roster };
   }
 
-  const mode = conn.attendanceDeliveryMode ?? 'both';
-  let dispatched = 0;
+  if (conn) {
+    const mode = conn.attendanceDeliveryMode ?? 'both';
 
-  const entries: Array<{ person: AttendancePerson; status: string }> = [];
-  report.attended.forEach((p) => entries.push({ person: p, status: p.status }));
-  report.noShow.forEach((email) => entries.push({ person: { email, status: 'no_show' }, status: 'no_show' }));
+    for (const { segment, person } of segmentEntries(segments)) {
+      const email = person.email ? normalizeEmail(person.email) : '';
+      // Walk-ins are new, so they get their own key. Matched outcomes keep the pre-segment key:
+      // deploying this must not replay every past attendee into GHL a second time.
+      const identity = email || person.name || person.participantId || person.registrantId || 'anon';
+      const fingerprint =
+        segment === 'not_invited' ? `${identity}:${segment}:${person.status}` : `${identity}:${person.status}`;
+      const claimed = await tryClaimAttendanceDispatch(sessionId, fingerprint);
+      if (!claimed) continue;
 
-  for (const { person, status } of entries) {
-    const email = person.email ? normalizeEmail(person.email) : '';
-    const fingerprint = `${email || person.name || 'anon'}:${status}`;
-    const claimed = await tryClaimAttendanceDispatch(sessionId, fingerprint);
-    if (!claimed) continue;
+      try {
+        const ctx = buildContext(session, person, report, segment, segments);
 
+        if (mode === 'api' || mode === 'both') {
+          if (email) {
+            const contact = await lookupContactByEmail(conn, email);
+            if (contact?.id) {
+              const tag = segmentTag(segment, conn.attendanceTags, {
+                attended: env.GHL_TAG_ATTENDED,
+                noShow: env.GHL_TAG_NO_SHOW,
+                notInvited: env.GHL_TAG_NOT_INVITED,
+              });
+              await addTags(conn, contact.id, [tag], `${sessionId}:${fingerprint}:tag`);
+              if (conn.attendanceCustomFieldId) {
+                await updateCustomField(
+                  conn,
+                  contact.id,
+                  conn.attendanceCustomFieldId,
+                  segment,
+                  `${sessionId}:${fingerprint}:segment`,
+                );
+              }
+            }
+          }
+        }
+
+        if (mode === 'webhook' || mode === 'both') {
+          const rules = matchingRules(conn.attendanceRules, ctx);
+          for (const rule of rules) {
+            try {
+              await postWebhook(rule.webhookUrl, buildPayload(session, person, report, segment, segments));
+              logger.info({ sessionId, ruleId: rule.id, email, segment }, 'attendance rule webhook fired');
+            } catch (err) {
+              logger.error({ sessionId, ruleId: rule.id, err: (err as Error).message }, 'attendance rule webhook failed');
+            }
+          }
+        }
+
+        dispatched += 1;
+        inc('attendance_dispatched_total', { status: person.status, segment });
+      } catch (err) {
+        failed += 1;
+        await releaseAttendanceDispatch(sessionId, fingerprint);
+        logger.error({ sessionId, email, segment, err: (err as Error).message }, 'attendance dispatch failed');
+      }
+    }
+  } else {
+    logger.info({ sessionId }, 'no connection linked; skipping GHL contact actions');
+  }
+
+  const roster = await deliverRoster(session, report, segments, conn, opts.forceRoster === true);
+  return { dispatched, failed, segments: segments.counts, roster };
+}
+
+/** Pick a representative person for the sample payload, preferring a matched attendee. */
+function pickSampleSegment(segments: AttendanceSegments): { person: SegmentPerson; segment: AttendanceSegment } {
+  if (segments.attended.length) return { person: segments.attended[0], segment: 'attended' };
+  if (segments.partial.length) return { person: segments.partial[0], segment: 'partial' };
+  if (segments.not_invited.length) return { person: segments.not_invited[0], segment: 'not_invited' };
+  return {
+    person: { email: 'person@example.com', name: 'Example', status: 'attended' },
+    segment: 'attended',
+  };
+}
+
+/** POST one roster payload, with a short retry for transient failures. */
+async function postRosterPayload(
+  settings: AttendanceRosterSettings,
+  token: string | undefined,
+  payload: RosterPayload,
+): Promise<void> {
+  if (!settings.url) throw new Error('roster webhook URL missing');
+
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    'X-Vibesuite-Event': payload.event,
+    'X-Vibesuite-Revision': payload.revision,
+  };
+  if (token) headers.Authorization = `Bearer ${token}`;
+
+  let lastError: { response?: { status?: number }; message?: string } | undefined;
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
     try {
-      const ctx = buildContext(session, person, report);
-
-      if (mode === 'api' || mode === 'both') {
-        if (email) {
-          const contact = await lookupContactByEmail(conn, email);
-          if (contact?.id) {
-            const tag = status === 'no_show' ? env.GHL_TAG_NO_SHOW : env.GHL_TAG_ATTENDED;
-            await addTags(conn, contact.id, [tag], `${sessionId}:${fingerprint}:tag`);
-          }
-        }
-      }
-
-      if (mode === 'webhook' || mode === 'both') {
-        const rules = matchingRules(conn.attendanceRules, ctx);
-        for (const rule of rules) {
-          try {
-            await postWebhook(rule.webhookUrl, buildPayload(session, person, report));
-            logger.info({ sessionId, ruleId: rule.id, email }, 'attendance rule webhook fired');
-          } catch (err) {
-            logger.error({ sessionId, ruleId: rule.id, err: (err as Error).message }, 'attendance rule webhook failed');
-          }
-        }
-      }
-
-      dispatched += 1;
-      inc('attendance_dispatched_total', { status });
+      await axios.post(settings.url, payload, { headers, timeout: 20000 });
+      return;
     } catch (err) {
-      await releaseAttendanceDispatch(sessionId, fingerprint);
-      logger.error({ sessionId, email, err: (err as Error).message }, 'attendance dispatch failed');
+      lastError = err as { response?: { status?: number }; message?: string };
+      if (attempt < 3) await new Promise((resolve) => setTimeout(resolve, attempt * 1000));
     }
   }
 
-  return { dispatched };
+  const status = lastError?.response?.status;
+  throw new Error(status ? `roster webhook returned ${status}` : lastError?.message || 'roster webhook failed');
+}
+
+/**
+ * Send the segmented roster to the configured URL, unless the same content was already delivered.
+ *
+ * The revision covers the people and counts but not the generation time, so a re-sync with no new
+ * data is a no-op; a corrected report produces a new revision the consumer can upsert.
+ */
+async function deliverRoster(
+  session: SessionRecord,
+  report: AttendanceReport,
+  segments: AttendanceSegments,
+  conn: StoredConnection | null,
+  force: boolean,
+): Promise<RosterDeliveryResult> {
+  const settings = conn?.attendanceRoster;
+  if (!conn) return { sent: 0, skipped: true, reason: 'no_connection' };
+  if (!settings?.url) return { sent: 0, skipped: true, reason: 'not_configured' };
+
+  const payloads = buildRosterPayloads(
+    segments,
+    {
+      sessionId: session.id,
+      sessionTitle: session.title,
+      sessionType: session.sessionType ?? 'meeting',
+      provider: session.provider,
+      invitedSource: report.invitedSource,
+    },
+    settings.shape ?? 'segments',
+  );
+  if (!payloads.length) return { sent: 0, skipped: true, reason: 'empty' };
+
+  const revision = stableRevision(payloads.map((p) => p.revision));
+  if (!force && session.rosterRevision === revision) {
+    logger.info({ sessionId: session.id }, 'attendance roster unchanged; skipping');
+    return { sent: 0, skipped: true, revision, reason: 'unchanged' };
+  }
+
+  let sent = 0;
+  try {
+    for (const payload of payloads) {
+      await postRosterPayload(settings, conn.attendanceRosterToken, payload);
+      sent += 1;
+    }
+    session.rosterRevision = revision;
+    session.rosterSentAt = Date.now();
+    session.rosterError = undefined;
+    await saveSession(session);
+    inc('attendance_roster_sent_total', {}, sent);
+    return { sent, skipped: false, revision };
+  } catch (err) {
+    const message = (err as Error).message;
+    session.rosterError = message;
+    await saveSession(session);
+    inc('attendance_roster_errors_total');
+    logger.error({ sessionId: session.id, err: message }, 'attendance roster delivery failed');
+    return { sent, skipped: false, error: message, revision };
+  }
 }
 

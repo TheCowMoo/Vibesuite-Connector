@@ -7,7 +7,14 @@ import {
   newConnectionId,
   publicConnection,
 } from '../../domain/connectionStore';
-import type { StoredConnection, WebhookUrls, DeliveryMode, AutomationRule } from '../../domain/connection';
+import type {
+  StoredConnection,
+  WebhookUrls,
+  DeliveryMode,
+  AutomationRule,
+  AttendanceTags,
+  AttendanceRosterSettings,
+} from '../../domain/connection';
 import { bootstrapConnection } from '../../domain/bootstrap';
 import { getSnapshot } from '../../domain/snapshotStore';
 
@@ -33,6 +40,10 @@ interface UpdateConnectionBody {
   rules?: AutomationRule[];
   attendanceDeliveryMode?: DeliveryMode;
   attendanceRules?: AutomationRule[];
+  attendanceTags?: AttendanceTags;
+  attendanceCustomFieldId?: string;
+  attendanceRoster?: AttendanceRosterSettings & { token?: string };
+  clearAttendanceRosterToken?: boolean;
 }
 
 export async function connectionRoutes(app: FastifyInstance): Promise<void> {
@@ -102,6 +113,32 @@ export async function connectionRoutes(app: FastifyInstance): Promise<void> {
     if (body.rules !== undefined) conn.rules = body.rules;
     if (body.attendanceDeliveryMode !== undefined) conn.attendanceDeliveryMode = body.attendanceDeliveryMode;
     if (body.attendanceRules !== undefined) conn.attendanceRules = body.attendanceRules;
+    if (body.attendanceTags !== undefined) {
+      const clean = (value?: string) => (value && value.trim() ? value.trim() : undefined);
+      conn.attendanceTags = {
+        attended: clean(body.attendanceTags.attended),
+        partial: clean(body.attendanceTags.partial),
+        noShow: clean(body.attendanceTags.noShow),
+        notInvited: clean(body.attendanceTags.notInvited),
+      };
+    }
+    if (body.attendanceCustomFieldId !== undefined) {
+      conn.attendanceCustomFieldId = body.attendanceCustomFieldId.trim() || undefined;
+    }
+    if (body.attendanceRoster !== undefined) {
+      const url = body.attendanceRoster.url?.trim();
+      conn.attendanceRoster = url
+        ? {
+            url,
+            shape: body.attendanceRoster.shape === 'session' ? 'session' : 'segments',
+          }
+        : undefined;
+      // A blank token keeps the stored one; "remove" is explicit so an accidental save cannot break
+      // a working webhook. The token itself is encrypted with the other connection secrets.
+      if (body.clearAttendanceRosterToken) conn.attendanceRosterToken = undefined;
+      const token = body.attendanceRoster.token?.trim();
+      if (token) conn.attendanceRosterToken = token;
+    }
     if (body.webhookUrls !== undefined) {
       conn.webhookUrls = {
         yes: body.webhookUrls.yes || undefined,

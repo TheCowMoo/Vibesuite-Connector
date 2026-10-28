@@ -1327,6 +1327,7 @@
   }
 
   var editingSessionId = null;
+  var editSessionListLoaded = false;
 
   function openEditSession() {
     if (!currentSessionId) return;
@@ -1339,6 +1340,20 @@
       document.getElementById('editSessionNote').textContent = s.status === 'pending'
         ? 'Saving resets the sync and tries again immediately.'
         : '';
+      editSessionListLoaded = false;
+      var connSel = document.getElementById('editSessionConnection');
+      connSel.innerHTML = '<option value="">None</option>' + (state.connections || []).map(function (c) {
+        return '<option value="' + esc(c.id) + '">' + esc(c.name) + '</option>';
+      }).join('');
+      connSel.value = s.connectionId || '';
+      api('/api/lists').then(function (d) {
+        var listSel = document.getElementById('editSessionList');
+        listSel.innerHTML = '<option value="">None</option>' + (d.lists || []).map(function (l) {
+          return '<option value="' + esc(l.id) + '">' + esc(l.name) + '</option>';
+        }).join('');
+        listSel.value = s.listId || '';
+        editSessionListLoaded = true;
+      }).catch(function () { /* leave the picker unusable rather than clearing the stored list */ });
       var wrap = document.getElementById('editSessionHostWrap');
       var sel = document.getElementById('editSessionHost');
       api('/api/zoom/accounts').then(function (d) {
@@ -1372,6 +1387,10 @@
     if (!document.getElementById('editSessionHostWrap').hidden) {
       body.zoomUserId = document.getElementById('editSessionHost').value || null;
     }
+    if (editSessionListLoaded) {
+      body.listId = document.getElementById('editSessionList').value || null;
+    }
+    body.connectionId = document.getElementById('editSessionConnection').value || null;
 
     withBusy(document.getElementById('editSessionSave'), api('/api/sessions/' + id, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }))
       .then(function () {
@@ -1412,9 +1431,11 @@
         ? '<p class="muted">Zoom has no report for this call yet. It retries automatically for 24 hours after the call ends; you can also press "Sync now".</p>'
         : '<p class="muted">No attendance synced yet — click "Sync now".</p>';
     } else {
+      var partialCount = (attendance.attended || []).filter(function (p) { return p.status === 'partial'; }).length;
       body += '<div class="summary" style="margin:0.5rem 0 1rem">' +
         '<div class="summary__item"><span class="summary__value">' + attendance.invitedCount + '</span><span class="summary__label">invited</span></div>' +
-        '<div class="summary__item"><span class="summary__value">' + attendance.attendedCount + '</span><span class="summary__label">attended</span></div>' +
+        '<div class="summary__item"><span class="summary__value">' + Math.max(0, attendance.attendedCount - partialCount) + '</span><span class="summary__label">attended</span></div>' +
+        '<div class="summary__item"><span class="summary__value">' + partialCount + '</span><span class="summary__label">partial</span></div>' +
         '<div class="summary__item"><span class="summary__value">' + attendance.noShowCount + '</span><span class="summary__label">no-show</span></div>' +
         '<div class="summary__item"><span class="summary__value">' + ((attendance.attendedNotInvited || []).length) + '</span><span class="summary__label">not on list</span></div>' +
         '<div class="summary__item"><span class="summary__value">' + Math.round((attendance.attendanceRate || 0) * 100) + '%</span><span class="summary__label">attendance</span></div>' +
@@ -1422,6 +1443,21 @@
         '<div class="summary__item"><span class="summary__value">' + ((attendance.polls || []).length) + '</span><span class="summary__label">polls</span></div>' +
         '<div class="summary__item"><span class="summary__value">' + ((attendance.qa || []).length) + '</span><span class="summary__label">Q&amp;A</span></div>' +
         '</div>';
+
+      var sourceLabels = {
+        campaign: 'campaign recipients',
+        invitation: 'calendar invitation',
+        list: 'contact list',
+        none: 'not linked'
+      };
+      if (attendance.invitedSource) {
+        body += '<p class="muted stats-note">Invited list: ' + esc(sourceLabels[attendance.invitedSource] || attendance.invitedSource) + '.</p>';
+      }
+      if (session.rosterError) {
+        body += '<p class="muted">Roster webhook failed: ' + esc(session.rosterError) + '</p>';
+      } else if (session.rosterSentAt) {
+        body += '<p class="muted stats-note">Roster last sent ' + esc(prettyDate(session.rosterSentAt)) + '.</p>';
+      }
 
       var stats = attendance.sessionStats || {};
       var statKeys = Object.keys(stats);
@@ -1491,8 +1527,38 @@
 
   function dispatchSession() {
     if (!currentSessionId) return;
-    withBusy(document.getElementById('sessionDispatch'), api('/api/sessions/' + currentSessionId + '/dispatch', { method: 'POST' }))
-      .then(function (r) { toast('Sent to GHL (' + r.dispatched + ' records)', 'success'); })
+    withBusy(document.getElementById('sessionDispatch'), api('/api/sessions/' + currentSessionId + '/dispatch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({})
+    }))
+      .then(function (r) {
+        var parts = [r.dispatched + ' contact' + (r.dispatched === 1 ? '' : 's')];
+        if (r.failed) parts.push(r.failed + ' failed');
+        if (r.roster && r.roster.error) parts.push('roster failed');
+        else if (r.roster && !r.roster.skipped) parts.push('roster sent');
+        toast('Sent (' + parts.join(', ') + ')', r.failed || (r.roster && r.roster.error) ? 'error' : 'success');
+        openSession(currentSessionId);
+      })
+      .catch(function (e) { toast(e.message, 'error'); });
+  }
+
+  function sendRoster() {
+    if (!currentSessionId) return;
+    withBusy(document.getElementById('sessionRoster'), api('/api/sessions/' + currentSessionId + '/dispatch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rosterOnly: true, forceRoster: true })
+    }))
+      .then(function (r) {
+        var roster = r.roster || {};
+        if (roster.error) toast('Roster failed: ' + roster.error, 'error');
+        else if (roster.reason === 'no_connection') toast('Link this call to a Google account first', 'error');
+        else if (roster.reason === 'empty') toast('Nothing to send for this call yet', 'info');
+        else if (roster.skipped) toast('No roster webhook is configured for this account', 'info');
+        else toast('Roster sent (' + roster.sent + ' request' + (roster.sent === 1 ? '' : 's') + ')', 'success');
+        openSession(currentSessionId);
+      })
       .catch(function (e) { toast(e.message, 'error'); });
   }
 
@@ -1580,6 +1646,7 @@
   document.getElementById('newSessionBtn').addEventListener('click', openNewSession);
   document.getElementById('newSessionSave').addEventListener('click', saveNewSession);
   document.getElementById('sessionDispatch').addEventListener('click', dispatchSession);
+  document.getElementById('sessionRoster').addEventListener('click', sendRoster);
   document.getElementById('sessionEdit').addEventListener('click', openEditSession);
   document.getElementById('editSessionSave').addEventListener('click', saveEditSession);
 
@@ -1608,12 +1675,37 @@
     var mode = c.attendanceDeliveryMode || 'both';
     $$('#attendanceAutomationsBody input[name="attendanceDeliveryMode"]').forEach(function (r) { r.checked = r.value === mode; });
 
+    var tags = c.attendanceTags || {};
+    document.getElementById('attTagAttended').value = tags.attended || '';
+    document.getElementById('attTagPartial').value = tags.partial || '';
+    document.getElementById('attTagNoShow').value = tags.noShow || '';
+    document.getElementById('attTagNotInvited').value = tags.notInvited || '';
+    document.getElementById('attCustomField').value = c.attendanceCustomFieldId || '';
+
+    var roster = c.attendanceRoster || {};
+    document.getElementById('attRosterUrl').value = roster.url || '';
+    document.getElementById('attRosterShape').value = roster.shape === 'session' ? 'session' : 'segments';
+    document.getElementById('attRosterToken').value = '';
+    document.getElementById('attRosterClearToken').checked = false;
+    document.getElementById('attRosterTokenState').textContent = c.attendanceRosterTokenSet
+      ? 'A bearer token is stored. Leave the field blank to keep it.'
+      : 'No bearer token is stored.';
+
     (CATALOG.length ? Promise.resolve() : loadCatalog()).then(function () {
       renderRules();
       document.getElementById('attendanceSnapshot').textContent = JSON.stringify({
-        sessionId: 'sess_…', provider: 'zoom', title: c.name, email: 'person@example.com', status: 'attended',
-        joinedAt: '2026-10-08T13:02:00Z', leftAt: '2026-10-08T13:58:00Z', durationSec: 3360,
-        invitedCount: 142, attendedCount: 98, noShowCount: 44, timestamp: new Date().toISOString()
+        event: 'attendance.result', sessionId: 'sess_…', provider: 'zoom', title: c.name,
+        segment: 'no_show', invited: false, invitedSource: 'campaign',
+        email: 'person@example.com', status: 'no_show',
+        segmentCounts: { invited: 142, attended: 65, partial: 33, noShow: 44, notInvited: 17, attendanceRate: 69 },
+        timestamp: new Date().toISOString()
+      }, null, 2);
+      document.getElementById('attendanceRosterSnapshot').textContent = JSON.stringify({
+        event: 'attendance.segment', version: 1, sessionId: 'sess_…', sessionTitle: c.name,
+        segment: 'no_show', count: 44,
+        counts: { invited: 142, attended: 65, partial: 33, noShow: 44, notInvited: 17, attendanceRate: 69 },
+        revision: 'sha256:…',
+        people: [{ email: 'person@example.com', name: 'Ada', status: 'no_show', minutes: null }]
       }, null, 2);
       openModal('attendanceAutomations');
     });
@@ -1627,7 +1719,23 @@
   document.getElementById('attendanceAutomationsSave').addEventListener('click', function () {
     var checked = document.querySelector('#attendanceAutomationsBody input[name="attendanceDeliveryMode"]:checked');
     var mode = (checked && checked.value) || 'both';
-    var body = { attendanceDeliveryMode: mode, attendanceRules: editingRules };
+    var body = {
+      attendanceDeliveryMode: mode,
+      attendanceRules: editingRules,
+      attendanceTags: {
+        attended: document.getElementById('attTagAttended').value.trim(),
+        partial: document.getElementById('attTagPartial').value.trim(),
+        noShow: document.getElementById('attTagNoShow').value.trim(),
+        notInvited: document.getElementById('attTagNotInvited').value.trim()
+      },
+      attendanceCustomFieldId: document.getElementById('attCustomField').value.trim(),
+      attendanceRoster: {
+        url: document.getElementById('attRosterUrl').value.trim(),
+        shape: document.getElementById('attRosterShape').value,
+        token: document.getElementById('attRosterToken').value.trim()
+      },
+      clearAttendanceRosterToken: document.getElementById('attRosterClearToken').checked
+    };
     api('/api/connections/' + automationsId, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
       .then(function () { closeModal('attendanceAutomations'); toast('Attendance automations saved', 'success'); return load(); })
       .catch(function (err) { toast(err.message, 'error'); });
