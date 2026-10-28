@@ -32,6 +32,40 @@ export interface QaEntry {
   [key: string]: unknown;
 }
 
+/** One attempt to read a call, kept so "why is this pending?" has an answer. */
+export interface SyncAttempt {
+  type: SessionType;
+  /** Which Zoom host asked (email or user id), or `server-to-server`. */
+  host?: string;
+  /** HTTP status of the report participants call; undefined when that path was skipped. */
+  reportStatus?: number;
+  /** HTTP status of the past-call participants fallback; undefined when the report already answered. */
+  pastStatus?: number;
+  /** Zoom's own message, when it gave one. */
+  detail?: string;
+}
+
+/** What the provider tried during the last sync, stored on the session for the panel. */
+export interface SyncDiagnostics {
+  at: number;
+  /** The ID actually used, after unwrapping a pasted link. */
+  externalId: string;
+  /** Type of the attempt that produced this result. */
+  sessionType: SessionType;
+  /** Host that produced this result. */
+  host?: string;
+  attempts: SyncAttempt[];
+  /** Hosts probed during recovery, with the status of their past-call lookup. */
+  hostSweep?: Array<{ host: string; type: SessionType; status: number }>;
+}
+
+/** What the provider had to change to make the call readable. */
+export interface ProviderCorrection {
+  externalId?: string;
+  sessionType?: SessionType;
+  zoomUserId?: string;
+}
+
 /** Everything a provider can extract for a finished session. */
 export interface ProviderFetchResult {
   attendees: AttendeeRecord[];
@@ -52,6 +86,10 @@ export interface ProviderFetchResult {
    * look like nobody attended.
    */
   reportReady?: boolean;
+  /** Wrong ID form, call type or host that the provider recovered from. Applied by the caller. */
+  correction?: ProviderCorrection;
+  /** What was tried and what Zoom answered — shown in the panel when a call will not sync. */
+  diagnostics?: SyncDiagnostics;
 }
 
 /** Which tenant a session belongs to, and which video host owns it. */

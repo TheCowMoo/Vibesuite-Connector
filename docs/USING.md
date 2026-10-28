@@ -105,6 +105,12 @@ call is linked to a campaign or an invitation.
 If Zoom has no report yet — normal for a while after a webinar ends — the call stays **Pending** and the
 panel retries hourly for up to 24 hours. Nothing is stored as “0 attended” in the meantime.
 
+If it stays pending, open **Details → What the last sync tried**: each attempt shows the call type, the
+Zoom host that asked, the HTTP status of the report and of the past-call fallback, and Zoom's own message.
+**Edit call** corrects the type, ID or host without deleting the call, and saving re-syncs immediately. The
+panel also retries the other call type and the other connected hosts on its own when the first answer is a
+404.
+
 ### Replies in GoHighLevel
 
 RSVP handling is configured **per Google account**, not per campaign: **Google accounts → Automations** on
@@ -339,7 +345,8 @@ planner in each wizard already accounts for the caps, so trust *When it will fin
 | Scheduled campaign is Paused with a reason | Its audience was empty at activation | Fix the audience, then Resume |
 | Attendance sections are empty | Zoom reports not readable, or the call has not happened | **Who attended → Sync now**; if it stays empty, Settings → Video conferencing → **Check access** |
 | Synced, but 0 attended while Details lists people under “not on the invited list” | The call has no invited list linked | Link it to the campaign or invitation that sent the invitations, then Sync now. Campaign-linked calls pick this up automatically |
-| “Zoom has no report for this call yet”, or the call stays Pending | Zoom has not published the report, the call has not ended, or the type/ID/host is wrong | Wait — it retries for 24 hours — and check that **Type of call** is Webinar for a webinar; then Sync now |
+| “Zoom has no report for this call yet”, or the call stays Pending with `HTTP 404` | Zoom has no past call under that ID, type or host | Press **Edit call**, set the right **Type of call**, paste the numeric ID or join link, pick the hosting Zoom account, then save. The panel also tries the other type and other hosts automatically |
+| Call stays Pending and details show `HTTP 401` | The host's Zoom authorisation is dead | Disconnect the host in Settings → Video conferencing, then Connect again |
 | Zoom says "Invalid access token" | The authorisation is dead (recreated app, rotated secret, changed scopes) | Disconnect the host, then Connect again |
 | Numbers differ between campaign and Statistics | Different windows/denominators | See *What the words mean* above |
 
@@ -351,6 +358,7 @@ Server-side failures (deploy, Redis, worker restarts) are covered in [`DEPLOYMEN
 | Area | File |
 |---|---|
 | Campaign schema, allocation, pace planner | `app/src/domain/campaign.ts` |
+| Zoom ID normalisation and call recovery | `app/src/video/zoomId.ts`, `app/src/video/zoom.ts` |
 | Status machine, start/stop validation | `app/src/domain/campaignLifecycle.ts` |
 | Freeze, send, redistribution, end | `app/src/domain/campaignDispatch.ts` |
 | Who gets invited (dedupe) | `app/src/domain/audience.ts` |

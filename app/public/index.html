@@ -563,9 +563,39 @@
     </div>
     <div id="sessionDetailBody"></div>
     <div class="modal__foot">
+      <button class="btn btn--outline" id="sessionEdit">Edit call</button>
       <button class="btn btn--outline" id="sessionDispatch">Send results to GHL</button>
       <span class="spacer"></span>
       <button class="btn btn--ghost" data-close="sessionDetail">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- Edit session -->
+<div class="backdrop" id="editSession" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="editSessionTitle">
+    <div class="modal__head">
+      <h2 class="modal__title" id="editSessionTitle">Edit video call</h2>
+      <button class="icon-btn" data-close="editSession" aria-label="Close">&times;</button>
+    </div>
+    <label class="field"><span class="field__label">Type of call</span>
+      <select id="editSessionType">
+        <option value="meeting">Meeting</option>
+        <option value="webinar">Webinar</option>
+      </select>
+    </label>
+    <label class="field"><span class="field__label">Meeting or webinar ID</span>
+      <input id="editSessionId" placeholder="ID or Zoom join link" />
+      <span class="field__hint">Paste the numeric ID or the join link. A /w/ link automatically means webinar.</span>
+    </label>
+    <label class="field" id="editSessionHostWrap" hidden><span class="field__label">Zoom host</span>
+      <select id="editSessionHost"><option value="">Automatic</option></select>
+    </label>
+    <p class="muted" id="editSessionNote"></p>
+    <div class="modal__foot">
+      <span class="spacer"></span>
+      <button class="btn btn--ghost" data-close="editSession">Cancel</button>
+      <button class="btn btn--primary" id="editSessionSave">Save and re-sync</button>
     </div>
   </div>
 </div>

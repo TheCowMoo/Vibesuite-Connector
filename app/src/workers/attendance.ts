@@ -175,6 +175,16 @@ export async function syncSession(sessionId: string): Promise<AttendanceReport> 
 
     const fetched = await provider.fetch(session.externalId, session.sessionType ?? 'meeting', authCtx);
 
+    // Apply what the provider had to correct to make the call readable (a pasted link, the wrong
+    // call type, another host). Persisting it means the next sync starts from the right place.
+    const correction = fetched.correction;
+    if (correction) {
+      if (correction.externalId) session.externalId = correction.externalId;
+      if (correction.sessionType) session.sessionType = correction.sessionType;
+      if (correction.zoomUserId) session.zoomUserId = correction.zoomUserId;
+    }
+    if (fetched.diagnostics) session.syncDiagnostics = fetched.diagnostics;
+
     const invited = await resolveInvitedEmails(session);
     const report = buildReport({
       sessionId,

@@ -28,9 +28,11 @@ import type {
   ProviderFetchResult,
   QaEntry,
   SessionType,
+  SyncAttempt,
   VideoAuthContext,
   VideoProviderImpl,
 } from './types';
+import { normalizeZoomCallId, otherType } from './zoomId';
 
 const BASE = 'https://api.zoom.us/v2';
 
@@ -324,7 +326,18 @@ export async function probeZoomCapabilities(
     };
   }
 
-  return { capabilities, participants: capabilities.participants };
+  const participants = capabilities.participants;
+  // A 401 is a dead token, not a scope refusal. Caching it as "denied" sends every later sync down
+  // the fallback path with a token that will never work, so say what actually happened instead.
+  if (isInvalidToken(participants.httpStatus ?? 0)) {
+    const target = await accountFor(ctx);
+    if (target) await invalidateZoomAuthorisation(target.userId);
+    throw new Error(
+      `Zoom has invalidated this authorisation${target ? ` for ${target.email}` : ''} — use Disconnect, then Connect Zoom again.`,
+    );
+  }
+
+  return { capabilities, participants };
 }
 
 function statsFrom(details: Record<string, unknown> | null): Record<string, string> {
@@ -342,57 +355,63 @@ async function accountFor(ctx?: VideoAuthContext) {
   return pickZoomAccount(await listZoomAccounts(), ctx?.zoomUserId).account;
 }
 
-export const zoomProvider: VideoProviderImpl = {
-  key: 'zoom',
+interface FetchAttempt {
+  result: ProviderFetchResult;
+  reportStatus?: number;
+  pastStatus?: number;
+  detail?: string;
+}
 
-  /**
-   * Attendance for a finished session.
-   *
-   * Order matters. The report API gives the richest data (absentees, polls, Q&A) but a user-managed
-   * app authorised by a non-admin host is refused there — that is normal, not an error. So the first
-   * refusal is remembered on the connection and the call falls through to the past-meetings
-   * participant list, which a host *can* read for their own meetings. Attendance and no-shows survive
-   * that switch because `buildReport()` derives no-shows from invited − attended; only polls, Q&A and
-   * the absentee list become unavailable, and a note says so.
-   */
-  async fetch(
-    externalId: string,
-    sessionType: SessionType = 'meeting',
-    ctx?: VideoAuthContext,
-  ): Promise<ProviderFetchResult> {
-    const token = await getAccessToken(ctx);
-    const seg = sessionType === 'webinar' ? 'webinars' : 'meetings';
-    const enc = encodeURIComponent(externalId);
-    const notes: string[] = [];
+/**
+ * One pass over one call type with one host.
+ *
+ * Throws only when Zoom invalidates the token itself: a dead authorisation is not fixed by trying a
+ * different type or host, and it needs the reconnect instruction rather than another retry.
+ */
+async function fetchOnce(
+  externalId: string,
+  sessionType: SessionType,
+  ctx?: VideoAuthContext,
+): Promise<FetchAttempt> {
+  const token = await getAccessToken(ctx);
+  const seg = sessionType === 'webinar' ? 'webinars' : 'meetings';
+  const enc = encodeURIComponent(externalId);
+  const notes: string[] = [];
 
-    const account = await accountFor(ctx);
-    const attemptKey = account?.userId ?? 's2s';
-    // A cached "denied" buys one verification attempt, because the probe and the participant call
-    // need different scopes — the probe's verdict must not be the final word.
-    const reportAllowed = shouldAttemptReports(account?.reportAccess, reportAttempted.has(attemptKey));
+  const account = await accountFor(ctx);
+  const attemptKey = account?.userId ?? 's2s';
+  // A cached "denied" buys one verification attempt, because the probe and the participant call
+  // need different scopes — the probe's verdict must not be the final word.
+  const reportAllowed = shouldAttemptReports(account?.reportAccess, reportAttempted.has(attemptKey));
+  let reportStatus: number | undefined;
+  let detail: string | undefined;
 
-    if (reportAllowed) {
-      const participants = await fetchListResult(token, `/report/${seg}/${enc}/participants`, 'participants');
+  if (reportAllowed) {
+    const participants = await fetchListResult(token, `/report/${seg}/${enc}/participants`, 'participants');
+    reportStatus = participants.status;
+    detail = participants.detail;
 
-      if (isInvalidToken(participants.status)) {
-        const target = await accountFor(ctx);
-        if (target) await invalidateZoomAuthorisation(target.userId);
-        throw new Error(
-          `Zoom has invalidated this authorisation${target ? ` for ${target.email}` : ''} — use Disconnect, then Connect Zoom again.`,
-        );
-      }
+    if (isInvalidToken(participants.status)) {
+      const target = await accountFor(ctx);
+      if (target) await invalidateZoomAuthorisation(target.userId);
+      throw new Error(
+        `Zoom has invalidated this authorisation${target ? ` for ${target.email}` : ''} — use Disconnect, then Connect Zoom again.`,
+      );
+    }
 
-      if (participants.status === 200) {
-        reportAttempted.delete(attemptKey);
-        await rememberReportAccess(ctx, 'granted');
+    if (participants.status === 200) {
+      reportAttempted.delete(attemptKey);
+      await rememberReportAccess(ctx, 'granted');
 
-        const absenteesRaw = await fetchList(token, `/report/${seg}/${enc}/absentees`, 'absentees');
-        const registrantsRaw = await fetchList(token, `/${seg}/${enc}/registrants`, 'registrants');
-        const details = await getJson(token, `/report/${seg}/${enc}`);
-        const pollsRaw = await fetchList(token, `/report/${seg}/${enc}/polls`, 'polls');
-        const qaRaw = await fetchList(token, `/report/${seg}/${enc}/qa`, 'questions');
+      const absenteesRaw = await fetchList(token, `/report/${seg}/${enc}/absentees`, 'absentees');
+      const registrantsRaw = await fetchList(token, `/${seg}/${enc}/registrants`, 'registrants');
+      const details = await getJson(token, `/report/${seg}/${enc}`);
+      const pollsRaw = await fetchList(token, `/report/${seg}/${enc}/polls`, 'polls');
+      const qaRaw = await fetchList(token, `/report/${seg}/${enc}/qa`, 'questions');
 
-        return {
+      return {
+        reportStatus,
+        result: {
           attendees: participants.rows.map(mapParticipant),
           absentees: absenteesRaw
             .map((a) => (str(a.user_email) || str(a.email) || '').toLowerCase())
@@ -402,44 +421,60 @@ export const zoomProvider: VideoProviderImpl = {
           polls: pollsRaw as unknown as PollResult[],
           qa: qaRaw as unknown as QaEntry[],
           reportReady: true,
-        };
-      }
+        },
+      };
+    }
 
-      if (isScopeDenied(participants.status, participants.detail)) {
-        reportAttempted.add(attemptKey);
-        await rememberReportAccess(ctx, 'denied', participants.detail);
-        notes.push(
-          'Zoom refused report access for this authorisation, so polls, Q&A and the absentee list are unavailable (they need an admin-managed Zoom app). Attendance still comes from the meeting participant list.',
-        );
-      }
-    } else {
+    if (isScopeDenied(participants.status, participants.detail)) {
+      reportAttempted.add(attemptKey);
+      await rememberReportAccess(ctx, 'denied', participants.detail);
       notes.push(
-        'This Zoom authorisation has no report scope, so polls, Q&A and the absentee list are unavailable. Attendance comes from the meeting participant list.',
+        'Zoom refused report access for this authorisation, so polls, Q&A and the absentee list are unavailable (they need an admin-managed Zoom app). Attendance still comes from the meeting participant list.',
       );
     }
+  } else {
+    notes.push(
+      'This Zoom authorisation has no report scope, so polls, Q&A and the absentee list are unavailable. Attendance comes from the meeting participant list.',
+    );
+  }
 
-    // Fallback: a host can always read participants of their own past meeting/webinar.
-    const pastSeg = sessionType === 'webinar' ? 'past_webinars' : 'past_meetings';
-    const detailsRes = await getJsonResult(token, `/${pastSeg}/${enc}`);
-    const uuid = detailsRes.data ? str(detailsRes.data.uuid) : undefined;
+  // Fallback: a host can always read participants of their own past meeting/webinar.
+  const pastSeg = sessionType === 'webinar' ? 'past_webinars' : 'past_meetings';
+  const detailsRes = await getJsonResult(token, `/${pastSeg}/${enc}`);
+  const uuid = detailsRes.data ? str(detailsRes.data.uuid) : undefined;
 
-    let past = await fetchListResult(token, `/${pastSeg}/${enc}/participants`, 'participants');
-    if (past.status !== 200 && uuid) {
-      // Zoom's UUID form usually needs double encoding, and starts with '/' for recurring meetings.
-      past = await fetchListResult(
-        token,
-        `/${pastSeg}/${encodeURIComponent(encodeURIComponent(uuid))}/participants`,
-        'participants',
-      );
-    }
+  let past = await fetchListResult(token, `/${pastSeg}/${enc}/participants`, 'participants');
+  if (past.status !== 200 && uuid) {
+    // Zoom's UUID form usually needs double encoding, and starts with '/' for recurring meetings.
+    past = await fetchListResult(
+      token,
+      `/${pastSeg}/${encodeURIComponent(encodeURIComponent(uuid))}/participants`,
+      'participants',
+    );
+  }
 
-    if (past.status !== 200) {
-      notes.push(
-        `Zoom would not return participants for this call (HTTP ${past.status || 'error'}) — it may not have ended yet, or the selected host cannot see it.`,
-      );
-    }
+  // A dead token is just as dead on the fallback path; without this it would look like "no report"
+  // and keep the session pending instead of asking for a reconnect.
+  if (isInvalidToken(past.status)) {
+    const target = await accountFor(ctx);
+    if (target) await invalidateZoomAuthorisation(target.userId);
+    throw new Error(
+      `Zoom has invalidated this authorisation${target ? ` for ${target.email}` : ''} — use Disconnect, then Connect Zoom again.`,
+    );
+  }
 
-    return {
+  if (past.status !== 200) {
+    const pastDetail = past.detail || detailsRes.detail;
+    notes.push(
+      `Zoom would not return participants for this call (HTTP ${past.status || 'error'}${pastDetail ? `: ${pastDetail}` : ''}) — it may not have ended yet, or the selected host cannot see it.`,
+    );
+  }
+
+  return {
+    reportStatus,
+    pastStatus: past.status,
+    detail: past.detail || detail || detailsRes.detail,
+    result: {
       attendees: past.rows.map(mapParticipant),
       absentees: [],
       registrants: 0,
@@ -450,8 +485,187 @@ export const zoomProvider: VideoProviderImpl = {
       // A 200 with an empty list is a real answer ("nobody joined"); anything else means there is
       // no report yet, which the caller must retry rather than store as zero attendance.
       reportReady: past.status === 200,
+    },
+  };
+}
+
+const MAX_SWEEP_HOSTS = 3;
+
+interface HostSweep {
+  found?: { userId: string; email?: string; type: SessionType };
+  probes: Array<{ host: string; type: SessionType; status: number }>;
+}
+
+/**
+ * If the selected host cannot see the call, another authorised host may be its owner. Probe the
+ * past-call endpoint (one cheap call each) before declaring the call unreadable.
+ */
+async function sweepOtherHosts(
+  externalId: string,
+  types: SessionType[],
+  ctx: VideoAuthContext | undefined,
+  excludeUserId?: string,
+): Promise<HostSweep> {
+  const probes: HostSweep['probes'] = [];
+  const settings = await getVideoSettings();
+  if (defaultZoomAuthMode(settings.zoomAuthMode) !== 'user') return { probes };
+
+  const accounts = (await listZoomAccounts()).filter((a) => a.userId !== excludeUserId);
+  if (!accounts.length) return { probes };
+
+  for (const account of accounts.slice(0, MAX_SWEEP_HOSTS)) {
+    let token: string;
+    try {
+      token = await getAccessToken({ ...ctx, zoomUserId: account.userId });
+    } catch {
+      continue;
+    }
+
+    for (const type of types) {
+      const seg = type === 'webinar' ? 'past_webinars' : 'past_meetings';
+      const res = await getJsonResult(token, `/${seg}/${encodeURIComponent(externalId)}`);
+      probes.push({ host: account.email || account.userId, type, status: res.status });
+      if (res.status === 200) {
+        return { found: { userId: account.userId, email: account.email, type }, probes };
+      }
+    }
+  }
+
+  return { probes };
+}
+
+interface FinishInput {
+  attempt: FetchAttempt;
+  type: SessionType;
+  hostLabel?: string;
+  hostUserId?: string;
+  id: string;
+  originalId: string;
+  originalType: SessionType;
+  attempts: SyncAttempt[];
+  probes?: HostSweep['probes'];
+  ctx?: VideoAuthContext;
+}
+
+/** Add the corrections, the sentences that explain them, and the diagnostics record. */
+function finishFetch(input: FinishInput): ProviderFetchResult {
+  const notes = [...(input.attempt.result.notes ?? [])];
+  const correctedId = input.id !== input.originalId ? input.id : undefined;
+  const correctedType = input.type !== input.originalType ? input.type : undefined;
+  const correctedHost =
+    input.hostUserId && input.hostUserId !== input.ctx?.zoomUserId ? input.hostUserId : undefined;
+
+  if (correctedId) notes.push(`The call ID was a Zoom link — using ${input.id} instead.`);
+  if (correctedType) {
+    notes.push(
+      `This call is a ${input.type === 'webinar' ? 'webinar' : 'meeting'}, but it was set as a ${input.originalType}. Corrected the type for future syncs.`,
+    );
+  }
+  if (correctedHost) {
+    notes.push(
+      `This call is not visible to the selected Zoom host; ${input.hostLabel || correctedHost} can read it. Using that host from now on.`,
+    );
+  }
+
+  return {
+    ...input.attempt.result,
+    notes: notes.length ? notes : undefined,
+    correction:
+      correctedId || correctedType || correctedHost
+        ? { externalId: correctedId, sessionType: correctedType, zoomUserId: correctedHost }
+        : undefined,
+    diagnostics: {
+      at: Date.now(),
+      externalId: input.id,
+      sessionType: input.type,
+      host: input.hostLabel,
+      attempts: input.attempts,
+      hostSweep: input.probes?.length ? input.probes : undefined,
+    },
+  };
+}
+
+
+export const zoomProvider: VideoProviderImpl = {
+  key: 'zoom',
+
+  /**
+   * Attendance for a finished session.
+   *
+   * The report API gives the richest data, but a user-managed app authorised by a non-admin host is
+   * refused there — normal, not an error. The fallback reads the past-call participant list, which a
+   * host can always read for their own calls.
+   *
+   * A 404 on both paths used to mean a permanent "pending". The usual causes are a webinar stored as
+   * a meeting, a pasted link instead of an ID, and a host who does not own the call; all three are
+   * recoverable here, and every attempt is recorded in `diagnostics` so the panel can explain a
+   * failure instead of just showing a status.
+   */
+  async fetch(
+    externalId: string,
+    sessionType: SessionType = 'meeting',
+    ctx?: VideoAuthContext,
+  ): Promise<ProviderFetchResult> {
+    const normalized = normalizeZoomCallId(externalId);
+    const id = normalized?.id ?? externalId;
+    const firstType = normalized?.kind ?? sessionType;
+    const secondType = otherType(firstType);
+    // In server-to-server mode the token is account-wide; naming a host there would be misleading.
+    const settings = await getVideoSettings();
+    const usingUserPool = defaultZoomAuthMode(settings.zoomAuthMode) === 'user';
+    const primary = usingUserPool ? await accountFor(ctx) : undefined;
+    const primaryHost = usingUserPool
+      ? primary
+        ? primary.email || primary.userId
+        : undefined
+      : 'server-to-server';
+    const attempts: SyncAttempt[] = [];
+
+    const attempt = async (type: SessionType, hostCtx: VideoAuthContext | undefined, host?: string) => {
+      const out = await fetchOnce(id, type, hostCtx);
+      attempts.push({ type, host, reportStatus: out.reportStatus, pastStatus: out.pastStatus, detail: out.detail });
+      return out;
     };
+
+    const finish = (
+      out: FetchAttempt,
+      type: SessionType,
+      host?: string,
+      hostUserId?: string,
+      probes?: HostSweep['probes'],
+    ): ProviderFetchResult =>
+      finishFetch({
+        attempt: out,
+        type,
+        hostLabel: host,
+        hostUserId,
+        id,
+        originalId: externalId,
+        originalType: sessionType,
+        attempts,
+        probes,
+        ctx,
+      });
+
+    const first = await attempt(firstType, ctx, primaryHost);
+    if (first.result.reportReady) return finish(first, firstType, primaryHost);
+
+    // A webinar sent to /meetings (or the reverse) 404s on both paths. Try the other type once.
+    const second = await attempt(secondType, ctx, primaryHost);
+    if (second.result.reportReady) return finish(second, secondType, primaryHost);
+
+    // The selected host may simply not own this call. Probe the other hosts before giving up.
+    const types = normalized?.kind ? [normalized.kind, otherType(normalized.kind)] : [firstType, secondType];
+    const sweep = await sweepOtherHosts(id, types, ctx, primary?.userId);
+    if (sweep.found) {
+      const host = sweep.found.email || sweep.found.userId;
+      const third = await attempt(sweep.found.type, { ...ctx, zoomUserId: sweep.found.userId }, host);
+      return finish(third, sweep.found.type, host, sweep.found.userId, sweep.probes);
+    }
+
+    return finish(first, firstType, primaryHost, undefined, sweep.probes);
   },
+
 
   /**
    * The real attendee join link, read from the management endpoint — which works *before* the

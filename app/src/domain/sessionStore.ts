@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { redis } from '../queue/connection';
 import { REDIS_KEYS } from '../config/constants';
-import type { SessionType, VideoProvider } from '../video/types';
+import type { SessionType, SyncDiagnostics, VideoProvider } from '../video/types';
 
 export type SessionStatus = 'pending' | 'synced' | 'failed';
 
@@ -24,6 +24,8 @@ export interface SessionRecord {
   error?: string;
   /** Non-fatal notes from the provider, e.g. why polls and Q&A are empty. */
   warnings?: string[];
+  /** What the last sync tried, so a session that will not sync can explain itself in the panel. */
+  syncDiagnostics?: SyncDiagnostics;
   samplePayload?: unknown;
   createdAt: number;
 }

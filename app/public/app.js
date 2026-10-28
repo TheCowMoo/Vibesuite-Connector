@@ -1321,8 +1321,75 @@
     currentSessionId = id;
     api('/api/sessions/' + id).then(function (d) {
       renderSessionDetail(d.session, d.attendance);
-      openModal('sessionDetail');
+      // Re-rendering an already-open detail must not stack a second copy on the modal stack.
+      if (document.getElementById('sessionDetail').hidden) openModal('sessionDetail');
     }).catch(function (e) { toast(e.message, 'error'); });
+  }
+
+  var editingSessionId = null;
+
+  function openEditSession() {
+    if (!currentSessionId) return;
+    editingSessionId = currentSessionId;
+    var session = attendanceSessions.filter(function (s) { return s.id === editingSessionId; })[0];
+
+    function fill(s) {
+      document.getElementById('editSessionType').value = s.sessionType || 'meeting';
+      document.getElementById('editSessionId').value = s.externalId || '';
+      document.getElementById('editSessionNote').textContent = s.status === 'pending'
+        ? 'Saving resets the sync and tries again immediately.'
+        : '';
+      var wrap = document.getElementById('editSessionHostWrap');
+      var sel = document.getElementById('editSessionHost');
+      api('/api/zoom/accounts').then(function (d) {
+        var accounts = d.accounts || [];
+        wrap.hidden = accounts.length === 0;
+        sel.innerHTML = '<option value="">Automatic</option>' + accounts.map(function (a) {
+          return '<option value="' + esc(a.userId) + '">' + esc(a.email || a.userId) + '</option>';
+        }).join('');
+        sel.value = s.zoomUserId || '';
+      }).catch(function () { /* the picker stays on Automatic */ });
+      openModal('editSession');
+    }
+
+    if (session) {
+      fill(session);
+      return;
+    }
+    api('/api/sessions/' + editingSessionId).then(function (d) {
+      fill(d.session);
+    }).catch(function (e) { toast(e.message, 'error'); });
+  }
+
+  function saveEditSession() {
+    if (!editingSessionId) return;
+    var id = editingSessionId;
+    var body = {
+      sessionType: document.getElementById('editSessionType').value,
+      externalId: document.getElementById('editSessionId').value.trim()
+    };
+    // Only send the host when the picker actually loaded; otherwise an API hiccup would clear it.
+    if (!document.getElementById('editSessionHostWrap').hidden) {
+      body.zoomUserId = document.getElementById('editSessionHost').value || null;
+    }
+
+    withBusy(document.getElementById('editSessionSave'), api('/api/sessions/' + id, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }))
+      .then(function () {
+        closeModal('editSession');
+        toast('Saved — trying again', 'info');
+        // Editing exists to un-stick a call, so re-sync now instead of waiting for the hourly poll.
+        return api('/api/sessions/' + id + '/sync', { method: 'POST' }).catch(function (e) {
+          toast('Saved, but the sync failed: ' + e.message, 'error');
+          return null;
+        });
+      })
+      .then(function (r) {
+        if (r && r.status === 'pending') toast('Zoom still has no report for this call.', 'info');
+        else if (r) toast('Synced — ' + r.report.attendedCount + ' attended', 'success');
+        loadAttendance();
+        setTimeout(function () { openSession(id); }, 200);
+      })
+      .catch(function (e) { toast(e.message, 'error'); });
   }
 
   function renderSessionDetail(session, attendance) {
@@ -1383,7 +1450,32 @@
           attendance.absentees.map(function (e) { return '<tr><td>' + esc(e) + '</td></tr>'; }).join('') + '</tbody></table>';
       }
     }
+    // A pending call should never be a mystery: show exactly what Zoom said to each attempt.
+    if (session.status !== 'synced' && session.syncDiagnostics) {
+      body += '<h3 class="detail__sub">What the last sync tried</h3>' + syncDiagnosticsTable(session.syncDiagnostics);
+    }
+
     document.getElementById('sessionDetailBody').innerHTML = body;
+  }
+
+  function syncDiagnosticsTable(d) {
+    function status(v) { return v === undefined ? 'not tried' : String(v); }
+    var rows = (d.attempts || []).map(function (a) {
+      return '<tr><td>' + esc(a.type) + '</td><td>' + esc(a.host || 'server-to-server') + '</td>' +
+        '<td>' + esc(status(a.reportStatus)) + '</td><td>' + esc(status(a.pastStatus)) + '</td>' +
+        '<td>' + esc(a.detail || '—') + '</td></tr>';
+    }).join('');
+
+    var sweep = (d.hostSweep || []).length
+      ? '<p class="muted">Other hosts checked: ' + d.hostSweep.map(function (p) {
+        return esc(p.host) + ' (' + esc(p.type) + ' → ' + p.status + ')';
+      }).join(', ') + '</p>'
+      : '';
+
+    return '<p class="muted">' + esc(prettyDate(d.at)) + ' · tried as ' + esc(d.sessionType) +
+      (d.host ? ' from ' + esc(d.host) : '') + '.</p>' +
+      '<div class="table-scroll"><table class="map"><thead><tr><th>Type</th><th>Host</th><th>Report</th><th>Fallback</th><th>Zoom said</th></tr></thead><tbody>' +
+      rows + '</tbody></table></div>' + sweep;
   }
 
   function attendanceTable(people) {
@@ -1488,6 +1580,8 @@
   document.getElementById('newSessionBtn').addEventListener('click', openNewSession);
   document.getElementById('newSessionSave').addEventListener('click', saveNewSession);
   document.getElementById('sessionDispatch').addEventListener('click', dispatchSession);
+  document.getElementById('sessionEdit').addEventListener('click', openEditSession);
+  document.getElementById('editSessionSave').addEventListener('click', saveEditSession);
 
   document.getElementById('sessionsList').addEventListener('click', function (e) {
     var btn = e.target.closest('[data-action]');

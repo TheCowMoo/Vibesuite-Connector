@@ -276,6 +276,29 @@ once an hour (`PENDING_RETRY_INTERVAL_MS`) rather than on every poll. After the 
 (wrong call type, wrong ID, wrong host), so nothing retries forever. The auto-sync dispatches to GHL only
 once a `synced` report exists.
 
+### Reading a call that moved, or was typed wrong
+
+A 404 from both endpoints used to be terminal. `zoomProvider.fetch()` now treats the recoverable causes
+explicitly, and `video/zoomId.ts` normalises what operators paste:
+
+- **A pasted link** is reduced to its numeric ID (`/j/…`, `/w/…`, `?pwd=` and spacing all accepted);
+  `/w/`, `/wc/`, `/webinar/` and `/register/` links also prove the call is a **webinar**. The
+  `POST /api/sessions` and `PATCH /api/sessions/:id` routes apply the same rule, so a link can no longer be
+  stored as an ID. A registration *token* link carries no usable ID and is rejected with an explanation.
+- **The wrong type** is retried once with the other kind. If that answers, the data is used, the session's
+  type is corrected and a note says so.
+- **The wrong host** is found by a bounded sweep: up to three other authorised hosts are asked for the past
+  call (one call each, `sweepOtherHosts()`). If one can see it, the sync uses that host and pins the session
+  to it; the note names it so the campaign's host can be fixed too.
+- **A dead token on the fallback path** takes the same invalid-token route as the report path (drop the
+  tokens, ask for Disconnect → Connect) instead of looking like a missing report. `Check access` no longer
+  records a 401 as "denied" either.
+
+Every attempt — type, host, report status, fallback status and Zoom's own message — is stored on the
+session as `syncDiagnostics` and shown under **"What the last sync tried"** whenever the call is not synced.
+`sessionType`, `externalId` and `zoomUserId` are editable through `PATCH /api/sessions/:id`; changing one of
+them resets the sync state so the scheduler retries with the new values (renaming a call does not).
+
 The link a calendar invite carries comes from `sessionJoinUrl()` (`domain/joinLink.ts`), in priority
 order:
 
