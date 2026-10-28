@@ -1,6 +1,7 @@
 import { env } from '../config/env';
 import { logger } from '../lib/logger';
-import { listSessions } from '../domain/sessionStore';
+import { getSession, listSessions } from '../domain/sessionStore';
+import { dueForPendingRetry } from '../domain/sessionSync';
 import { syncSession, dispatchSession } from '../workers/attendance';
 
 export async function checkAttendance(): Promise<void> {
@@ -12,10 +13,14 @@ export async function checkAttendance(): Promise<void> {
     if (s.status === 'synced') continue;
     const endTime = Date.parse(s.endTime);
     if (Number.isNaN(endTime) || endTime + delayMs > now) continue;
+    // A pending call is retried hourly, not on every poll: each attempt costs several Zoom calls.
+    if (s.status === 'pending' && !dueForPendingRetry({ lastSyncedAt: s.lastSyncedAt, now })) continue;
 
     try {
       await syncSession(s.id);
-      await dispatchSession(s.id);
+      // A pending session has no stored report yet; dispatching now would push an empty attendance.
+      const fresh = await getSession(s.id);
+      if (fresh?.status === 'synced') await dispatchSession(s.id);
     } catch (err) {
       logger.error({ sessionId: s.id, err: (err as Error).message }, 'attendance auto-sync failed');
     }

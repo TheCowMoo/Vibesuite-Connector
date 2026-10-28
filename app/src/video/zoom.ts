@@ -401,6 +401,7 @@ export const zoomProvider: VideoProviderImpl = {
           sessionStats: statsFrom(details),
           polls: pollsRaw as unknown as PollResult[],
           qa: qaRaw as unknown as QaEntry[],
+          reportReady: true,
         };
       }
 
@@ -434,7 +435,7 @@ export const zoomProvider: VideoProviderImpl = {
 
     if (past.status !== 200) {
       notes.push(
-        'Zoom would not return participants for this call — it may not have ended yet, or the selected host cannot see it.',
+        `Zoom would not return participants for this call (HTTP ${past.status || 'error'}) — it may not have ended yet, or the selected host cannot see it.`,
       );
     }
 
@@ -446,6 +447,9 @@ export const zoomProvider: VideoProviderImpl = {
       polls: [],
       qa: [],
       notes: notes.length ? notes : undefined,
+      // A 200 with an empty list is a real answer ("nobody joined"); anything else means there is
+      // no report yet, which the caller must retry rather than store as zero attendance.
+      reportReady: past.status === 200,
     };
   },
 

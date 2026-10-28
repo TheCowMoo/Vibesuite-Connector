@@ -97,6 +97,14 @@ link back to an invitation.
 Attendance syncs on its own after the call, and **Sync now** forces a refresh. **Details** shows who
 attended and who did not, and **Send results to GHL** pushes those results to your CRM.
 
+A call linked to a campaign inherits that campaign's **frozen recipients** as its invited list, so
+attendance matches the people who were actually emailed. A standalone call has no invited list: the people
+who joined appear under **“Attended — not on the invited list”**, and no-show counts stay empty until the
+call is linked to a campaign or an invitation.
+
+If Zoom has no report yet — normal for a while after a webinar ends — the call stays **Pending** and the
+panel retries hourly for up to 24 hours. Nothing is stored as “0 attended” in the meantime.
+
 ### Replies in GoHighLevel
 
 RSVP handling is configured **per Google account**, not per campaign: **Google accounts → Automations** on
@@ -330,6 +338,8 @@ planner in each wizard already accounts for the caps, so trust *When it will fin
 | `N didn't go through` chip | Some recipients failed (bad address, provider refusal) | Details shows the error per recipient; failures re-queue automatically |
 | Scheduled campaign is Paused with a reason | Its audience was empty at activation | Fix the audience, then Resume |
 | Attendance sections are empty | Zoom reports not readable, or the call has not happened | **Who attended → Sync now**; if it stays empty, Settings → Video conferencing → **Check access** |
+| Synced, but 0 attended while Details lists people under “not on the invited list” | The call has no invited list linked | Link it to the campaign or invitation that sent the invitations, then Sync now. Campaign-linked calls pick this up automatically |
+| “Zoom has no report for this call yet”, or the call stays Pending | Zoom has not published the report, the call has not ended, or the type/ID/host is wrong | Wait — it retries for 24 hours — and check that **Type of call** is Webinar for a webinar; then Sync now |
 | Zoom says "Invalid access token" | The authorisation is dead (recreated app, rotated secret, changed scopes) | Disconnect the host, then Connect again |
 | Numbers differ between campaign and Statistics | Different windows/denominators | See *What the words mean* above |
 

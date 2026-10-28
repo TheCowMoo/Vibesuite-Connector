@@ -1303,7 +1303,17 @@
   function syncSession(id) {
     var btn = document.querySelector('#sessionsList [data-action="syncSession"][data-id="' + id + '"]');
     withBusy(btn, api('/api/sessions/' + id + '/sync', { method: 'POST' }))
-      .then(function (r) { toast('Attendance synced (' + r.report.attendedCount + ' attended, ' + r.report.noShowCount + ' no-show)', 'success'); loadAttendance(); })
+      .then(function (r) {
+        // Pending means Zoom has no report yet; saying "synced (0 attended)" would be a lie.
+        if (r.status === 'pending') {
+          toast('Zoom has no report for this call yet — it will retry automatically.', 'info');
+        } else {
+          var unlisted = (r.report.attendedNotInvited || []).length;
+          toast('Attendance synced (' + r.report.attendedCount + ' attended, ' + r.report.noShowCount + ' no-show' +
+            (unlisted ? ', ' + unlisted + ' not on the invited list' : '') + ')', 'success');
+        }
+        loadAttendance();
+      })
       .catch(function (e) { toast(e.message, 'error'); });
   }
 
@@ -1331,12 +1341,15 @@
 
     var body = head;
     if (!attendance) {
-      body += '<p class="muted">No attendance synced yet — click "Sync now".</p>';
+      body += session.status === 'pending'
+        ? '<p class="muted">Zoom has no report for this call yet. It retries automatically for 24 hours after the call ends; you can also press "Sync now".</p>'
+        : '<p class="muted">No attendance synced yet — click "Sync now".</p>';
     } else {
       body += '<div class="summary" style="margin:0.5rem 0 1rem">' +
         '<div class="summary__item"><span class="summary__value">' + attendance.invitedCount + '</span><span class="summary__label">invited</span></div>' +
         '<div class="summary__item"><span class="summary__value">' + attendance.attendedCount + '</span><span class="summary__label">attended</span></div>' +
         '<div class="summary__item"><span class="summary__value">' + attendance.noShowCount + '</span><span class="summary__label">no-show</span></div>' +
+        '<div class="summary__item"><span class="summary__value">' + ((attendance.attendedNotInvited || []).length) + '</span><span class="summary__label">not on list</span></div>' +
         '<div class="summary__item"><span class="summary__value">' + Math.round((attendance.attendanceRate || 0) * 100) + '%</span><span class="summary__label">attendance</span></div>' +
         '<div class="summary__item"><span class="summary__value">' + (attendance.registrantCount || 0) + '</span><span class="summary__label">registrants</span></div>' +
         '<div class="summary__item"><span class="summary__value">' + ((attendance.polls || []).length) + '</span><span class="summary__label">polls</span></div>' +
@@ -1355,6 +1368,15 @@
 
       body += '<h3 class="detail__sub">No-show (' + attendance.noShowCount + ')</h3>' +
         (attendance.noShow.length ? '<table class="map"><tbody>' + attendance.noShow.map(function (e) { return '<tr><td>' + esc(e) + '</td></tr>'; }).join('') + '</tbody></table>' : '<p class="muted">None</p>');
+
+      // These people are in the Zoom report but not in the invited list. Hiding them made a successful
+      // sync look like an empty one, so they get their own section and are never counted as attended.
+      var unlisted = attendance.attendedNotInvited || [];
+      if (unlisted.length) {
+        body += '<h3 class="detail__sub">Attended — not on the invited list (' + unlisted.length + ')</h3>' +
+          '<p class="muted">These people joined the call but are not in the invited list it is linked to, so they count as neither attended nor no-show.</p>' +
+          attendanceTable(unlisted);
+      }
 
       if ((attendance.absentees || []).length) {
         body += '<h3 class="detail__sub">Absentees (' + attendance.absentees.length + ')</h3><table class="map"><tbody>' +

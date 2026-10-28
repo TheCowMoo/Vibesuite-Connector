@@ -70,7 +70,9 @@ export async function sessionRoutes(app: FastifyInstance): Promise<void> {
     const id = (req.params as { id: string }).id;
     try {
       const report = await syncSession(id);
-      return { ok: true, report };
+      // `status` tells the panel whether this was a real report or one Zoom has not published yet.
+      const session = await getSession(id);
+      return { ok: true, report, status: session?.status ?? 'synced' };
     } catch (err) {
       reply.code(502).send({ error: (err as Error).message });
     }

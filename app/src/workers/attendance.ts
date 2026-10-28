@@ -9,6 +9,9 @@ import { getList } from '../domain/listStore';
 import { getInvite } from '../domain/inviteStore';
 import { extractRecipients } from '../domain/invite';
 import { getConnection } from '../domain/connectionStore';
+import { getRecipients, listCampaigns } from '../domain/campaignStore';
+import { missingAudienceNote, pickInvitedEmails } from '../domain/sessionAudience';
+import { REPORT_RETRY_WINDOW_MS, syncOutcome } from '../domain/sessionSync';
 import { lookupContactByEmail, addTags } from '../ghl/contacts';
 import { postWebhook } from '../ghl/webhooks';
 import { matchingRules, type ConditionContext } from '../domain/condition';
@@ -93,17 +96,59 @@ function buildPayload(session: SessionRecord, p: AttendancePerson, report: Atten
   };
 }
 
-async function resolveInvitedEmails(session: SessionRecord): Promise<string[]> {
-  if (session.inviteId) {
-    const invite = await getInvite(session.inviteId);
-    if (invite && invite.listId) {
-      const list = await getList(invite.listId);
-      if (list && list.result) {
-        return extractRecipients(list.result, invite.segments).emails;
-      }
-    }
+/** Campaigns whose audience is this call: their frozen rows are the exact invited set. */
+async function campaignInvitedEmails(session: SessionRecord): Promise<{ emails: string[]; campaigns: number }> {
+  const campaigns = (await listCampaigns()).filter((c) => c.sessionId === session.id);
+  if (!campaigns.length) return { emails: [], campaigns: 0 };
+
+  const emails: string[] = [];
+  for (const camp of campaigns) {
+    const recipients = await getRecipients(camp.id);
+    // Only rows that actually went out: a pending or failed recipient was never invited, and
+    // counting them would invent a no-show.
+    for (const r of recipients) if (r.status === 'sent') emails.push(r.email);
   }
-  return [];
+  return { emails, campaigns: campaigns.length };
+}
+
+async function inviteInvitedEmails(session: SessionRecord): Promise<string[]> {
+  if (!session.inviteId) return [];
+  const invite = await getInvite(session.inviteId);
+  if (!invite || !invite.listId) return [];
+  const list = await getList(invite.listId);
+  return list && list.result ? extractRecipients(list.result, invite.segments).emails : [];
+}
+
+async function listInvitedEmails(session: SessionRecord): Promise<string[]> {
+  if (!session.listId) return [];
+  const list = await getList(session.listId);
+  return list && list.result ? extractRecipients(list.result, []).emails : [];
+}
+
+/**
+ * Who was invited to this call.
+ *
+ * Campaigns that link the call win, because their recipient rows are exactly what was emailed.
+ * Sessions created from the Invitations tab fall back to that invitation's list, and a call with a
+ * list attached uses it whole. This used to read `session.inviteId` only, which left every
+ * campaign-linked call with an empty invited set — Zoom's participants then all landed in
+ * `attendedNotInvited` and the panel showed a flat zero.
+ */
+async function resolveInvitedEmails(session: SessionRecord): Promise<{ emails: string[]; linkedCampaigns: number }> {
+  const campaigns = await campaignInvitedEmails(session);
+  if (campaigns.emails.length) {
+    return {
+      emails: pickInvitedEmails({ campaignEmails: campaigns.emails, inviteEmails: [], listEmails: [] }).emails,
+      linkedCampaigns: campaigns.campaigns,
+    };
+  }
+
+  const inviteEmails = await inviteInvitedEmails(session);
+  const listEmails = inviteEmails.length ? [] : await listInvitedEmails(session);
+  return {
+    emails: pickInvitedEmails({ campaignEmails: [], inviteEmails, listEmails }).emails,
+    linkedCampaigns: campaigns.campaigns,
+  };
 }
 
 export async function syncSession(sessionId: string): Promise<AttendanceReport> {
@@ -136,7 +181,7 @@ export async function syncSession(sessionId: string): Promise<AttendanceReport> 
       provider: session.provider,
       sessionTitle: session.title,
       sessionType: session.sessionType ?? 'meeting',
-      invitedEmails: invited,
+      invitedEmails: invited.emails,
       attendees: fetched.attendees,
       absentees: fetched.absentees,
       registrantCount: fetched.registrants,
@@ -146,20 +191,39 @@ export async function syncSession(sessionId: string): Promise<AttendanceReport> 
       minSeconds: env.ATTENDANCE_MIN_SECONDS,
     });
 
-    await saveAttendance(report);
+    const notes = [...(fetched.notes ?? [])];
+    const audienceNote = missingAudienceNote({
+      invitedCount: report.invitedCount,
+      seen: report.attended.length + report.attendedNotInvited.length,
+      linkedCampaigns: invited.linkedCampaigns,
+    });
+    if (audienceNote) notes.push(audienceNote);
 
-    const samplePerson: AttendancePerson =
-      report.attended[0] ?? report.attendedNotInvited[0] ?? { email: 'person@example.com', name: 'Example', status: 'attended' };
+    const reportReady = fetched.reportReady !== false;
+    const outcome = syncOutcome({ reportReady, endTime: session.endTime, now: Date.now() });
+    if (outcome === 'synced' && !reportReady) {
+      notes.push(
+        `Zoom still has no report for this call after ${Math.round(REPORT_RETRY_WINDOW_MS / 3600000)} hours. Check the call type (meeting or webinar), the ID and the selected Zoom host.`,
+      );
+    }
 
-    session.status = 'synced';
+    // Only a real report is stored. An empty placeholder would tell campaign stats that everyone who
+    // said yes was a no-show while Zoom is still preparing the data.
+    if (outcome === 'synced') {
+      await saveAttendance(report);
+      const samplePerson: AttendancePerson =
+        report.attended[0] ?? report.attendedNotInvited[0] ?? { email: 'person@example.com', name: 'Example', status: 'attended' };
+      session.samplePayload = buildPayload(session, samplePerson, report);
+    }
+
+    session.status = outcome;
     session.lastSyncedAt = Date.now();
     session.error = undefined;
     // Keep the provider's explanations (e.g. no report access) so an empty section is not a mystery.
-    session.warnings = fetched.notes;
-    session.samplePayload = buildPayload(session, samplePerson, report);
+    session.warnings = notes.length ? notes : undefined;
     await saveSession(session);
 
-    inc('attendance_synced_total', { provider: session.provider });
+    inc(outcome === 'synced' ? 'attendance_synced_total' : 'attendance_pending_total', { provider: session.provider });
     return report;
   } catch (err) {
     session.status = 'failed';

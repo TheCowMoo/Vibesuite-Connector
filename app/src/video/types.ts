@@ -46,6 +46,12 @@ export interface ProviderFetchResult {
    * section is explained instead of looking broken.
    */
   notes?: string[];
+  /**
+   * False when the provider could not read the call at all yet (report not published, call not ended).
+   * The session stays `pending` so the scheduler retries, instead of storing an empty report that would
+   * look like nobody attended.
+   */
+  reportReady?: boolean;
 }
 
 /** Which tenant a session belongs to, and which video host owns it. */

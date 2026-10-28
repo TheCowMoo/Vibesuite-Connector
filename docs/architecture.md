@@ -250,6 +250,32 @@ survive any of those. `isInvalidToken()` routes that case away from the scope lo
 dropped (the account stays listed, so campaigns still point at it) and the error asks for
 Disconnect → Connect rather than echoing "Invalid access token".
 
+### Who counts as invited, and when a report is ready
+
+`syncSession()` needs two things to turn Zoom's participant list into attendance: the call's **invited
+set**, and a report that actually exists.
+
+The invited set is resolved by `resolveInvitedEmails()` (`workers/attendance.ts`) through
+`pickInvitedEmails()` (`domain/sessionAudience.ts`), in this order: the **frozen recipients of every
+campaign that links the session** (only rows with `status: 'sent'` — a pending or failed recipient was
+never invited), then the linked invitation's list + segments, then a list attached to the session. It used
+to read `session.inviteId` only, which left every campaign-linked call with an empty audience: Zoom's
+participants all fell into `attendedNotInvited`, the panel showed 0 attended / 0 no-show, campaign stats
+lost all attendance and GHL dispatch sent nothing. When the audience is empty but people joined, the
+session carries a warning saying so and the panel lists them under **"Attended — not on the invited
+list"** instead of hiding them.
+
+A missing report is not a zero. Zoom publishes reports after a call ends (webinars can take much longer),
+and `GET /report/*` answers 404 until then. `zoomProvider.fetch()` returns `reportReady: false` when
+neither the report call nor the `past_*` fallback answered, and `syncOutcome()`
+(`domain/sessionSync.ts`) keeps the session **pending** while the call ended less than
+`REPORT_RETRY_WINDOW_MS` (24 h) ago. Only a ready report is stored — an empty placeholder would tell
+campaign stats that everyone who said yes was a no-show — and the scheduler re-syncs pending sessions
+once an hour (`PENDING_RETRY_INTERVAL_MS`) rather than on every poll. After the window the session becomes
+`synced` with a warning naming the likely causes
+(wrong call type, wrong ID, wrong host), so nothing retries forever. The auto-sync dispatches to GHL only
+once a `synced` report exists.
+
 The link a calendar invite carries comes from `sessionJoinUrl()` (`domain/joinLink.ts`), in priority
 order:
 
