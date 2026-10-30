@@ -4,7 +4,7 @@ import { inc } from '../lib/metrics';
 import { createInviteEvent } from '../google/events';
 import { getConnection } from './connectionStore';
 import { getList } from './listStore';
-import { chunk } from './invite';
+import { chunk, eventStartEpoch } from './invite';
 import { buildAudience, describeEmptyAudience } from './audience';
 import { getInvitedEmails, markInvited } from './inviteStore';
 import { getSession } from './sessionStore';
@@ -391,8 +391,8 @@ export async function sendCampaignBatch(campaignId: string, maxPerSender = 200):
     if (camp.nextBatchAt && camp.nextBatchAt > Date.now()) {
       throw new Error(`this campaign is between batches — the next round opens at ${new Date(camp.nextBatchAt).toISOString()}`);
     }
-    const eventStart = Date.parse(camp.event.start);
-    if (Number.isFinite(eventStart) && Date.now() >= eventStart) {
+    const eventStart = eventStartEpoch(camp.event.start, camp.event.timeZone);
+    if (eventStart !== null && Date.now() >= eventStart) {
       throw new Error('the event has already started — an invitation would arrive too late');
     }
   }

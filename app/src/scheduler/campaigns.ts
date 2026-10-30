@@ -6,6 +6,7 @@ import { queueLength } from '../domain/campaignStore';
 import { getSenderGauge, getSenderProfile } from '../domain/senderStore';
 import { finalizeIfDone, redistributeStranded, sendFromSender, startCampaign, endCampaign, markBatchRound } from '../domain/campaignDispatch';
 import { campaignTickAction } from '../domain/campaignLifecycle';
+import { eventStartEpoch } from '../domain/invite';
 import { saveCampaign } from '../domain/campaignStore';
 import {
   allocateBatch,
@@ -130,8 +131,8 @@ async function applyLifecycle(now: Date): Promise<void> {
   for (const camp of camps) {
     // A batched campaign cannot usefully invite people after its event has begun.
     if (camp.eventBatchSize && (camp.status === 'active' || camp.status === 'scheduled')) {
-      const start = Date.parse(camp.event.start);
-      if (Number.isFinite(start) && now.getTime() >= start) {
+      const start = eventStartEpoch(camp.event.start, camp.event.timeZone);
+      if (start !== null && now.getTime() >= start) {
         await endCampaign(camp.id, 'Stopped at the event start');
         logger.info({ campaignId: camp.id }, 'campaign ended at its event start');
         continue;

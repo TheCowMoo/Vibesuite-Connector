@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { extractRecipients, chunk, toRfc3339, hasTimeZoneOffset, resolveEventTime } from '../../src/domain/invite';
+import { extractRecipients, chunk, toRfc3339, hasTimeZoneOffset, resolveEventTime, eventStartEpoch } from '../../src/domain/invite';
 
 describe('extractRecipients', () => {
   it('extracts emails from object rows via an email-ish key', () => {
@@ -81,5 +81,21 @@ describe('resolveEventTime', () => {
   });
   it('throws when there is no offset and no timeZone', () => {
     expect(() => resolveEventTime('2026-10-08T13:18')).toThrow(/timeZone is required/);
+  });
+});
+
+describe('eventStartEpoch', () => {
+  it('interprets a naive wall time in the event timezone', () => {
+    expect(eventStartEpoch('2026-10-08T13:18', 'Asia/Manila')).toBe(Date.UTC(2026, 9, 8, 5, 18));
+    expect(eventStartEpoch('2026-10-08T13:18', 'America/New_York')).toBe(Date.UTC(2026, 9, 8, 17, 18));
+  });
+
+  it('respects an explicit offset instead of the timezone field', () => {
+    expect(eventStartEpoch('2026-10-08T13:18:00Z', 'Asia/Manila')).toBe(Date.UTC(2026, 9, 8, 13, 18));
+    expect(eventStartEpoch('2026-10-08T13:18:00-04:00')).toBe(Date.UTC(2026, 9, 8, 17, 18));
+  });
+
+  it('returns null for an unparseable start', () => {
+    expect(eventStartEpoch('not a date', 'UTC')).toBeNull();
   });
 });

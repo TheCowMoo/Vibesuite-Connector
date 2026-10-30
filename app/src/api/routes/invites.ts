@@ -4,7 +4,7 @@ import { getAiSettings } from '../../domain/aiSettings';
 import { getAllKnowledge } from '../../domain/knowledgeStore';
 import { retrieveContext } from '../../domain/retrieval';
 import { generateJson } from '../../lib/ai';
-import { hasTimeZoneOffset } from '../../domain/invite';
+import { hasTimeZoneOffset, eventStartEpoch } from '../../domain/invite';
 import { buildAudience, describeEmptyAudience } from '../../domain/audience';
 import { createInviteRecord, listInvites, deleteInvite, getInvitedEmails, getInvitedMeta } from '../../domain/inviteStore';
 import { labelPreviousInvite } from '../../domain/reinvite';
@@ -222,7 +222,7 @@ export async function inviteRoutes(app: FastifyInstance): Promise<void> {
     const batchSize = batching ? Math.max(1, Math.min(1000, Math.floor(b.batchSize as number))) : 0;
     const delayMinutes = batching ? Math.max(0, Math.floor(Number(b.delayMinutes) || 0)) : 0;
     const delayMs = delayMinutes * 60_000;
-    const stopAt = Date.parse(ev.start);
+    const stopAt = eventStartEpoch(ev.start, ev.timeZone) ?? Date.parse(ev.start);
     if (batching && (!Number.isFinite(stopAt) || stopAt <= Date.now())) {
       reply.code(400).send({ error: 'the event must start in the future to send invitations in batches' });
       return;

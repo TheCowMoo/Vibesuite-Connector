@@ -123,6 +123,74 @@ export function hasTimeZoneOffset(value: string): boolean {
   return /([Zz]|[+-]\d{2}:?\d{2})$/.test(value.trim());
 }
 
+/**
+ * Epoch millis for an event's wall-clock start, honouring the event's IANA timezone.
+ *
+ * `Date.parse('2026-10-08T13:18')` interprets a naive value in the *server's* timezone, which is
+ * usually UTC in a container. An event at 13:18 Asia/Manila is 05:18 UTC; treating it as 13:18 UTC
+ * would let a batch run eight hours after the event began. Values that already carry `Z` or an
+ * offset are parsed directly.
+ */
+export function eventStartEpoch(value: string, timeZone?: string): number | null {
+  const trimmed = value.trim();
+  if (hasTimeZoneOffset(trimmed)) {
+    const parsed = Date.parse(trimmed);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+
+  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?/.exec(trimmed);
+  if (!m) {
+    const parsed = Date.parse(trimmed);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+
+  const year = Number(m[1]);
+  const month = Number(m[2]);
+  const day = Number(m[3]);
+  const hour = Number(m[4]);
+  const minute = Number(m[5]);
+  const second = Number(m[6] ?? 0);
+  const millis = Number((m[7] ?? '').padEnd(3, '0') || 0);
+  const wallAsUtc = Date.UTC(year, month - 1, day, hour, minute, second, millis);
+
+  if (!timeZone || !timeZone.trim()) return wallAsUtc;
+
+  try {
+    // What wall time does `instant` show in `timeZone`? The difference from the same fields read as
+    // UTC is the zone's offset at that moment. Two passes settle it across a DST transition.
+    const offsetAt = (instant: number): number => {
+      const base = Math.floor(instant / 1000) * 1000;
+      const parts = new Intl.DateTimeFormat('en-US', {
+        timeZone: timeZone.trim(),
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false,
+      }).formatToParts(new Date(base));
+      const get = (type: string): number => Number(parts.find((p) => p.type === type)?.value);
+      const shownAsUtc = Date.UTC(
+        get('year'),
+        get('month') - 1,
+        get('day'),
+        get('hour') % 24,
+        get('minute'),
+        get('second'),
+      );
+      return shownAsUtc - base;
+    };
+
+    let epoch = wallAsUtc - offsetAt(wallAsUtc);
+    epoch = wallAsUtc - offsetAt(epoch);
+    return Number.isFinite(epoch) ? epoch : null;
+  } catch {
+    // An unrecognised zone is left to Google to reject; keep the guard deterministic meanwhile.
+    return wallAsUtc;
+  }
+}
+
 export function resolveEventTime(value: string, timeZone?: string): { dateTime: string; timeZone?: string } {
   const dateTime = toRfc3339(value);
   if (hasTimeZoneOffset(dateTime)) {
