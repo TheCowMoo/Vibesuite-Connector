@@ -950,6 +950,49 @@
     return !!(box && box.checked);
   }
 
+  /**
+   * The round plan for the composer: how many per round, how many rounds, and when the next one is.
+   * This is an estimate — each account's mailbox cap can shrink a round — so it says "up to".
+   */
+  function refreshInviteBatchPreview() {
+    var el = document.getElementById('inviteBatchPreview');
+    if (!el) return;
+    var box = document.getElementById('inviteBatch');
+    if (!box || !box.checked) {
+      el.textContent = '';
+      return;
+    }
+
+    var accounts = selectedInviteAccountIds().length;
+    var batch = Number(document.getElementById('inviteBatchSize').value) || 0;
+    var hours = Math.max(0, Number(document.getElementById('inviteBatchDelay').value) || 0);
+    var reach = inviteRecipientCount + (reinviteTicked() ? inviteAlreadyInvited : 0);
+    if (!accounts || !batch) {
+      el.textContent = 'Pick accounts and a recipients-per-event value to see the round plan.';
+      return;
+    }
+    if (!reach) {
+      el.textContent = 'Pick a list with people to invite to see the round plan.';
+      return;
+    }
+
+    var perRound = accounts * batch;
+    var rounds = Math.max(1, Math.ceil(reach / perRound));
+    var next = prettyDate(Date.now() + hours * 3600000);
+    var text = accounts + ' account' + (accounts === 1 ? '' : 's') + ' × ' + batch + ' = up to ' + perRound +
+      ' per round · ' + rounds + ' round' + (rounds === 1 ? '' : 's') + ' · next round ' + next + '.';
+
+    var start = document.getElementById('inviteStart').value;
+    var stop = start ? new Date(start).getTime() : NaN;
+    if (Number.isFinite(stop)) {
+      var fit = hours > 0 ? Math.max(0, Math.floor((stop - Date.now()) / (hours * 3600000)) + 1) : rounds;
+      if (rounds > fit) {
+        text += ' Only about ' + fit + ' round' + (fit === 1 ? '' : 's') + ' fit before the event starts.';
+      }
+    }
+    el.textContent = text;
+  }
+
   function syncInviteValidity() {
     var btn = document.getElementById('inviteSend');
     var why = document.getElementById('inviteWhy');
@@ -994,6 +1037,7 @@
         why.classList.remove('invite-actions__note--blocking');
       }
     }
+    refreshInviteBatchPreview();
   }
 
   function renderInviteSummaryStrip(invites) {
@@ -1189,6 +1233,10 @@
   document.getElementById('invitePreview').addEventListener('click', refreshInvitePreview);
   document.getElementById('inviteBatch').addEventListener('change', function () {
     document.getElementById('inviteBatchFields').hidden = !this.checked;
+    refreshInviteBatchPreview();
+  });
+  ['inviteBatchSize', 'inviteBatchDelay'].forEach(function (id) {
+    document.getElementById(id).addEventListener('input', refreshInviteBatchPreview);
   });
 
   document.getElementById('inviteDraftAi').addEventListener('click', function () {
@@ -3410,6 +3458,7 @@
     input.addEventListener('change', function () {
       if (id === 'campStart') ensureEndAfterStart('campStart', 'campEnd', 3600000);
       if (id === 'inviteStart') ensureEndAfterStart('inviteStart', 'inviteEnd', 3600000);
+      if (id === 'inviteStart') refreshInviteBatchPreview();
       if (id === 'sessionStart') ensureEndAfterStart('sessionStart', 'sessionEnd', 3600000);
       refreshTimeLimits();
       refreshTimeHints();
