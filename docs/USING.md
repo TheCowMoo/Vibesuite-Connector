@@ -215,8 +215,9 @@ open the tabs and read the numbers. (With auth disabled everyone is effectively 
 | Also invite people who were already invited | Off by default; see the rules below |
 | Start sending | **As soon as I press Begin sending**, or **At a specific time** |
 | Stop sending by (optional) | A hard deadline; presets add +1 day / +3 days / +1 week |
-| Send in batches | Optional: one event per account per round, then wait |
+| Send in batches | Optional: a round creates one event per active variant per account, then waits |
 | Recipients per event / wait between rounds | Appear when batching is on; defaults 300 and 24 h |
+| Test different copy (A/B/C/D) | Optional: A is the subject/description above; add B, C or D to split the audience evenly |
 | Who this will reach | Live count, already minus anyone invited before |
 | When it will finish | Live estimate from the selected mailboxes and their caps |
 | Email subject / Description | What the invitation says |
@@ -230,6 +231,27 @@ mailbox, raise a cap, or move the deadline — before starting.
 If **Send in batches** is on, the estimate also shows roughly how many rounds there will be and when the last
 one starts. It assumes every account can send its full per-round amount, so a lower cap makes the real finish
 later — the note says so.
+
+### Testing copy (A/B/C/D)
+
+Tick **Test different copy (A/B/C/D)** in the campaign wizard to add alternates to the subject/description
+above (variant A). On **Begin sending**, recipients are split as evenly as possible across A/B/C/D and each
+active variant gets its own calendar event. With batching, the per-event limit is shared across the variants,
+so four variants on one account produce four smaller events in that round.
+
+Open **Campaigns → Details** to see every variant and **Send test copy**. A test:
+
+- is a real Google Calendar invite to 1–5 addresses, titled `[TEST] <subject>`;
+- uses the same time, join link and copy as the real variant;
+- does **not** enter the queue, mark anyone invited, or appear in the campaign stats;
+- leaves a `[TEST]` event on the sending account's calendar, and its RSVPs are ignored by the sync pipeline.
+
+Campaign Details also shows **What happened, per copy variant**: sent, yes/no/maybe/no reply, attendance (once
+the call is synced), RSVP rate and acceptance rate. The app has no open/click tracking, so choose a winner
+yourself from those numbers — there is no automatic winner.
+
+Variants are fixed when sending starts. While a campaign is a draft or scheduled, **Details → Edit copy** lets
+you change A/B/C/D; once the audience is frozen, the copy is locked.
 
 **Create campaign** saves it as a draft — or as **Scheduled** when you chose a later start. Nothing is frozen
 yet either way, and every field can still be changed.
@@ -320,8 +342,13 @@ You set the ceiling; the scheduler decides the moment-to-moment order.
 9. **A campaign is one event, one webinar, one Zoom host.** Need a second event? Create a second campaign.
 10. **A batched send stops at the event start.** No round begins after it; anyone left stays uninvited and is
     reported in the schedule's error line.
-11. **A round is one event per account, not one event overall.** Three accounts create three events per round,
-    each with its own event ID; attendance reads all of them.
+11. **A round is one event per account, not one event overall.** Without copy variants, three accounts create
+    three events per round, each with its own event ID; attendance reads all of them. Each active A/B/C/D
+    variant adds another event per account.
+12. **A/B/C/D adds events, not recipients.** Each active variant gets its own event, so four variants on three
+    accounts can create up to twelve events in a round; the total recipients per account per round is unchanged.
+13. **A test copy does not count as an invitation.** It sends a real `[TEST]` calendar invite but never enters
+    the queue, the invited set or the campaign stats; its RSVPs are ignored by the sync pipeline.
 
 ## Reading the numbers
 

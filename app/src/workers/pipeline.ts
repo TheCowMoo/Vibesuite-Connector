@@ -12,6 +12,7 @@ import { toGhlAction } from '../domain/transform';
 import { tryClaimDispatch, releaseDispatch } from '../domain/dispatchGuard';
 import { matchingRules, type ConditionContext } from '../domain/condition';
 import { saveSnapshot } from '../domain/snapshotStore';
+import { isCampaignTestEvent } from '../domain/campaignStore';
 import { mapping } from '../ghl/mapping';
 import { updateAppointmentStatus } from '../ghl/appointments';
 import { addTags, removeTags, setDnd, updateCustomField, addNote } from '../ghl/contacts';
@@ -87,6 +88,14 @@ async function runSync(conn: StoredConnection): Promise<void> {
 
 async function dispatchChange(conn: StoredConnection, change: AttendeeChange): Promise<void> {
   const connectionId = conn.id;
+
+  // A test copy is a real calendar event but not a campaign send. Its RSVPs must never create/update
+  // a GHL contact or fire attendance/tag rules.
+  if (await isCampaignTestEvent(connectionId, change.eventId)) {
+    logger.info({ connectionId, eventId: change.eventId, email: change.email }, 'test-copy RSVP ignored');
+    return;
+  }
+
   const action = toGhlAction(change.newStatus);
   const fingerprint = buildChangeFingerprint(connectionId, change);
   const mode = conn.ghlDeliveryMode ?? 'both';

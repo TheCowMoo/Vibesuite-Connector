@@ -647,6 +647,9 @@ fieldset.field legend { margin-bottom: 0.4rem; }
 .camp-sender:last-child { border-bottom: 0; }
 .camp-sender .daychk { flex: 1; }
 .camp-sender input[type="number"] { width: 5.5rem; margin: 0; }
+.camp-variant { border: 1px solid var(--line); border-radius: 10px; padding: 0.6rem 0.75rem; margin: 0.5rem 0; }
+.camp-variant .field__label-row { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; }
+.camp-variant input, .camp-variant textarea { margin-top: 0.35rem; }
 
 /* ---- Guided tour ---- */
 .tour { position: fixed; inset: 0; z-index: 60; }

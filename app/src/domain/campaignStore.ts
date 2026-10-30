@@ -43,7 +43,8 @@ export async function deleteCampaign(id: string): Promise<void> {
     .multi()
     .srem(REDIS_KEYS.campaignsIndex(), id)
     .del(REDIS_KEYS.campaign(id))
-    .del(REDIS_KEYS.campaignRecipients(id));
+    .del(REDIS_KEYS.campaignRecipients(id))
+    .del(REDIS_KEYS.campaignVariantMap(id));
   if (rec) {
     for (const s of rec.senders) {
       multi.del(REDIS_KEYS.campaignQueue(id, s.connectionId)).del(REDIS_KEYS.campaignSender(id, s.connectionId));
@@ -157,4 +158,53 @@ export async function resetCampaignCounters(id: string, connectionIds: string[])
 
 export async function clearRecipients(id: string): Promise<void> {
   await redis.del(REDIS_KEYS.campaignRecipients(id));
+}
+
+/* ---------------- copy variants + test events ---------------- */
+
+/** email -> A/B/C/D, written once when the audience is frozen. */
+export async function setCampaignVariantMap(id: string, map: Record<string, string>): Promise<void> {
+  const entries = Object.entries(map);
+  if (!entries.length) return;
+  const multi = redis.multi();
+  for (const [email, variant] of entries) {
+    multi.hset(REDIS_KEYS.campaignVariantMap(id), email.trim().toLowerCase(), variant);
+  }
+  await multi.exec();
+}
+
+export async function getCampaignVariantMap(id: string, emails: string[]): Promise<Record<string, string>> {
+  if (!emails.length) return {};
+  const keys = emails.map((email) => email.trim().toLowerCase());
+  const values = await redis.hmget(REDIS_KEYS.campaignVariantMap(id), ...keys);
+  const out: Record<string, string> = {};
+  keys.forEach((email, index) => {
+    const variant = values[index];
+    if (variant) out[email] = variant;
+  });
+  return out;
+}
+
+export async function clearCampaignVariantMap(id: string): Promise<void> {
+  await redis.del(REDIS_KEYS.campaignVariantMap(id));
+}
+
+/**
+ * Remember a test-copy event so the RSVP pipeline can ignore it. A test invite is a real calendar
+ * event, so without this its responses could create or update a GHL contact.
+ */
+export async function markCampaignTestEvent(connectionId: string, eventId: string): Promise<void> {
+  if (!eventId) return;
+  await redis.set(REDIS_KEYS.campaignTestEvent(connectionId, eventId), '1', 'EX', 60 * 60 * 24 * 30);
+}
+
+export async function isCampaignTestEvent(connectionId: string, eventId: string): Promise<boolean> {
+  if (!eventId) return false;
+  return (await redis.exists(REDIS_KEYS.campaignTestEvent(connectionId, eventId))) === 1;
+}
+
+/** Small guard so a double-click cannot send the same test copy twice within a few seconds. */
+export async function acquireCampaignTestCopyLock(id: string, ttlSeconds = 5): Promise<boolean> {
+  const res = await redis.set(REDIS_KEYS.campaignTestCopyLock(id), '1', 'EX', ttlSeconds, 'NX');
+  return res === 'OK';
 }

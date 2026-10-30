@@ -2,8 +2,14 @@ import { describe, it, expect } from 'vitest';
 import { buildCampaignStats, normalizeRsvp, percent } from '../../src/domain/campaignStats';
 import type { RecipientRecord } from '../../src/domain/campaign';
 
-function rec(email: string, connectionId: string, status: RecipientRecord['status'], eventId?: string): RecipientRecord {
-  return { email, connectionId, status, eventId };
+function rec(
+  email: string,
+  connectionId: string,
+  status: RecipientRecord['status'],
+  eventId?: string,
+  variant?: RecipientRecord['variant'],
+): RecipientRecord {
+  return { email, connectionId, status, eventId, variant };
 }
 
 describe('normalizeRsvp', () => {
@@ -114,9 +120,28 @@ describe('buildCampaignStats', () => {
   });
 
   it('handles an empty campaign', () => {
-    const { funnel, perSender } = buildCampaignStats({ recipients: [], rsvpByConnection: {} });
+    const { funnel, perSender, variants } = buildCampaignStats({ recipients: [], rsvpByConnection: {} });
     expect(funnel.invited).toBe(0);
     expect(funnel.acceptanceRate).toBe(0);
     expect(perSender).toEqual([]);
+    expect(variants).toEqual([]);
+  });
+
+  it('attributes the funnel per copy variant', () => {
+    const { funnel, variants } = buildCampaignStats({
+      recipients: [
+        rec('a@x.com', 'm1', 'sent', 'evA', 'A'),
+        rec('b@x.com', 'm1', 'sent', 'evA', 'A'),
+        rec('c@x.com', 'm1', 'sent', 'evB', 'B'),
+      ],
+      rsvpByConnection: {
+        m1: { evA: { 'a@x.com': 'accepted', 'b@x.com': 'declined' }, evB: { 'c@x.com': 'accepted' } },
+      },
+    });
+
+    expect(funnel).toMatchObject({ invited: 3, sent: 3, accepted: 2, declined: 1 });
+    expect(variants.map((v) => v.variant)).toEqual(['A', 'B']);
+    expect(variants[0]).toMatchObject({ variant: 'A', invited: 2, sent: 2, accepted: 1, declined: 1, acceptanceRate: 50 });
+    expect(variants[1]).toMatchObject({ variant: 'B', invited: 1, sent: 1, accepted: 1, acceptanceRate: 100 });
   });
 });

@@ -474,7 +474,8 @@ events and 900 invitations.
 **Campaigns** (`eventBatchSize`, `batchDelayMinutes`, `nextBatchAt`, `lastBatchAt`):
 
 - Opt-in fields on the campaign. `sendFromSender()` caps the claimed batch at `eventBatchSize` and creates
-  exactly one event per account; with batching off, the original chunking and numbered suffix are untouched.
+  exactly one event per active variant per account; with batching off, the original chunking and numbered suffix
+  are untouched.
 - `activeCampaigns(now)` skips a campaign whose `nextBatchAt` has not arrived. After a tick in which a
   campaign actually sent, `markBatchRound()` sets `nextBatchAt = now + delay`; the manual “Send a batch”
   action uses the same helper and refuses while the gate is closed.
@@ -485,6 +486,32 @@ events and 900 invitations.
 
 **Shared semantics:** delay from the end of the previous round; remainder carried forward; a failed event is
 retried for those recipients in the next round; no round begins at or after the event start.
+
+### A/B/C/D copy variants and test copies
+
+A campaign can carry up to four copy variants (`copyVariants: [{ id: 'A'|'B'|'C'|'D', summary, description? }]`).
+Variant A is mirrored into the legacy `event.summary`/`event.description`, so cards, attendance labels and older
+clients keep reading one coherent subject.
+
+- At **Begin sending**, `startCampaign()` assigns every audience email round-robin across the active variants
+  (even split, deterministic) and writes the `campaign:{id}:variants` hash. The recipient row also stores
+  `variant`, so the queue can keep carrying plain email addresses and redistribution does not lose the assignment.
+- `sendFromSender()` groups its claimed batch by variant and creates **one event per active variant** in batched
+  mode (or the usual chunks in legacy mode). `eventBatchSize` remains the total per account per round, so four
+  variants × three accounts can mean up to twelve smaller events rather than three large ones. Google Calendar has
+  one summary/description per event, so this is unavoidable for real per-recipient copy.
+- `markInvited()` records the variant's subject. `buildCampaignStats()` adds a `variants` funnel alongside the
+  aggregate funnel and per-sender table, using the existing recipient `eventId` and RSVP map. There is no
+  open/click tracking, so the winner is a manual read of RSVP/attendance, not an automatic decision.
+- Variants are frozen once `startedAt` is set. Draft/scheduled campaigns can still be patched; a paused/active
+  campaign rejects `copyVariants` changes.
+
+**Test copy** (`POST /api/campaigns/:id/test-copy`, owner/admin) sends a real calendar invite to 1–5 test
+addresses from one campaign sender, with the title prefixed `[TEST]`. It deliberately does **not** create
+recipient rows, queues, caps, stats or invited-set entries. The event ID is stored in
+`campaign:test-event:{connectionId}:{eventId}` for 30 days, and `dispatchChange()` skips those IDs so a test
+RSVP cannot create/update a GHL contact or fire attendance/webhook rules. The test event remains on the sender's
+calendar, marked `[TEST]`.
 
 ## Security model
 

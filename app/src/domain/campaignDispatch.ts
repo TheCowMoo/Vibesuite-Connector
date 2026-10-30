@@ -21,8 +21,11 @@ import { isoDate } from './senderLoad';
 import {
   bumpCampaignSender,
   clearCampaignQueues,
+  clearCampaignVariantMap,
   clearRecipients,
   getCampaign,
+  getCampaignVariantMap,
+  markCampaignTestEvent,
   popQueue,
   pushQueue,
   queueLength,
@@ -31,10 +34,12 @@ import {
   resetCampaignCounters,
   saveCampaign,
   saveRecipient,
+  setCampaignVariantMap,
   setRecipients,
   tryClaimRecipient,
 } from './campaignStore';
 import { allocateEmails, type Campaign, type CampaignSender, type RecipientRecord } from './campaign';
+import { assignVariants, campaignVariants, groupEmailsByVariant } from './campaignVariants';
 import { startBlockedByDeadline } from './campaignLifecycle';
 import { dueForNextBatch, senderReadiness } from './campaignSchedule';
 import { sessionJoinUrl } from './joinLink';
@@ -93,6 +98,13 @@ export async function startCampaign(
   await clearCampaignQueues(id, connectionIds);
   await resetCampaignCounters(id, connectionIds);
   await clearRecipients(id);
+  await clearCampaignVariantMap(id);
+
+  // Freeze the A/B/C/D split with the audience. The queue still carries plain emails; this map is
+  // what lets a mailbox group its claimed slice by variant without an extra read per recipient.
+  const variants = campaignVariants(camp);
+  const variantByEmail = assignVariants(emails, variants);
+  await setCampaignVariantMap(id, variantByEmail);
 
   const allocated = allocateEmails(emails, camp.senders);
   const records: RecipientRecord[] = [];
@@ -101,7 +113,14 @@ export async function startCampaign(
   for (const connectionId of Object.keys(allocated)) {
     const list_ = allocated[connectionId];
     perSender[connectionId] = list_.length;
-    for (const email of list_) records.push({ email, connectionId, status: 'pending' });
+    for (const email of list_) {
+      records.push({
+        email,
+        connectionId,
+        status: 'pending',
+        variant: variantByEmail[email.trim().toLowerCase()] ?? variants[0].id,
+      });
+    }
     await pushQueue(id, connectionId, list_);
   }
 
@@ -197,62 +216,89 @@ export async function sendFromSender(
 
   {
     const popped = await popQueue(campaignId, ps.connectionId, allowance);
+    const variants = campaignVariants(camp);
+    const fallbackVariant = variants[0].id;
+    const activeVariants = new Set(variants.map((v) => v.id));
+    const variantByEmail = await getCampaignVariantMap(campaignId, popped);
 
     // Claim first — a recipient is only ever invited once per campaign.
     const claimed: string[] = [];
     for (const email of popped) {
+      const raw = variantByEmail[email.trim().toLowerCase()];
+      const variant = (raw && activeVariants.has(raw as typeof fallbackVariant) ? raw : fallbackVariant) as typeof fallbackVariant;
       if (await tryClaimRecipient(campaignId, email)) claimed.push(email);
-      else await saveRecipient(campaignId, { email, connectionId: ps.connectionId, status: 'sent', sentAt: Date.now() });
+      else await saveRecipient(campaignId, { email, connectionId: ps.connectionId, status: 'sent', sentAt: Date.now(), variant });
     }
 
-    // Batched campaigns create exactly one event per account per round. Without batching, the
-    // original chunking (with its numbered suffix) is preserved.
-    const parts = camp.eventBatchSize && camp.eventBatchSize > 0
-      ? (claimed.length ? [claimed] : [])
-      : chunk(claimed, env.INVITE_BATCH_SIZE);
+    // Each variant gets its own event(s): Google Calendar has one summary/description per event.
+    // `eventBatchSize` is the total for this account this round, split across the variant groups.
+    const grouped = groupEmailsByVariant(claimed, variantByEmail, fallbackVariant, variants);
     let sent = 0;
     let failed = 0;
     const failedEmails: string[] = [];
 
-    for (let i = 0; i < parts.length; i += 1) {
-      const part = parts[i];
-      const summary = parts.length > 1 ? `${camp.event.summary} (${i + 1}/${parts.length})` : camp.event.summary;
-      try {
-        const res = await createInviteEvent(conn, {
-          summary,
-          description: camp.event.description,
-          location: joinUrl || camp.event.location,
-          start: camp.event.start,
-          end: camp.event.end,
-          timeZone: camp.event.timeZone,
-          emails: part,
-        });
+    for (const variant of variants) {
+      const group = grouped.get(variant.id) ?? [];
+      if (!group.length) continue;
 
-        sent += part.length;
-        for (const email of part) {
-          await saveRecipient(campaignId, { email, connectionId: ps.connectionId, status: 'sent', sentAt: Date.now(), eventId: res.id });
+      const parts = camp.eventBatchSize && camp.eventBatchSize > 0
+        ? [group]
+        : chunk(group, env.INVITE_BATCH_SIZE);
+
+      for (let i = 0; i < parts.length; i += 1) {
+        const part = parts[i];
+        if (!part.length) continue;
+        const summary = parts.length > 1 ? `${variant.summary} (${i + 1}/${parts.length})` : variant.summary;
+        try {
+          const res = await createInviteEvent(conn, {
+            summary,
+            description: variant.description ?? camp.event.description,
+            location: joinUrl || camp.event.location,
+            start: camp.event.start,
+            end: camp.event.end,
+            timeZone: camp.event.timeZone,
+            emails: part,
+          });
+
+          sent += part.length;
+          for (const email of part) {
+            await saveRecipient(campaignId, {
+              email,
+              connectionId: ps.connectionId,
+              status: 'sent',
+              sentAt: Date.now(),
+              eventId: res.id,
+              variant: variant.id,
+            });
+          }
+          await markInvited(camp.listId, part, {
+            summary: variant.summary,
+            start: camp.event.start,
+            source: 'campaign',
+          });
+          await bumpSenderDay(ps.connectionId, todayISO, 'sent', part.length);
+          await bumpSenderHour(ps.connectionId, hourISO, part.length);
+          await bumpCampaignSender(campaignId, ps.connectionId, 'sent', part.length);
+          inc('campaign_invites_sent_total');
+        } catch (err) {
+          const msg = describeError(err);
+          failed += part.length;
+          failedEmails.push(...part);
+          for (const email of part) {
+            await saveRecipient(campaignId, {
+              email,
+              connectionId: ps.connectionId,
+              status: 'failed',
+              error: msg,
+              variant: variant.id,
+            });
+            await releaseRecipient(campaignId, email);
+          }
+          await bumpSenderDay(ps.connectionId, todayISO, 'failed', part.length);
+          await bumpCampaignSender(campaignId, ps.connectionId, 'failed', part.length);
+          inc('campaign_invites_failed_total');
+          logger.error({ campaignId, connectionId: ps.connectionId, variant: variant.id, err: msg }, 'campaign invite batch failed');
         }
-        await markInvited(camp.listId, part, {
-          summary: camp.event.summary,
-          start: camp.event.start,
-          source: 'campaign',
-        });
-        await bumpSenderDay(ps.connectionId, todayISO, 'sent', part.length);
-        await bumpSenderHour(ps.connectionId, hourISO, part.length);
-        await bumpCampaignSender(campaignId, ps.connectionId, 'sent', part.length);
-        inc('campaign_invites_sent_total');
-      } catch (err) {
-        const msg = describeError(err);
-        failed += part.length;
-        failedEmails.push(...part);
-        for (const email of part) {
-          await saveRecipient(campaignId, { email, connectionId: ps.connectionId, status: 'failed', error: msg });
-          await releaseRecipient(campaignId, email);
-        }
-        await bumpSenderDay(ps.connectionId, todayISO, 'failed', part.length);
-        await bumpCampaignSender(campaignId, ps.connectionId, 'failed', part.length);
-        inc('campaign_invites_failed_total');
-        logger.error({ campaignId, connectionId: ps.connectionId, err: msg }, 'campaign invite batch failed');
       }
     }
 
@@ -335,6 +381,9 @@ export async function redistributeStranded(camp: Campaign): Promise<number> {
   });
   if (!healthy.length || !stranded.length) return 0;
 
+  const activeVariants = campaignVariants(camp);
+  const activeIds = new Set(activeVariants.map((v) => v.id));
+  const fallbackVariant = activeVariants[0].id;
   let moved = 0;
 
   for (const from of stranded) {
@@ -343,6 +392,7 @@ export async function redistributeStranded(camp: Campaign): Promise<number> {
 
     const emails = await popQueue(camp.id, from, queued);
     if (!emails.length) continue;
+    const variantByEmail = await getCampaignVariantMap(camp.id, emails);
 
     const targets = healthy.filter((h) => h.connectionId !== from);
     if (!targets.length) {
@@ -360,7 +410,13 @@ export async function redistributeStranded(camp: Campaign): Promise<number> {
       if (!slice.length) continue;
       await pushQueue(camp.id, target, slice);
       for (const email of slice) {
-        await saveRecipient(camp.id, { email, connectionId: target, status: 'pending' });
+        const raw = variantByEmail[email.trim().toLowerCase()];
+        await saveRecipient(camp.id, {
+          email,
+          connectionId: target,
+          status: 'pending',
+          variant: (raw && activeIds.has(raw as typeof fallbackVariant) ? raw : fallbackVariant) as typeof fallbackVariant,
+        });
       }
       moved += slice.length;
     }
@@ -428,4 +484,69 @@ export async function markBatchRound(campaignId: string, now = Date.now()): Prom
   camp.lastBatchAt = now;
   camp.nextBatchAt = now + camp.batchDelayMinutes * 60_000;
   await saveCampaign(camp);
+}
+
+export interface TestCopyResult {
+  eventId: string;
+  htmlLink?: string;
+  variantId: string;
+  sentTo: string[];
+}
+
+/**
+ * Send a real calendar invite with one variant's copy to test addresses.
+ *
+ * This deliberately does not touch recipients, queues, caps, stats or `list:{id}:invited`: it is a
+ * preview of the actual invitation, not a send. The event ID is remembered so the RSVP pipeline
+ * ignores responses to it.
+ */
+export async function sendCampaignTestCopy(
+  camp: Campaign,
+  input: { emails: string[]; variantId?: string; connectionId?: string },
+): Promise<TestCopyResult> {
+  const variants = campaignVariants(camp);
+  const variant = input.variantId
+    ? variants.find((v) => v.id === input.variantId)
+    : variants[0];
+  if (!variant) throw new Error(`copy variant ${input.variantId} not found`);
+
+  const sender = camp.senders.find(
+    (s) => s.enabled && (!input.connectionId || s.connectionId === input.connectionId),
+  );
+  if (!sender) throw new Error('choose an enabled sending account from this campaign');
+
+  const conn = await getConnection(sender.connectionId);
+  if (!conn) throw new Error('sending account not found');
+  if (conn.status !== 'active') throw new Error('sending account is not connected to Google');
+
+  const emails = Array.from(
+    new Set(
+      (input.emails || [])
+        .map((email) => String(email).trim().toLowerCase())
+        .filter(Boolean),
+    ),
+  );
+  if (!emails.length) throw new Error('add at least one test email address');
+  if (emails.length > 5) throw new Error('a test copy can go to at most 5 addresses');
+  const invalid = emails.find((email) => !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email));
+  if (invalid) throw new Error(`not a valid email address: ${invalid}`);
+
+  const eventStart = eventStartEpoch(camp.event.start, camp.event.timeZone);
+  if (eventStart !== null && eventStart <= Date.now()) {
+    throw new Error('the event has already started — a test copy would arrive too late');
+  }
+
+  const joinUrl = await resolveJoinUrl(camp);
+  const res = await createInviteEvent(conn, {
+    summary: `[TEST] ${variant.summary}`,
+    description: variant.description ?? camp.event.description,
+    location: joinUrl || camp.event.location,
+    start: camp.event.start,
+    end: camp.event.end,
+    timeZone: camp.event.timeZone,
+    emails,
+  });
+
+  await markCampaignTestEvent(conn.id, res.id);
+  return { eventId: res.id, htmlLink: res.htmlLink, variantId: variant.id, sentTo: emails };
 }

@@ -806,12 +806,12 @@
       </label>
     </div>
     <div class="field">
-      <label class="daychk"><input type="checkbox" id="campBatch" /><span>Send in batches (one event per account per round)</span></label>
+      <label class="daychk"><input type="checkbox" id="campBatch" /><span>Send in batches (one round at a time)</span></label>
       <div class="invite-row" id="campBatchFields" hidden>
         <label class="field"><span class="field__label">Recipients per event</span><input type="number" id="campBatchSize" min="1" max="1000" value="300" /></label>
         <label class="field"><span class="field__label">Wait between rounds (hours)</span><input type="number" id="campBatchDelay" min="0" step="1" value="24" /></label>
       </div>
-      <span class="field__hint">Each account creates one event per round. Mailbox caps still apply, so a round can be smaller than the batch size.</span>
+      <span class="field__hint">Each active variant creates one event per account per round. Mailbox caps still apply, so a round can be smaller than the batch size.</span>
     </div>
     <div class="field"><span class="field__label">Who this will reach</span><div id="campAudience" aria-live="polite"><span class="muted">Pick a contact list to see who will be invited.</span></div></div>
     <div class="field"><span class="field__label">When it will finish</span><div id="campPlan" aria-live="polite"><span class="muted">Pick a contact list and at least one sending account to see the pace.</span></div></div>
@@ -822,6 +822,12 @@
     </div>
     <p class="field__hint" id="campTzHint"></p>
     <label class="field"><span class="field__label">Description</span><textarea id="campDesc" rows="2" placeholder="Agenda, speaker, what to expect..."></textarea></label>
+    <div class="field">
+      <label class="daychk"><input type="checkbox" id="campVariantsOn" /><span>Test different copy (A/B/C/D)</span></label>
+      <span class="field__hint">A is the subject and description above. Add B, C or D to split the audience evenly. Each active variant creates its own calendar event.</span>
+      <div id="campVariantsList"></div>
+      <button type="button" class="btn btn--ghost btn--sm" id="campAddVariant" hidden>Add another variant</button>
+    </div>
     <div class="field"><span class="field__label">Which Google accounts send this</span><div id="campSenders"></div></div>
     <div class="modal__foot">
       <span class="spacer"></span>
@@ -915,6 +921,48 @@
   </div>
 </div>
 
+<!-- Test copy -->
+<div class="backdrop" id="testCopyModal" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="testCopyTitle">
+    <div class="modal__head">
+      <h2 class="modal__title" id="testCopyTitle">Send test copy</h2>
+      <button class="icon-btn" data-close="testCopyModal" aria-label="Close">&times;</button>
+    </div>
+    <p class="muted" id="testCopyIntro"></p>
+    <label class="field"><span class="field__label">Send from</span><select id="testCopySender"></select></label>
+    <label class="field"><span class="field__label">Test email addresses (comma-separated, max 5)</span><input id="testCopyEmails" placeholder="you@example.com" /></label>
+    <div class="invite-result" id="testCopyResult" hidden></div>
+    <div class="modal__foot">
+      <span class="spacer"></span>
+      <button class="btn btn--ghost" data-close="testCopyModal">Close</button>
+      <button class="btn btn--primary" id="testCopySend">Send test copy</button>
+    </div>
+  </div>
+</div>
+
+
+
+<!-- Edit campaign copy -->
+<div class="backdrop" id="editCopyModal" hidden>
+  <div class="modal modal--wide" role="dialog" aria-modal="true" aria-labelledby="editCopyTitle">
+    <div class="modal__head">
+      <h2 class="modal__title" id="editCopyTitle">Edit campaign copy</h2>
+      <button class="icon-btn" data-close="editCopyModal" aria-label="Close">&times;</button>
+    </div>
+    <label class="field"><span class="field__label">Subject A (base)</span><input id="editCopySummary" /></label>
+    <label class="field"><span class="field__label">Description A</span><textarea id="editCopyDesc" rows="3"></textarea></label>
+    <div class="field">
+      <span class="field__label">Alternate variants</span>
+      <div id="editCopyVariantsList"></div>
+      <button type="button" class="btn btn--ghost btn--sm" id="editCopyAdd">Add another variant</button>
+    </div>
+    <div class="modal__foot">
+      <span class="spacer"></span>
+      <button class="btn btn--ghost" data-close="editCopyModal">Cancel</button>
+      <button class="btn btn--primary" id="editCopySave">Save copy</button>
+    </div>
+  </div>
+</div>
 
 
 <!-- How it works -->

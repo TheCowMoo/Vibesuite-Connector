@@ -3188,6 +3188,11 @@
   /** Authorised Zoom hosts, shared across campaigns. */
   var zoomAccounts = [];
   var currentCampaignId = null;
+  var currentCampaign = null;
+  var campCopyVariants = [];
+  var editCopyVariants = [];
+  var testCopyVariantId = null;
+  var CAMP_ALT_IDS = ['B', 'C', 'D'];
 
   function campStatusChip(status) {
     var tone = { draft: 'neutral', active: 'success', paused: 'warning', completed: 'neutral', scheduled: 'neutral', ended: 'neutral' };
@@ -3349,6 +3354,9 @@
             (c.zoomUserId ? '<span class="chip chip--neutral">Zoom: ' + esc(zoomAccountLabel(c.zoomUserId)) + '</span>' : '') +
             (c.sendByAt ? '<span class="chip chip--neutral">Stop by ' + esc(prettyDate(c.sendByAt)) + '</span>' : '') +
             (c.nextBatchAt ? '<span class="chip chip--neutral">Next round ' + esc(prettyDate(c.nextBatchAt)) + '</span>' : '') +
+            (c.copyVariants && c.copyVariants.length > 1
+              ? '<span class="chip chip--neutral">Copy ' + esc(c.copyVariants.map(function (v) { return v.id; }).join('/')) + '</span>'
+              : '') +
             (counts.failed ? '<span class="chip chip--danger">' + counts.failed + " didn't go through</span>" : '') + '</div>' +
           '<div class="conn__meta"><span class="conn__cal">' + icon('calendar') + esc(campListName(c.listId)) + '</span>' +
             '<span class="conn__cal">' + esc(prettyDate(c.event.start)) + '</span></div>' +
@@ -3682,6 +3690,61 @@
     }).join('');
   }
 
+  function nextCampVariantId() {
+    for (var i = 0; i < CAMP_ALT_IDS.length; i++) {
+      var id = CAMP_ALT_IDS[i];
+      if (!campCopyVariants.some(function (v) { return v.id === id; })) return id;
+    }
+    return null;
+  }
+
+  function renderCampVariants() {
+    var box = document.getElementById('campVariantsList');
+    var add = document.getElementById('campAddVariant');
+    var on = document.getElementById('campVariantsOn').checked;
+    box.hidden = !on;
+    box.innerHTML = on ? campCopyVariants.slice().sort(function (a, b) {
+      return CAMP_ALT_IDS.indexOf(a.id) - CAMP_ALT_IDS.indexOf(b.id);
+    }).map(function (v) {
+      return '<div class="camp-variant" data-variant-box="' + esc(v.id) + '">' +
+        '<div class="field__label-row"><span class="field__label">Variant ' + esc(v.id) + ' subject</span>' +
+        '<button type="button" class="btn btn--ghost btn--sm" data-remove-variant="' + esc(v.id) + '">Remove</button></div>' +
+        '<input data-variant-summary="' + esc(v.id) + '" value="' + esc(v.summary || '') + '" placeholder="Subject for variant ' + esc(v.id) + '" />' +
+        '<textarea data-variant-desc="' + esc(v.id) + '" rows="2" placeholder="Description for variant ' + esc(v.id) + '">' + esc(v.description || '') + '</textarea>' +
+        '</div>';
+    }).join('') : '';
+    var next = nextCampVariantId();
+    add.hidden = !on || !next;
+    add.textContent = next ? 'Add variant ' + next : 'All variants added';
+  }
+
+  function syncCampVariantsFromInputs() {
+    $$('#campVariantsList [data-variant-summary]').forEach(function (input) {
+      var id = input.dataset.variantSummary;
+      var row = campCopyVariants.filter(function (v) { return v.id === id; })[0];
+      if (!row) return;
+      row.summary = input.value;
+      var desc = document.querySelector('#campVariantsList [data-variant-desc="' + id + '"]');
+      row.description = desc ? desc.value : '';
+    });
+  }
+
+  function addCampVariant() {
+    syncCampVariantsFromInputs();
+    var id = nextCampVariantId();
+    if (!id) return;
+    campCopyVariants.push({ id: id, summary: '', description: '' });
+    renderCampVariants();
+    var input = document.querySelector('#campVariantsList [data-variant-summary="' + id + '"]');
+    if (input) input.focus();
+  }
+
+  function resetCampVariants() {
+    campCopyVariants = [];
+    document.getElementById('campVariantsOn').checked = false;
+    renderCampVariants();
+  }
+
   function openCampaignWizard() {
     document.getElementById('campList').innerHTML = campLists.length
       ? campLists.map(function (l) {
@@ -3715,6 +3778,7 @@
     document.getElementById('campBatchSize').value = '300';
     document.getElementById('campBatchDelay').value = '24';
     document.getElementById('campBatchFields').hidden = true;
+    resetCampVariants();
 
     renderCampSenderRows();
     loadCampaignSegments();
@@ -3822,6 +3886,31 @@
       }
       body.eventBatchSize = Math.floor(batchSize);
       body.batchDelayMinutes = Math.round(batchHours * 60);
+    }
+
+    if (document.getElementById('campVariantsOn').checked) {
+      syncCampVariantsFromInputs();
+      if (!campCopyVariants.length) {
+        toast('Add at least one alternate variant, or turn A/B/C/D off', 'error');
+        return;
+      }
+      for (var vi = 0; vi < campCopyVariants.length; vi++) {
+        if (!String(campCopyVariants[vi].summary || '').trim()) {
+          toast('Variant ' + campCopyVariants[vi].id + ' needs a subject', 'error');
+          return;
+        }
+      }
+      body.copyVariants = [{
+        id: 'A',
+        summary: summary,
+        description: body.event.description
+      }].concat(campCopyVariants.map(function (v) {
+        return {
+          id: v.id,
+          summary: String(v.summary).trim(),
+          description: String(v.description || '').trim() || undefined
+        };
+      }));
     }
 
     withBusy(btn, api('/api/campaigns', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }))
@@ -3956,6 +4045,7 @@
 
   function openCampaignDetail(id) {
     currentCampaignId = id;
+    currentCampaign = null;
     document.getElementById('campaignDetailBody').innerHTML = skeletonCards(1);
     openModal('campaignDetail');
     return Promise.all([
@@ -3963,10 +4053,39 @@
       api('/api/campaigns/' + id + '/plan'),
       api('/api/campaigns/' + id + '/stats').catch(function () { return null; })
     ])
-      .then(function (r) { renderCampaignDetail(r[0].campaign, r[1], r[2] && r[2].stats); })
+      .then(function (r) {
+        currentCampaign = r[0].campaign;
+        renderCampaignDetail(r[0].campaign, r[1], r[2] && r[2].stats);
+      })
       .catch(function (e) {
         document.getElementById('campaignDetailBody').innerHTML = '<p class="muted">' + esc(e.message) + '</p>';
       });
+  }
+
+  function campaignVariantsFor(c) {
+    if (c.copyVariants && c.copyVariants.length) return c.copyVariants;
+    return [{ id: 'A', summary: c.event.summary, description: c.event.description }];
+  }
+
+  function campaignVariantsHtml(c) {
+    var variants = campaignVariantsFor(c);
+    var testable = c.status !== 'completed' && c.status !== 'ended';
+    var cards = variants.map(function (v) {
+      return '<div class="camp-variant">' +
+        '<div class="field__label-row"><span class="field__label">Variant ' + esc(v.id) + '</span>' +
+        (testable ? '<button class="btn btn--ghost btn--sm" data-test-variant="' + esc(v.id) + '">Send test copy</button>' : '') +
+        '</div>' +
+        '<div><strong>' + esc(v.summary) + '</strong></div>' +
+        (v.description ? '<div class="muted">' + esc(v.description) + '</div>' : '') +
+        '</div>';
+    }).join('');
+    var editable = (c.status === 'draft' || c.status === 'scheduled') && !c.startedAt;
+    return '<div class="field__label-row"><h3 class="detail__sub" style="margin:0">Copy' +
+      (variants.length > 1 ? ' variants' : '') + '</h3>' +
+      (editable ? '<button class="btn btn--ghost btn--sm" data-edit-copy>Edit copy</button>' : '') +
+      '</div>' + cards +
+      '<p class="muted">' + (variants.length > 1 ? 'Each variant creates its own calendar event. ' : '') +
+      'A test copy is a real calendar invite marked [TEST]; it never enters the queue or stats.</p>';
   }
 
   /**
@@ -4039,6 +4158,7 @@
   }
 
   function renderCampaignDetail(c, plan, stats) {
+    currentCampaign = c;
     document.getElementById('campaignDetailTitle').textContent = c.name;
     var counts = c.counts || { total: 0, sent: 0, pending: 0, failed: 0 };
 
@@ -4064,6 +4184,7 @@
         '<div class="summary__item"><span class="summary__value">' + counts.failed + '</span><span class="summary__label">didn\'t go through</span></div>' +
       '</div>' +
       '<p class="muted">' + planText + '</p>' +
+      campaignVariantsHtml(c) +
       (c.lastError ? '<p class="muted" style="color:var(--danger)">' + esc(c.lastError) + '</p>' : '') +
       '<h3 class="detail__sub">Progress by account</h3>' +
       '<table class="map"><thead><tr><th>Account</th><th>Sent</th><th>Waiting</th><th>Couldn\'t send</th><th>On</th></tr></thead><tbody>' +
@@ -4103,7 +4224,158 @@
 
     return html + '<h3 class="detail__sub">What happened, per sending account</h3>' +
       '<table class="map"><thead>' + head + '</thead><tbody>' +
-      (body || '<tr><td colspan="' + (withAtt ? 7 : 6) + '" class="muted">Nothing sent yet.</td></tr>') + '</tbody></table>';
+      (body || '<tr><td colspan="' + (withAtt ? 7 : 6) + '" class="muted">Nothing sent yet.</td></tr>') + '</tbody></table>' +
+      campaignVariantStatsHtml(stats);
+  }
+
+  function campaignVariantStatsHtml(stats) {
+    if (!stats || !stats.variants || stats.variants.length < 2) return '';
+    var withAtt = !!stats.hasAttendance;
+    var head = '<tr><th>Copy</th><th>Sent</th><th>Yes</th><th>No</th><th>Maybe</th><th>No reply</th>' +
+      (withAtt ? '<th>Showed up</th>' : '') + '<th>RSVP %</th><th>Accept %</th></tr>';
+    var body = stats.variants.map(function (v) {
+      return '<tr><td><strong>' + esc(v.variant) + '</strong></td><td>' + v.sent + '</td><td>' + v.accepted +
+        '</td><td>' + v.declined + '</td><td>' + v.tentative + '</td><td>' + v.noResponse + '</td>' +
+        (withAtt ? '<td>' + v.attended + '</td>' : '') +
+        '<td>' + v.rsvpRate + '</td><td>' + v.acceptanceRate + '</td></tr>';
+    }).join('');
+    return '<h3 class="detail__sub">What happened, per copy variant</h3>' +
+      '<table class="map"><thead>' + head + '</thead><tbody>' + body + '</tbody></table>';
+  }
+
+  function openTestCopy(variantId) {
+    var c = currentCampaign;
+    if (!c) return;
+    var variants = campaignVariantsFor(c);
+    var variant = variants.filter(function (v) { return v.id === variantId; })[0] || variants[0];
+    testCopyVariantId = variant.id;
+
+    document.getElementById('testCopyIntro').textContent =
+      'Variant ' + variant.id + ' — ' + variant.summary + '. This sends a real Google Calendar invite marked [TEST]. ' +
+      'It does not enter the queue, consume campaign stats, or mark anyone invited.';
+    document.getElementById('testCopySender').innerHTML = c.senders.filter(function (s) { return s.enabled; })
+      .map(function (s) {
+        return '<option value="' + esc(s.connectionId) + '">' + esc(connName(s.connectionId)) + '</option>';
+      }).join('');
+    document.getElementById('testCopyEmails').value = '';
+    var result = document.getElementById('testCopyResult');
+    result.hidden = true;
+    result.innerHTML = '';
+    openModal('testCopyModal');
+  }
+
+  function nextEditVariantId() {
+    for (var i = 0; i < CAMP_ALT_IDS.length; i++) {
+      var id = CAMP_ALT_IDS[i];
+      if (!editCopyVariants.some(function (v) { return v.id === id; })) return id;
+    }
+    return null;
+  }
+
+  function renderEditCopyVariants() {
+    var list = document.getElementById('editCopyVariantsList');
+    list.innerHTML = editCopyVariants.slice().sort(function (a, b) {
+      return CAMP_ALT_IDS.indexOf(a.id) - CAMP_ALT_IDS.indexOf(b.id);
+    }).map(function (v) {
+      return '<div class="camp-variant" data-edit-box="' + esc(v.id) + '">' +
+        '<div class="field__label-row"><span class="field__label">Variant ' + esc(v.id) + ' subject</span>' +
+        '<button type="button" class="btn btn--ghost btn--sm" data-remove-edit-variant="' + esc(v.id) + '">Remove</button></div>' +
+        '<input data-edit-summary="' + esc(v.id) + '" value="' + esc(v.summary || '') + '" />' +
+        '<textarea data-edit-desc="' + esc(v.id) + '" rows="2">' + esc(v.description || '') + '</textarea>' +
+        '</div>';
+    }).join('');
+    var next = nextEditVariantId();
+    var add = document.getElementById('editCopyAdd');
+    add.hidden = !next;
+    add.textContent = next ? 'Add variant ' + next : 'All variants added';
+  }
+
+  function syncEditCopyVariants() {
+    $$('#editCopyVariantsList [data-edit-summary]').forEach(function (input) {
+      var id = input.dataset.editSummary;
+      var row = editCopyVariants.filter(function (v) { return v.id === id; })[0];
+      if (!row) return;
+      row.summary = input.value;
+      var desc = document.querySelector('#editCopyVariantsList [data-edit-desc="' + id + '"]');
+      row.description = desc ? desc.value : '';
+    });
+  }
+
+  function addEditCopyVariant() {
+    syncEditCopyVariants();
+    var id = nextEditVariantId();
+    if (!id) return;
+    editCopyVariants.push({ id: id, summary: '', description: '' });
+    renderEditCopyVariants();
+  }
+
+  function openEditCopy() {
+    var c = currentCampaign;
+    if (!c || c.startedAt || (c.status !== 'draft' && c.status !== 'scheduled')) return;
+    var variants = campaignVariantsFor(c);
+    var primary = variants.filter(function (v) { return v.id === 'A'; })[0] || variants[0];
+    document.getElementById('editCopySummary').value = primary.summary || '';
+    document.getElementById('editCopyDesc').value = primary.description || '';
+    editCopyVariants = variants.filter(function (v) { return v.id !== primary.id; }).map(function (v) {
+      return { id: v.id, summary: v.summary, description: v.description || '' };
+    });
+    renderEditCopyVariants();
+    openModal('editCopyModal');
+  }
+
+  function saveEditCopy(btn) {
+    var c = currentCampaign;
+    if (!c) return;
+    syncEditCopyVariants();
+    var summary = document.getElementById('editCopySummary').value.trim();
+    var description = document.getElementById('editCopyDesc').value.trim();
+    if (!summary) {
+      toast('Variant A needs a subject', 'error');
+      return;
+    }
+    for (var i = 0; i < editCopyVariants.length; i++) {
+      if (!String(editCopyVariants[i].summary || '').trim()) {
+        toast('Variant ' + editCopyVariants[i].id + ' needs a subject', 'error');
+        return;
+      }
+    }
+
+    var copyVariants = [{
+      id: 'A',
+      summary: summary,
+      description: description || undefined
+    }].concat(editCopyVariants.map(function (v) {
+      return {
+        id: v.id,
+        summary: String(v.summary).trim(),
+        description: String(v.description || '').trim() || undefined
+      };
+    }));
+
+    var body = {
+      event: {
+        summary: summary,
+        description: description || undefined,
+        location: c.event.location,
+        start: c.event.start,
+        end: c.event.end,
+        timeZone: c.event.timeZone
+      },
+      copyVariants: copyVariants
+    };
+
+    withBusy(btn, api('/api/campaigns/' + c.id, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    }))
+      .then(function () {
+        closeModal('editCopyModal');
+        toast('Campaign copy saved', 'success');
+        openCampaignDetail(c.id);
+        loadCampaigns();
+      })
+      .catch(function (err) { toast(err.message, 'error'); });
   }
 
   $('#campaignNew').addEventListener('click', openCampaignWizard);
@@ -4122,6 +4394,23 @@
     document.getElementById('campBatchFields').hidden = !this.checked;
     refreshCampPlan();
   });
+  $('#campVariantsOn').addEventListener('change', function () {
+    if (this.checked && !campCopyVariants.length) {
+      campCopyVariants.push({ id: 'B', summary: '', description: '' });
+    }
+    renderCampVariants();
+  });
+  $('#campAddVariant').addEventListener('click', addCampVariant);
+  var campVariantsList = document.getElementById('campVariantsList');
+  campVariantsList.addEventListener('input', syncCampVariantsFromInputs);
+  campVariantsList.addEventListener('click', function (e) {
+    var remove = e.target.closest('[data-remove-variant]');
+    if (!remove) return;
+    syncCampVariantsFromInputs();
+    campCopyVariants = campCopyVariants.filter(function (v) { return v.id !== remove.dataset.removeVariant; });
+    if (!campCopyVariants.length) document.getElementById('campVariantsOn').checked = false;
+    renderCampVariants();
+  });
   ['campStartAt', 'campStopBy'].forEach(function (id) {
     var field = document.getElementById(id);
     if (field) field.addEventListener('change', refreshCampPlan);
@@ -4139,6 +4428,62 @@
         loadCampaigns();
       })
       .catch(function (e) { toast(e.message, 'error'); });
+  });
+
+  document.getElementById('campaignDetailBody').addEventListener('click', function (e) {
+    var edit = e.target.closest('[data-edit-copy]');
+    if (edit) {
+      openEditCopy();
+      return;
+    }
+    var btn = e.target.closest('[data-test-variant]');
+    if (!btn) return;
+    openTestCopy(btn.dataset.testVariant);
+  });
+
+  $('#editCopyAdd').addEventListener('click', addEditCopyVariant);
+  var editCopyList = document.getElementById('editCopyVariantsList');
+  editCopyList.addEventListener('input', syncEditCopyVariants);
+  editCopyList.addEventListener('click', function (e) {
+    var remove = e.target.closest('[data-remove-edit-variant]');
+    if (!remove) return;
+    syncEditCopyVariants();
+    editCopyVariants = editCopyVariants.filter(function (v) { return v.id !== remove.dataset.removeEditVariant; });
+    renderEditCopyVariants();
+  });
+  $('#editCopySave').addEventListener('click', function () { saveEditCopy(this); });
+
+  $('#testCopySend').addEventListener('click', function () {
+    if (!currentCampaignId || !testCopyVariantId) return;
+    var emails = document.getElementById('testCopyEmails').value.split(/[\s,;]+/).filter(Boolean);
+    if (!emails.length) {
+      toast('Add at least one test email address', 'error');
+      return;
+    }
+    var body = {
+      variantId: testCopyVariantId,
+      emails: emails,
+      connectionId: document.getElementById('testCopySender').value
+    };
+    var result = document.getElementById('testCopyResult');
+    withBusy(this, api('/api/campaigns/' + currentCampaignId + '/test-copy', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    }))
+      .then(function (r) {
+        result.hidden = false;
+        result.className = 'invite-result invite-result--success';
+        result.innerHTML = 'Test copy sent to ' + esc((r.sentTo || []).join(', ')) + '.' +
+          (r.htmlLink ? ' <a href="' + esc(r.htmlLink) + '" target="_blank" rel="noopener">Open test event</a>' : '');
+        toast('Test copy sent', 'success');
+      })
+      .catch(function (err) {
+        result.hidden = false;
+        result.className = 'invite-result invite-result--error';
+        result.textContent = err.message;
+        toast(err.message, 'error');
+      });
   });
 
   $('#campaignsList').addEventListener('click', function (e) {

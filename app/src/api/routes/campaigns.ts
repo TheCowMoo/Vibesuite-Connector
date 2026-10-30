@@ -9,6 +9,7 @@ import { resolveSendPlan, stopTimeError } from '../../domain/campaignLifecycle';
 import { applyCampaignZoomHost } from '../../domain/campaignZoom';
 import { getZoomAccount } from '../../domain/zoomStore';
 import {
+  acquireCampaignTestCopyLock,
   countRecipients,
   createCampaign,
   deleteCampaign,
@@ -19,7 +20,8 @@ import {
   queueLength,
   saveCampaign,
 } from '../../domain/campaignStore';
-import { sendCampaignBatch, startCampaign, endCampaign } from '../../domain/campaignDispatch';
+import { sendCampaignBatch, sendCampaignTestCopy, startCampaign, endCampaign } from '../../domain/campaignDispatch';
+import { mirrorPrimaryVariant } from '../../domain/campaignVariants';
 import { getSenderProfile } from '../../domain/senderStore';
 import { getList } from '../../domain/listStore';
 import { getInvitedEmails } from '../../domain/inviteStore';
@@ -221,17 +223,19 @@ export async function campaignRoutes(app: FastifyInstance): Promise<void> {
       return;
     }
 
-    // A campaign can be created with a stop time already attached ("begin now, stop on Friday").
-    const stopProblem = sendByError(parsed.data, Date.now());
+    // Variant A is the base copy; keep the legacy event fields in step with it so cards, attendance
+    // labels and older clients all read the same subject.
+    const data = mirrorPrimaryVariant(parsed.data);
+    const stopProblem = sendByError(data, Date.now());
     if (stopProblem) {
       reply.code(400).send({ error: stopProblem });
       return;
     }
 
-    const camp = await createCampaign(parsed.data);
-    if (parsed.data.zoomUserId) {
+    const camp = await createCampaign(data);
+    if (camp.zoomUserId) {
       // Also stamps the linked session, so attendance sync knows whose Zoom to read.
-      await applyCampaignZoomHost({ campaign: camp, zoomUserId: parsed.data.zoomUserId, previousZoomUserId: undefined });
+      await applyCampaignZoomHost({ campaign: camp, zoomUserId: camp.zoomUserId, previousZoomUserId: undefined });
     }
     return { ok: true, campaign: await withStats(camp) };
   });
@@ -255,9 +259,14 @@ export async function campaignRoutes(app: FastifyInstance): Promise<void> {
       return;
     }
 
+    const body = (req.body || {}) as Record<string, unknown>;
+    if ('copyVariants' in body && camp.startedAt) {
+      reply.code(400).send({ error: 'copy variants are frozen once sending has started' });
+      return;
+    }
+
     // Only judge the stop time when this edit actually touched it, so renaming a paused campaign
     // whose deadline has already lapsed stays possible.
-    const body = (req.body || {}) as Record<string, unknown>;
     if ('sendByAt' in body || 'scheduledStartAt' in body) {
       const stopProblem = sendByError(parsed.data, Date.now());
       if (stopProblem) {
@@ -266,15 +275,56 @@ export async function campaignRoutes(app: FastifyInstance): Promise<void> {
       }
     }
 
-    await saveCampaign(parsed.data);
+    const next = mirrorPrimaryVariant(parsed.data);
+    await saveCampaign(next);
     if ('zoomUserId' in body) {
       await applyCampaignZoomHost({
-        campaign: parsed.data,
-        zoomUserId: parsed.data.zoomUserId,
+        campaign: next,
+        zoomUserId: next.zoomUserId,
         previousZoomUserId: camp.zoomUserId,
       });
     }
-    return { ok: true, campaign: await withStats(parsed.data) };
+    return { ok: true, campaign: await withStats(next) };
+  });
+
+  /**
+   * Send one variant's copy as a real calendar invite to test addresses.
+   *
+   * No queue, recipient, cap, stat or invited-set changes: this is a test, not a send. The event is
+   * marked `[TEST]` and its RSVPs are ignored by the sync pipeline.
+   */
+  app.post('/api/campaigns/:id/test-copy', guard, async (req, reply) => {
+    const id = (req.params as { id: string }).id;
+    const camp = await getCampaign(id);
+    if (!camp) {
+      reply.code(404).send({ error: 'campaign not found' });
+      return;
+    }
+    if (camp.status === 'completed' || camp.status === 'ended') {
+      reply.code(400).send({ error: 'this campaign has finished; create a new one to test copy' });
+      return;
+    }
+
+    const body = (req.body || {}) as { emails?: unknown; variantId?: string; connectionId?: string };
+    if (!Array.isArray(body.emails) || !body.emails.length) {
+      reply.code(400).send({ error: 'emails must be a non-empty array' });
+      return;
+    }
+    if (!(await acquireCampaignTestCopyLock(id))) {
+      reply.code(429).send({ error: 'a test copy was just sent — wait a few seconds and try again' });
+      return;
+    }
+
+    try {
+      const result = await sendCampaignTestCopy(camp, {
+        emails: body.emails.map(String),
+        variantId: body.variantId,
+        connectionId: body.connectionId,
+      });
+      return { ok: true, ...result };
+    } catch (err) {
+      reply.code(400).send({ error: (err as Error).message });
+    }
   });
 
   app.delete('/api/campaigns/:id', guard, async (req, reply) => {
