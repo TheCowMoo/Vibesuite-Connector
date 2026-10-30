@@ -155,11 +155,11 @@ the same mapping.
 
 | | **Invitations** (one-off) | **Campaigns** |
 |---|---|---|
-| Timing | Sends immediately | Now, or on a timer |
-| Size | Whatever today's headroom allows | Any size — spread over days |
+| Timing | Sends now, or in scheduled rounds | Now, or on a timer |
+| Size | Up to 300 per account per round (optional) | Any size — spread over days |
 | Pacing | Mailbox caps only; **sending hours are ignored** | Caps + sending hours + batch delays + warm-up |
-| Progress | A result summary (`sent`, `unplaced`) | Per-recipient ledger, progress bar and per-mailbox counts |
-| After it starts | Nothing to control | Pause, resume, send a batch, change the stop time, end |
+| Progress | A result summary (`sent`, `scheduled`, `unplaced`) | Per-recipient ledger, progress bar and per-mailbox counts |
+| After it starts | Pause or cancel a scheduled batch | Pause, resume, send a batch, change the stop time, end |
 | Repeat invites | Checkbox, with a count of who it affects | `includeAlreadyInvited` on the campaign |
 | Reporting | History table | Full funnel + per-mailbox attribution + attendance |
 | Use it when | "Send this now to the people I can reach today" | "Invite 3,000 people over the next week, safely" |
@@ -174,10 +174,25 @@ mailbox, not by feature.
 3. Pick the contact list and, if you want, specific groups. The preview shows exactly who will receive it.
 4. If anyone on that list was already invited, a **“Also invite people who were already invited”** checkbox
    appears with a count and the previous event they were invited to. Leave it off unless you mean it.
-5. **Preview**, then **Send invitations**.
+5. **Send in batches** (optional): tick it, set **Recipients per event** (default 300) and **Wait between
+   rounds** (hours). The first round goes out immediately; the worker sends the later rounds.
+6. **Preview**, then **Send invitations**.
 
 The result tells you what went out and what could not be placed today. Nothing is recalled once sent.
 Events are chunked per account, so a guest normally receives a single, unnumbered invitation.
+
+### Sending a one-off in rounds
+
+A round is **one event per selected account**. With three accounts and 300 recipients, a round invites up to
+900 people; the panel then waits the delay and sends the next round. The history shows the schedule with
+**Pause**, **Resume** and **Cancel**, plus the next round time and how many people are still waiting.
+
+- The 300 is a ceiling **on top of** the mailbox cap. An account with 100 left sends 100 this round and the
+  rest waits, so rounds take longer than the caps alone would.
+- Rounds stop at the event start. Anyone left at that point is reported as not invited.
+- The invited set is re-checked every round, so someone invited elsewhere in the meantime is skipped.
+- A failed event's recipients stay queued for the next round.
+- Batching off (the default) keeps the original single-send behaviour exactly.
 
 ## Running a campaign
 
@@ -200,6 +215,8 @@ open the tabs and read the numbers. (With auth disabled everyone is effectively 
 | Also invite people who were already invited | Off by default; see the rules below |
 | Start sending | **As soon as I press Begin sending**, or **At a specific time** |
 | Stop sending by (optional) | A hard deadline; presets add +1 day / +3 days / +1 week |
+| Send in batches | Optional: one event per account per round, then wait |
+| Recipients per event / wait between rounds | Appear when batching is on; defaults 300 and 24 h |
 | Who this will reach | Live count, already minus anyone invited before |
 | When it will finish | Live estimate from the selected mailboxes and their caps |
 | Email subject / Description | What the invitation says |
@@ -209,6 +226,10 @@ open the tabs and read the numbers. (With auth disabled everyone is effectively 
 **Who this will reach** and **When it will finish** are computed with the same code the send uses, so the
 numbers you approve are the numbers that get frozen. If the estimate lands after your deadline, add a
 mailbox, raise a cap, or move the deadline — before starting.
+
+If **Send in batches** is on, the estimate also shows roughly how many rounds there will be and when the last
+one starts. It assumes every account can send its full per-round amount, so a lower cap makes the real finish
+later — the note says so.
 
 **Create campaign** saves it as a draft — or as **Scheduled** when you chose a later start. Nothing is frozen
 yet either way, and every field can still be changed.
@@ -231,7 +252,8 @@ From then on the background scheduler sends. You do not need to keep the panel o
 ### 3. Watch it
 
 Each card shows a progress bar, `Sent X of Y · Z still waiting · N accounts`, a status chip, and — when
-something fails — a `N didn't go through` chip. **Details** opens the funnel and the per-mailbox breakdown.
+something fails — a `N didn't go through` chip. With batching on, a **Next round** chip shows when the next
+round opens. **Details** opens the funnel and the per-mailbox breakdown.
 
 ## Controlling a campaign
 
@@ -247,9 +269,11 @@ something fails — a `N didn't go through` chip. **Details** opens the funnel a
 The `⋯` menu holds the occasional actions: **Add / Change Zoom host**, **Add / Change stop time** (both only
 while the campaign is live), **End sending**, **Delete**.
 
-- **Pause** stops new sends immediately. Nothing is lost.
-- **Send a batch** runs one manual pass for that campaign (up to 200 per mailbox). It skips the "pause
-  between batches" delay, but the caps, sending hours and cooldowns still apply.
+- **Pause** stops new sends immediately. Nothing is lost, and a batched campaign keeps its next round time.
+- **Send a batch** runs one manual pass for that campaign (up to 200 per mailbox, or the campaign's per-round
+  limit when batching is on). It skips the "pause between batches" delay, but the caps, sending hours and
+  cooldowns still apply. While a batched campaign is between rounds, it refuses and tells you when the next
+  round opens.
 - **End sending** asks for confirmation and tells you how many people will never be invited. It is **not a
   recall**: invitations already delivered stay in people's calendars.
 - **Delete** removes the campaign and its per-recipient history. Use **End** if you only want it to stop.
@@ -265,6 +289,9 @@ You set the ceiling; the scheduler decides the moment-to-moment order.
 - **Sending hours** (on the sending account) gate campaigns. Outside them, nothing is sent, and the work
   simply waits for the window.
 - **Batch delays** keep sends from being back-to-back. **Warm-up** raises a new mailbox's daily cap gradually.
+- **Batched rounds add a second ceiling.** A batched one-off or campaign sends at most the per-event limit
+  from each account, then waits. Daily/hourly caps still apply, so a 100/day cap with a 300 batch sends 100
+  in that round and takes longer than the caps alone would. Rounds never start at or after the event.
 - **One mailbox is one resource.** When several campaigns share it, each gets a fair slice of the allowance,
   then leftover capacity flows to the priority order — a huge campaign cannot starve a small one.
 - **Failures are retried in front of the queue**, so a temporary error does not push someone to the back of
@@ -291,6 +318,10 @@ You set the ceiling; the scheduler decides the moment-to-moment order.
 8. **Deleting supporting objects breaks references.** Deleting a list leaves campaigns that cannot start;
    deleting a video call removes its attendance record and the join link from future invitations.
 9. **A campaign is one event, one webinar, one Zoom host.** Need a second event? Create a second campaign.
+10. **A batched send stops at the event start.** No round begins after it; anyone left stays uninvited and is
+    reported in the schedule's error line.
+11. **A round is one event per account, not one event overall.** Three accounts create three events per round,
+    each with its own event ID; attendance reads all of them.
 
 ## Reading the numbers
 

@@ -10,6 +10,7 @@ import type { SyncJobData } from '../queue/jobs/types';
 import { startWatchRenewal } from '../scheduler/renewal';
 import { startAttendancePolling } from '../scheduler/attendance';
 import { startCampaignScheduler } from '../scheduler/campaigns';
+import { startInviteScheduler } from '../scheduler/invites';
 import { startReconciliation } from '../scheduler/reconcile';
 
 async function main(): Promise<void> {
@@ -30,6 +31,7 @@ async function main(): Promise<void> {
   startWatchRenewal();
   startAttendancePolling();
   startCampaignScheduler();
+  startInviteScheduler();
   startReconciliation();
 
   if (env.METRICS_PORT > 0) {

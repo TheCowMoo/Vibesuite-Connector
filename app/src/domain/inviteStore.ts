@@ -7,6 +7,8 @@ export interface InviteBatch {
   eventId: string;
   htmlLink?: string;
   count: number;
+  /** Which mailbox created this event; absent on records written before multi-account sends. */
+  connectionId?: string;
 }
 
 export interface InviteSenderSummary {
@@ -58,6 +60,11 @@ export async function getInvite(id: string): Promise<InviteRecord | null> {
   } catch {
     return null;
   }
+}
+
+/** Persist an existing record, e.g. after a scheduled round appended its events. */
+export async function saveInvite(rec: InviteRecord): Promise<void> {
+  await redis.set(REDIS_KEYS.invite(rec.id), JSON.stringify(rec));
 }
 
 export async function listInvites(): Promise<InviteRecord[]> {

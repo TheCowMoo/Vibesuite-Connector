@@ -1,21 +1,23 @@
 import type { FastifyInstance } from 'fastify';
-import { getConnection } from '../../domain/connectionStore';
 import { getList } from '../../domain/listStore';
 import { getAiSettings } from '../../domain/aiSettings';
 import { getAllKnowledge } from '../../domain/knowledgeStore';
 import { retrieveContext } from '../../domain/retrieval';
 import { generateJson } from '../../lib/ai';
-import { createInviteEvent } from '../../google/events';
-import { chunk, hasTimeZoneOffset } from '../../domain/invite';
+import { hasTimeZoneOffset } from '../../domain/invite';
 import { buildAudience, describeEmptyAudience } from '../../domain/audience';
-import { createInviteRecord, listInvites, deleteInvite, getInvitedEmails, getInvitedMeta, markInvited, type InviteSenderSummary } from '../../domain/inviteStore';
+import { createInviteRecord, listInvites, deleteInvite, getInvitedEmails, getInvitedMeta } from '../../domain/inviteStore';
 import { labelPreviousInvite } from '../../domain/reinvite';
-import { bumpSenderDay, bumpSenderHour, getSenderGauge, isoHour } from '../../domain/senderStore';
-import { senderReadiness } from '../../domain/campaignSchedule';
-import { isoDate } from '../../domain/senderLoad';
-import { planInviteSplit, type AccountAllowance } from '../../domain/invitePlan';
-import { withRetry, sleep } from '../../lib/backoff';
-import { env } from '../../config/env';
+import { planInviteSplit } from '../../domain/invitePlan';
+import { accountAllowances } from '../../domain/inviteCapacity';
+import { sendInviteRound } from '../../domain/inviteSend';
+import {
+  createScheduledInvite,
+  getScheduledInvite,
+  listScheduledInvites,
+  setScheduledInviteStatus,
+  type ScheduledInviteRecord,
+} from '../../domain/scheduledInviteStore';
 import { logger } from '../../lib/logger';
 
 interface InviteEventBody {
@@ -36,6 +38,10 @@ interface CreateInviteBody {
   segments?: string[];
   event: InviteEventBody;
   force?: boolean;
+  /** When > 0, send in scheduled rounds of up to this many recipients per account. */
+  batchSize?: number;
+  /** Minutes between rounds; 0 means back-to-back rounds on the next worker tick. */
+  delayMinutes?: number;
 }
 
 interface PreviewBody {
@@ -43,55 +49,10 @@ interface PreviewBody {
   segments?: string[];
 }
 
-function describeError(err: unknown): string {
-  const e = err as { response?: { status?: number; data?: { error?: { message?: string } | string } }; message?: string };
-  const status = e?.response?.status;
-  const d = e?.response?.data?.error;
-  const detail = typeof d === 'string' ? d : d?.message;
-  const base = detail || e?.message || 'unknown error';
-  return status ? `${status} ${base}` : base;
-}
-
-interface AccountCapacity extends AccountAllowance {
-  name: string;
-}
-
-/**
- * How much each chosen account can still send right now, and why not when it can't.
- *
- * The same `senderReadiness()` the campaign scheduler uses, so the numbers shown before a send are
- * the numbers the send itself honours. These counters are per *mailbox*, not per feature, so any
- * campaigns running on the same account share this budget — an invite sent here consumes it.
- */
-async function accountAllowances(connectionIds: string[], now: Date): Promise<AccountCapacity[]> {
-  return Promise.all(
-    connectionIds.map(async (connectionId) => {
-      const conn = await getConnection(connectionId);
-      const name = conn?.name || connectionId;
-      if (!conn) return { connectionId, name, allowance: 0, reason: 'account not found' };
-      if (conn.status !== 'active') return { connectionId, name, allowance: 0, reason: 'not connected to Google' };
-
-      const gauge = await getSenderGauge(connectionId, now);
-      const readiness = senderReadiness({
-        enabled: gauge.profile.enabled,
-        inWindow: gauge.inWindow,
-        coolingUntil: gauge.state.cooldownUntil,
-        now: now.getTime(),
-        capToday: gauge.capToday,
-        sentToday: gauge.sentToday,
-        hourlyCap: gauge.profile.hourlyCap,
-        sentThisHour: gauge.sentThisHour,
-        // Sending invitations is an explicit act, not scheduled pacing — the send window exists to
-        // spread a bulk campaign, so it must not grey out a one-off send at 9pm. Caps and cooldowns
-        // below still apply, so an account with no headroom is still refused.
-        ignoreWindow: true,
-      });
-
-      return readiness.ready
-        ? { connectionId, name, allowance: readiness.allowance }
-        : { connectionId, name, allowance: 0, reason: readiness.reason };
-    }),
-  );
+/** The schedule as the browser needs it: counts and status, never the remaining email addresses. */
+function scheduleView(rec: ScheduledInviteRecord) {
+  const { remaining, ...rest } = rec;
+  return { ...rest, remainingCount: remaining.length };
 }
 
 export async function inviteRoutes(app: FastifyInstance): Promise<void> {
@@ -100,8 +61,65 @@ export async function inviteRoutes(app: FastifyInstance): Promise<void> {
   });
 
   app.delete('/api/invites/:id', async (req) => {
-    await deleteInvite((req.params as { id: string }).id);
+    const id = (req.params as { id: string }).id;
+    await deleteInvite(id);
+    // A deleted history record must not keep inviting people.
+    const schedules = await listScheduledInvites();
+    for (const schedule of schedules) {
+      if (schedule.inviteId === id && (schedule.status === 'scheduled' || schedule.status === 'paused')) {
+        await setScheduledInviteStatus(schedule.id, 'cancelled', 'the invitation history was deleted');
+      }
+    }
     return { ok: true };
+  });
+
+  app.get('/api/invites/schedules', async () => {
+    return { schedules: (await listScheduledInvites()).map(scheduleView) };
+  });
+
+  app.post('/api/invites/schedules/:id/pause', async (req, reply) => {
+    const id = (req.params as { id: string }).id;
+    const current = await getScheduledInvite(id);
+    if (!current) {
+      reply.code(404).send({ error: 'scheduled invite not found' });
+      return;
+    }
+    if (current.status !== 'scheduled') {
+      reply.code(400).send({ error: 'only a scheduled batch can be paused' });
+      return;
+    }
+    const schedule = await setScheduledInviteStatus(id, 'paused', current.error);
+    return { schedule: schedule ? scheduleView(schedule) : schedule };
+  });
+
+  app.post('/api/invites/schedules/:id/resume', async (req, reply) => {
+    const id = (req.params as { id: string }).id;
+    const current = await getScheduledInvite(id);
+    if (!current) {
+      reply.code(404).send({ error: 'scheduled invite not found' });
+      return;
+    }
+    if (current.status !== 'paused') {
+      reply.code(400).send({ error: 'only a paused batch can be resumed' });
+      return;
+    }
+    const schedule = await setScheduledInviteStatus(id, 'scheduled', undefined);
+    return { schedule: schedule ? scheduleView(schedule) : schedule };
+  });
+
+  app.post('/api/invites/schedules/:id/cancel', async (req, reply) => {
+    const id = (req.params as { id: string }).id;
+    const current = await getScheduledInvite(id);
+    if (!current) {
+      reply.code(404).send({ error: 'scheduled invite not found' });
+      return;
+    }
+    if (current.status !== 'scheduled' && current.status !== 'paused') {
+      reply.code(400).send({ error: 'this batch has already finished' });
+      return;
+    }
+    const schedule = await setScheduledInviteStatus(id, 'cancelled', 'cancelled by the operator');
+    return { schedule: schedule ? scheduleView(schedule) : schedule };
   });
 
   app.post('/api/invites/preview', async (req, reply) => {
@@ -200,6 +218,16 @@ export async function inviteRoutes(app: FastifyInstance): Promise<void> {
       return;
     }
 
+    const batching = typeof b.batchSize === 'number' && Number.isFinite(b.batchSize) && b.batchSize > 0;
+    const batchSize = batching ? Math.max(1, Math.min(1000, Math.floor(b.batchSize as number))) : 0;
+    const delayMinutes = batching ? Math.max(0, Math.floor(Number(b.delayMinutes) || 0)) : 0;
+    const delayMs = delayMinutes * 60_000;
+    const stopAt = Date.parse(ev.start);
+    if (batching && (!Number.isFinite(stopAt) || stopAt <= Date.now())) {
+      reply.code(400).send({ error: 'the event must start in the future to send invitations in batches' });
+      return;
+    }
+
     // Per-account checks — exists, active, and how much headroom it has left — happen in
     // accountAllowances() below. A missing or paused account is reported as a skip for that
     // account rather than failing the whole send.
@@ -225,7 +253,12 @@ export async function inviteRoutes(app: FastifyInstance): Promise<void> {
 
     const now = new Date();
     const accounts = await accountAllowances(requestedIds, now);
-    const split = planInviteSplit(emails, accounts);
+    // Batched: each account may contribute at most `batchSize` this round, so the rest stays for
+    // the schedule. Legacy: the full headroom is placed at once, exactly as before.
+    const splitAccounts = batching
+      ? accounts.map((account) => ({ ...account, allowance: Math.min(account.allowance, batchSize) }))
+      : accounts;
+    const split = planInviteSplit(emails, splitAccounts);
 
     if (!split.totalCapacity) {
       const why = accounts.filter((a) => a.reason).map((a) => `${a.name}: ${a.reason}`).join('; ');
@@ -236,68 +269,17 @@ export async function inviteRoutes(app: FastifyInstance): Promise<void> {
       return;
     }
 
-    const batches: Array<{ chunk: number; eventId: string; htmlLink?: string; count: number }> = [];
-    const senders: InviteSenderSummary[] = [];
-    const sentEmails: string[] = [];
-    let firstError = '';
+    const round = await sendInviteRound({
+      listId: b.listId,
+      event: ev,
+      allocation: split.allocated,
+      accounts,
+      batchSize: batching ? batchSize : undefined,
+      now,
+    });
 
-    for (const account of accounts) {
-      const slice = split.allocated[account.connectionId] || [];
-      const row: InviteSenderSummary = {
-        connectionId: account.connectionId,
-        connectionName: account.name,
-        sent: 0,
-        failed: 0,
-        skippedReason: account.reason,
-      };
-      senders.push(row);
-      if (!slice.length) continue;
-
-      const conn = await getConnection(account.connectionId);
-      if (!conn) {
-        row.skippedReason = 'account not found';
-        continue;
-      }
-
-      // Chunk per mailbox rather than across the whole audience. With one chunk each — the normal
-      // case once the list is spread — no numbered suffix appears at all, so a guest never receives
-      // something titled "Webinar (3/5)". The suffix only returns if one account needs splitting.
-      const parts = chunk(slice, env.INVITE_BATCH_SIZE);
-
-      for (let i = 0; i < parts.length; i++) {
-        const part = parts[i];
-        const summary = parts.length > 1 ? `${ev.summary} (${i + 1}/${parts.length})` : ev.summary;
-        try {
-          const res = await withRetry(() => createInviteEvent(conn, { ...ev, summary, emails: part }), { retries: 3 });
-          batches.push({ chunk: batches.length + 1, eventId: res.id, htmlLink: res.htmlLink, count: part.length });
-          sentEmails.push(...part);
-          row.sent += part.length;
-          // Spend the shared per-mailbox budget. Without this the caps we just read would never be
-          // consumed, so every send would see the same full headroom — and campaigns on the same
-          // account would not see this usage either.
-          await bumpSenderDay(conn.id, isoDate(now), 'sent', part.length);
-          await bumpSenderHour(conn.id, isoHour(now), part.length);
-        } catch (err) {
-          const msg = describeError(err);
-          firstError = firstError || msg;
-          row.failed += part.length;
-          await bumpSenderDay(conn.id, isoDate(now), 'failed', part.length);
-          logger.error({ connectionId: conn.id, listId: b.listId, chunk: i + 1, err: msg }, 'invite chunk failed');
-        }
-        if (i < parts.length - 1) await sleep(env.INVITE_DELAY_MS);
-      }
-
-      // Small gap between mailboxes so several accounts never hit Google in lockstep.
-      await sleep(env.INVITE_DELAY_MS);
-    }
-
-    if (sentEmails.length) {
-      await markInvited(b.listId, sentEmails, {
-        summary: ev.summary,
-        start: ev.start,
-        source: 'invite',
-      });
-    }
+    const { batches, senders, sentEmails } = round;
+    const firstError = round.firstError ?? '';
 
     const status = firstError ? (sentEmails.length ? 'partial' : 'failed') : 'sent';
     const primary = senders.find((s) => s.sent > 0) || senders[0];
@@ -318,16 +300,68 @@ export async function inviteRoutes(app: FastifyInstance): Promise<void> {
       error: firstError || undefined,
     });
 
+    // The remainder of a batched send becomes a schedule; a round that would start after the event
+    // is refused up front rather than silently inviting people after the webinar.
+    const remaining = Array.from(new Set([...split.unplaced, ...round.failedEmails]));
+    let schedule: Awaited<ReturnType<typeof createScheduledInvite>> | null = null;
+    let batchWarning: string | undefined;
+
+    if (batching && remaining.length) {
+      const nextAt = Date.now() + delayMs;
+      if (nextAt >= stopAt) {
+        batchWarning = `${remaining.length} people would only be invited after the event starts, so they were left out`;
+      } else {
+        try {
+          schedule = await createScheduledInvite({
+            inviteId: record.id,
+            listId: b.listId,
+            listName: list.name,
+            segments: record.segments,
+            event: ev,
+            connectionIds: requestedIds,
+            force: !!b.force,
+            batchSize,
+            delayMs,
+            stopAt,
+            remaining,
+            rounds: [
+              {
+                at: now.getTime(),
+                completedAt: Date.now(),
+                sent: sentEmails.length,
+                failed: round.failedEmails.length,
+                events: batches.map((batch) => ({
+                  connectionId: batch.connectionId ?? '',
+                  eventId: batch.eventId,
+                  htmlLink: batch.htmlLink,
+                  count: batch.count,
+                })),
+                error: round.firstError,
+              },
+            ],
+            nextAt,
+            status: 'scheduled',
+          });
+        } catch (err) {
+          // The first round already went out; losing the schedule must not pretend it did not.
+          batchWarning = `the first round was sent, but ${remaining.length} people could not be scheduled: ${(err as Error).message}`;
+        }
+      }
+    }
+
     return {
       ok: status === 'sent',
       invite: record,
       sent: sentEmails.length,
       failed: senders.reduce((n, s) => n + s.failed, 0),
+      schedule: schedule ? scheduleView(schedule) : null,
+      batchWarning,
       skipped: {
         duplicatesRemoved: audience.duplicatesRemoved,
         invalid: audience.invalid.length,
         alreadyInvited: audience.alreadyInvited.length,
-        unplaced: split.unplaced.length,
+        unplaced: schedule ? 0 : split.unplaced.length,
+        scheduled: schedule ? schedule.remaining.length : 0,
         noCapacity: accounts
           .filter((a) => a.reason)
           .map((a) => ({ connectionId: a.connectionId, name: a.name, reason: a.reason })),

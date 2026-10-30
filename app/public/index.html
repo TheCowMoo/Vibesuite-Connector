@@ -178,6 +178,14 @@
             <p class="muted" id="inviteReinviteNote" style="margin:0.4rem 0 0"></p>
             <div class="reinvite-list muted" id="invitePrevList"></div>
           </div>
+          <div class="field">
+            <label class="daychk"><input type="checkbox" id="inviteBatch" /><span>Send in batches (one event per account per round)</span></label>
+            <div class="invite-row" id="inviteBatchFields" hidden>
+              <label class="field"><span class="field__label">Recipients per event</span><input type="number" id="inviteBatchSize" min="1" max="1000" value="300" /></label>
+              <label class="field"><span class="field__label">Wait between rounds (hours)</span><input type="number" id="inviteBatchDelay" min="0" step="1" value="24" /></label>
+            </div>
+            <span class="field__hint">Each account creates one event per round. Anything left over is invited after the delay, and no round starts after the event begins.</span>
+          </div>
         </div>
       </div>
 
@@ -795,6 +803,14 @@
           <button type="button" class="btn btn--ghost btn--sm" data-preset-days="7">+1 week</button>
         </span>
       </label>
+    </div>
+    <div class="field">
+      <label class="daychk"><input type="checkbox" id="campBatch" /><span>Send in batches (one event per account per round)</span></label>
+      <div class="invite-row" id="campBatchFields" hidden>
+        <label class="field"><span class="field__label">Recipients per event</span><input type="number" id="campBatchSize" min="1" max="1000" value="300" /></label>
+        <label class="field"><span class="field__label">Wait between rounds (hours)</span><input type="number" id="campBatchDelay" min="0" step="1" value="24" /></label>
+      </div>
+      <span class="field__hint">Each account creates one event per round. Mailbox caps still apply, so a round can be smaller than the batch size.</span>
     </div>
     <div class="field"><span class="field__label">Who this will reach</span><div id="campAudience" aria-live="polite"><span class="muted">Pick a contact list to see who will be invited.</span></div></div>
     <div class="field"><span class="field__label">When it will finish</span><div id="campPlan" aria-live="polite"><span class="muted">Pick a contact list and at least one sending account to see the pace.</span></div></div>

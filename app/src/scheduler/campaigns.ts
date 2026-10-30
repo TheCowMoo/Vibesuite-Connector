@@ -4,7 +4,7 @@ import { inc } from '../lib/metrics';
 import { listCampaigns } from '../domain/campaignStore';
 import { queueLength } from '../domain/campaignStore';
 import { getSenderGauge, getSenderProfile } from '../domain/senderStore';
-import { finalizeIfDone, redistributeStranded, sendFromSender, startCampaign, endCampaign } from '../domain/campaignDispatch';
+import { finalizeIfDone, redistributeStranded, sendFromSender, startCampaign, endCampaign, markBatchRound } from '../domain/campaignDispatch';
 import { campaignTickAction } from '../domain/campaignLifecycle';
 import { saveCampaign } from '../domain/campaignStore';
 import {
@@ -21,6 +21,8 @@ export interface MailboxTickResult {
   sent: number;
   failed: number;
   campaigns: string[];
+  /** Per-campaign successes, used to close a batched round only when something actually went out. */
+  sentByCampaign?: Record<string, number>;
   reason?: string;
 }
 
@@ -32,8 +34,10 @@ export interface TickResult {
   campaigns: string[];
 }
 
-async function activeCampaigns() {
-  return (await listCampaigns()).filter((c) => c.status === 'active');
+async function activeCampaigns(now = Date.now()) {
+  return (await listCampaigns()).filter(
+    (c) => c.status === 'active' && (!c.nextBatchAt || c.nextBatchAt <= now),
+  );
 }
 
 /**
@@ -42,8 +46,8 @@ async function activeCampaigns() {
  * multi-campaign arbitration happens — a mailbox is a shared, rate-limited resource.
  */
 async function runMailbox(connectionId: string, maxPerSender: number, now: Date, ignoreDelay: boolean): Promise<MailboxTickResult> {
-  const base: MailboxTickResult = { connectionId, sent: 0, failed: 0, campaigns: [] };
-  const active = await activeCampaigns();
+  const base: MailboxTickResult = { connectionId, sent: 0, failed: 0, campaigns: [], sentByCampaign: {} };
+  const active = await activeCampaigns(now.getTime());
 
   const claims: SenderClaim[] = [];
   for (const camp of active) {
@@ -74,26 +78,43 @@ async function runMailbox(connectionId: string, maxPerSender: number, now: Date,
   }
 
   const ordered = orderClaims(claims);
-  const budget = allocateBatch(Math.min(readiness.allowance, maxPerSender), ordered);
+  // A batched campaign asks for up to its own per-round ceiling, which can be higher than the
+  // scheduler's normal per-mailbox tick budget. Raise the pool only as far as a batch requires;
+  // non-batched claims are still capped at `maxPerSender` below.
+  const batchCeiling = ordered.reduce((max, claim) => {
+    const camp = active.find((c) => c.id === claim.campaignId);
+    return Math.max(max, camp?.eventBatchSize ?? 0);
+  }, 0);
+  const budget = allocateBatch(Math.min(readiness.allowance, Math.max(maxPerSender, batchCeiling)), ordered);
   const campaigns: string[] = [];
+  const sentByCampaign: Record<string, number> = {};
   let sent = 0;
   let failed = 0;
 
   for (const claim of ordered) {
-    const take = budget[claim.campaignId] ?? 0;
-    if (take <= 0) continue;
-
     const camp = active.find((c) => c.id === claim.campaignId);
     const ps = camp && camp.senders.find((s) => s.connectionId === connectionId);
     if (!camp || !ps) continue;
 
+    const cap = camp.eventBatchSize && camp.eventBatchSize > 0 ? camp.eventBatchSize : maxPerSender;
+    const take = Math.min(budget[claim.campaignId] ?? 0, cap);
+    if (take <= 0) continue;
+
     const res = await sendFromSender(camp, ps, take, { ignoreDelay: true });
     sent += res.sent;
     failed += res.failed;
+    if (res.sent) sentByCampaign[camp.id] = (sentByCampaign[camp.id] ?? 0) + res.sent;
     if (res.sent || res.failed) campaigns.push(camp.id);
   }
 
-  return { connectionId, sent, failed, campaigns, reason: sent || failed ? undefined : 'no capacity' };
+  return {
+    connectionId,
+    sent,
+    failed,
+    campaigns,
+    sentByCampaign,
+    reason: sent || failed ? undefined : 'no capacity',
+  };
 }
 
 /**
@@ -107,6 +128,16 @@ async function applyLifecycle(now: Date): Promise<void> {
   const camps = await listCampaigns();
 
   for (const camp of camps) {
+    // A batched campaign cannot usefully invite people after its event has begun.
+    if (camp.eventBatchSize && (camp.status === 'active' || camp.status === 'scheduled')) {
+      const start = Date.parse(camp.event.start);
+      if (Number.isFinite(start) && now.getTime() >= start) {
+        await endCampaign(camp.id, 'Stopped at the event start');
+        logger.info({ campaignId: camp.id }, 'campaign ended at its event start');
+        continue;
+      }
+    }
+
     const action = campaignTickAction(camp, now.getTime());
 
     if (action === 'activate') {
@@ -138,7 +169,7 @@ export async function runCampaignTick(options: { maxPerSender?: number; now?: Da
   // Lifecycle first, so the send pass only sees campaigns that should actually be sending.
   await applyLifecycle(now);
 
-  const active = await activeCampaigns();
+  const active = await activeCampaigns(now.getTime());
   if (!active.length) return { mailboxes: 0, sent: 0, failed: 0, redistributed: 0, campaigns: [] };
 
   const mailboxes = new Set<string>();
@@ -153,12 +184,18 @@ export async function runCampaignTick(options: { maxPerSender?: number; now?: Da
   let failed = 0;
   let worked = 0;
   const campaigns = new Set<string>();
+  const sentByCampaign: Record<string, number> = {};
 
   for (const connectionId of mailboxes) {
     try {
       const res = await runMailbox(connectionId, maxPerSender, now, false);
       sent += res.sent;
       failed += res.failed;
+      if (res.sentByCampaign) {
+        for (const [id, count] of Object.entries(res.sentByCampaign)) {
+          sentByCampaign[id] = (sentByCampaign[id] ?? 0) + count;
+        }
+      }
       if (res.sent || res.failed) {
         worked += 1;
         res.campaigns.forEach((id) => campaigns.add(id));
@@ -167,6 +204,16 @@ export async function runCampaignTick(options: { maxPerSender?: number; now?: Da
       }
     } catch (err) {
       logger.error({ connectionId, err: (err as Error).message }, 'campaign tick failed for mailbox');
+    }
+  }
+
+  // Close a batched round only when something actually went out; a failed round retries next tick.
+  for (const [campaignId, count] of Object.entries(sentByCampaign)) {
+    if (count <= 0) continue;
+    try {
+      await markBatchRound(campaignId, now.getTime());
+    } catch (err) {
+      logger.error({ campaignId, err: (err as Error).message }, 'failed to close campaign batch round');
     }
   }
 

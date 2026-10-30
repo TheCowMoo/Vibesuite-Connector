@@ -447,6 +447,45 @@ the browser for the requested period, never persisted, and disappears automatica
 activity exists — the `hasActivity` flag is computed across all campaigns and sessions, so an empty
 *period* on an established account still shows honest zeros rather than samples.
 
+### Batched invitations: one event per account per round
+
+Both the one-off Invitations tab and campaigns can send in **rounds**. A round means: every chosen
+account creates **one** calendar event with at most `eventBatchSize` recipients (default 300 when enabled),
+then the plan waits `batchDelayMinutes` before the next round. With three accounts, a round is up to three
+events and 900 invitations.
+
+**One-off invitations** (`POST /api/invites` with `batchSize`/`delayMinutes`):
+
+- The API sends the first round synchronously and creates a `ScheduledInvite` (`invite:schedule:{id}`)
+  holding the remaining emails, event payload, accounts, batch size, delay and event-start guard.
+- `startInviteScheduler()` (`scheduler/invites.ts`, `INVITE_SCHEDULE_TICK_INTERVAL_MS`) sends due rounds via
+  `runScheduledInviteRound()`. Each round:
+  - re-checks `list:{id}:invited` unless the schedule was created with `force`;
+  - caps each account at `min(batchSize, current allowance)` and plans the split with the same
+    `planInviteSplit()` the synchronous route uses;
+  - sends one event per account through `sendInviteRound()`, appends the event IDs to the original
+    `InviteRecord`, and stores the round on the schedule.
+- A round that sends nothing retries after 15 minutes rather than burning the whole delay. A round that
+  sent something schedules the next one with `nextRoundAt()`. Once the next round would start at/after the
+  event, the schedule completes and reports the remainder as not invited.
+- Schedules are `scheduled` / `paused` / `completed` / `cancelled`; `GET /api/invites/schedules` and the
+  `pause`/`resume`/`cancel` routes drive the panel. Deleting the invite record cancels its schedules.
+
+**Campaigns** (`eventBatchSize`, `batchDelayMinutes`, `nextBatchAt`, `lastBatchAt`):
+
+- Opt-in fields on the campaign. `sendFromSender()` caps the claimed batch at `eventBatchSize` and creates
+  exactly one event per account; with batching off, the original chunking and numbered suffix are untouched.
+- `activeCampaigns(now)` skips a campaign whose `nextBatchAt` has not arrived. After a tick in which a
+  campaign actually sent, `markBatchRound()` sets `nextBatchAt = now + delay`; the manual “Send a batch”
+  action uses the same helper and refuses while the gate is closed.
+- Daily/hourly caps, the sending window and `minDelayMs` still apply inside a round, so a capped account can
+  send fewer than `eventBatchSize` and the rest waits for the next round.
+- `applyLifecycle()` ends a batched campaign at the earlier of `sendByAt` and the event start; a manual batch
+  after the event start is refused.
+
+**Shared semantics:** delay from the end of the previous round; remainder carried forward; a failed event is
+retried for those recipients in the next round; no round begins at or after the event start.
+
 ## Security model
 
 - **Webhook authentication**: the only reliable Google push validation is the

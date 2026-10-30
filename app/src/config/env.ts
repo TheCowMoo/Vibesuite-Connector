@@ -60,6 +60,8 @@ const EnvSchema = z.object({
   SYNC_RECONCILE_INTERVAL_MS: z.coerce.number().int().min(0).default(900000),
   INVITE_BATCH_SIZE: z.coerce.number().int().positive().default(100),
   INVITE_DELAY_MS: z.coerce.number().int().min(0).default(300),
+  /** How often the worker looks for a due round of a scheduled (batched) invitation. */
+  INVITE_SCHEDULE_TICK_INTERVAL_MS: z.coerce.number().int().positive().default(60000),
   ATTENDANCE_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(900000),
   ATTENDANCE_FETCH_DELAY_MIN: z.coerce.number().int().min(0).default(15),
   ATTENDANCE_MIN_SECONDS: z.coerce.number().int().min(0).default(60),

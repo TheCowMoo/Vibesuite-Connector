@@ -181,7 +181,11 @@ export async function sendFromSender(
     return { connectionId: ps.connectionId, sent: 0, failed: 0, remaining: queued, skipped: true, reason: 'inter-batch delay' };
   }
 
-  const allowance = Math.min(readiness.allowance, maxCount, queued);
+  const allowance = Math.min(
+    readiness.allowance,
+    camp.eventBatchSize && camp.eventBatchSize > 0 ? Math.min(maxCount, camp.eventBatchSize) : maxCount,
+    queued,
+  );
   if (allowance <= 0) {
     return { connectionId: ps.connectionId, sent: 0, failed: 0, remaining: queued, skipped: true, reason: 'nothing queued' };
   }
@@ -201,7 +205,11 @@ export async function sendFromSender(
       else await saveRecipient(campaignId, { email, connectionId: ps.connectionId, status: 'sent', sentAt: Date.now() });
     }
 
-    const parts = chunk(claimed, env.INVITE_BATCH_SIZE);
+    // Batched campaigns create exactly one event per account per round. Without batching, the
+    // original chunking (with its numbered suffix) is preserved.
+    const parts = camp.eventBatchSize && camp.eventBatchSize > 0
+      ? (claimed.length ? [claimed] : [])
+      : chunk(claimed, env.INVITE_BATCH_SIZE);
     let sent = 0;
     let failed = 0;
     const failedEmails: string[] = [];
@@ -379,18 +387,45 @@ export async function sendCampaignBatch(campaignId: string, maxPerSender = 200):
   const blocked = startBlockedByDeadline(camp, Date.now());
   if (blocked) throw new Error(blocked);
 
+  if (camp.eventBatchSize) {
+    if (camp.nextBatchAt && camp.nextBatchAt > Date.now()) {
+      throw new Error(`this campaign is between batches — the next round opens at ${new Date(camp.nextBatchAt).toISOString()}`);
+    }
+    const eventStart = Date.parse(camp.event.start);
+    if (Number.isFinite(eventStart) && Date.now() >= eventStart) {
+      throw new Error('the event has already started — an invitation would arrive too late');
+    }
+  }
+
   const perSender: SenderBatchResult[] = [];
   let sent = 0;
   let failed = 0;
+  const limit = camp.eventBatchSize ? Math.max(maxPerSender, camp.eventBatchSize) : maxPerSender;
 
   for (const ps of camp.senders) {
     if (!ps.enabled) continue;
-    const res = await sendFromSender(camp, ps, maxPerSender, { ignoreDelay: true });
+    const res = await sendFromSender(camp, ps, limit, { ignoreDelay: true });
     perSender.push(res);
     sent += res.sent;
     failed += res.failed;
   }
 
+  if (sent > 0) await markBatchRound(campaignId);
+
   const completed = await finalizeIfDone(campaignId);
   return { sent, failed, perSender, completed };
+}
+
+/**
+ * Close a batched campaign's round: the next send pass will skip it until the delay expires.
+ *
+ * Called by the scheduler after a tick that actually sent something, and by the manual "Send a batch"
+ * action, so both paths respect the same interval.
+ */
+export async function markBatchRound(campaignId: string, now = Date.now()): Promise<void> {
+  const camp = await getCampaign(campaignId);
+  if (!camp || !camp.eventBatchSize || !camp.batchDelayMinutes) return;
+  camp.lastBatchAt = now;
+  camp.nextBatchAt = now + camp.batchDelayMinutes * 60_000;
+  await saveCampaign(camp);
 }

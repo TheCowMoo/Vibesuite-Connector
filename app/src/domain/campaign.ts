@@ -43,6 +43,15 @@ export const CampaignSchema = z.object({
   scheduledStartAt: z.number().int().optional(),
   /** Optional deadline: sending stops once this is reached. */
   sendByAt: z.number().int().optional(),
+  /**
+   * When set, each round creates one event per account with at most this many recipients, then
+   * waits `batchDelayMinutes` before the next round. Off when absent.
+   */
+  eventBatchSize: z.number().int().min(1).max(1000).optional(),
+  batchDelayMinutes: z.number().int().min(0).optional(),
+  /** Runtime gate: the scheduler will not send this campaign before this time. */
+  nextBatchAt: z.number().int().optional(),
+  lastBatchAt: z.number().int().optional(),
   /** Why a scheduled activation failed — surfaced on the card so it cannot fail silently. */
   lastError: z.string().optional(),
   createdAt: z.number(),

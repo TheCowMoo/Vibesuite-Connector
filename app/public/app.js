@@ -1023,6 +1023,16 @@
     }).filter(Boolean).join(', ');
     var unplaced = (r.skipped && r.skipped.unplaced) || 0;
 
+    if (r.schedule) {
+      el.className = 'invite-result invite-result--success';
+      var scheduled = 'Sent to ' + r.sent + ' now. ' + r.schedule.remainingCount +
+        ' more will be invited in rounds of up to ' + r.schedule.batchSize + ' per account; next round ' +
+        prettyDate(r.schedule.nextAt) + '.';
+      if (r.batchWarning) scheduled += ' ' + esc(r.batchWarning) + '.';
+      el.innerHTML = scheduled + (links ? ' — ' + links : '');
+      return;
+    }
+
     if (r.ok && !unplaced) {
       el.className = 'invite-result invite-result--success';
       el.innerHTML = 'Sent to ' + r.sent + ' recipient' + (r.sent === 1 ? '' : 's') + (links ? ' — ' + links : '') + '.';
@@ -1037,7 +1047,8 @@
     if (r.failed) bits.push(r.failed + ' failed');
     if (unplaced) bits.push(unplaced + ' not sent — no room left today, try again later');
     var why = (r.invite && r.invite.error) ? esc(r.invite.error) + '. ' : '';
-    el.innerHTML = why + (bits.join(', ') || 'nothing went through') + (links ? ' — ' + links : '') + '.';
+    var warning = r.batchWarning ? esc(r.batchWarning) + '. ' : '';
+    el.innerHTML = warning + why + (bits.join(', ') || 'nothing went through') + (links ? ' — ' + links : '') + '.';
   }
 
   function renderInvitePrereqs() {
@@ -1065,16 +1076,59 @@
   }
 
   function loadInviteHistory() {
-    return api('/api/invites').then(function (d) { renderInviteHistory(d.invites || []); }).catch(function () {});
+    return Promise.all([
+      api('/api/invites').then(function (d) { return d.invites || []; }).catch(function () { return []; }),
+      api('/api/invites/schedules').then(function (d) { return d.schedules || []; }).catch(function () { return []; })
+    ]).then(function (r) { renderInviteHistory(r[0], r[1]); });
   }
 
-  function renderInviteHistory(invites) {
+  function renderScheduleTable(schedules) {
+    function chip(status) {
+      if (status === 'scheduled') return '<span class="chip chip--success">Scheduled</span>';
+      if (status === 'paused') return '<span class="chip chip--warning">Paused</span>';
+      if (status === 'completed') return '<span class="chip chip--neutral">Finished</span>';
+      return '<span class="chip chip--danger">Cancelled</span>';
+    }
+
+    var rows = schedules.map(function (s) {
+      var id = esc(s.id);
+      var actions = '';
+      if (s.status === 'scheduled') {
+        actions = '<button class="btn btn--ghost btn--sm" data-action="pauseSchedule" data-id="' + id + '">Pause</button>' +
+          ' <button class="btn btn--ghost btn--sm" data-action="cancelSchedule" data-id="' + id + '">Cancel</button>';
+      } else if (s.status === 'paused') {
+        actions = '<button class="btn btn--ghost btn--sm" data-action="resumeSchedule" data-id="' + id + '">Resume</button>' +
+          ' <button class="btn btn--ghost btn--sm" data-action="cancelSchedule" data-id="' + id + '">Cancel</button>';
+      }
+      var next = (s.status === 'scheduled' || s.status === 'paused') ? prettyDate(s.nextAt) : '—';
+      var delay = s.delayMs ? Math.round(s.delayMs / 3600000) + ' h' : 'back-to-back';
+      var rounds = (s.rounds || []).length;
+      return '<tr>' +
+        '<td><strong>' + esc(s.event.summary) + '</strong><div class="muted" style="font-size:0.8rem">' + esc(s.listName) + '</div></td>' +
+        '<td>' + s.remainingCount + '</td>' +
+        '<td>' + s.batchSize + ' / account</td>' +
+        '<td>' + esc(delay) + '</td>' +
+        '<td>' + esc(next) + '</td>' +
+        '<td>' + rounds + '</td>' +
+        '<td>' + chip(s.status) + (s.error ? '<div class="muted" style="font-size:0.75rem">' + esc(s.error) + '</div>' : '') + '</td>' +
+        '<td>' + actions + '</td>' +
+        '</tr>';
+    }).join('');
+
+    return '<div class="table-scroll"><table class="map" aria-label="Scheduled batches"><thead><tr>' +
+      '<th>What</th><th>Left</th><th>Per round</th><th>Delay</th><th>Next</th><th>Rounds</th><th>Status</th><th></th>' +
+      '</tr></thead><tbody>' + rows + '</tbody></table></div>';
+  }
+
+  function renderInviteHistory(invites, schedules) {
     var el = document.getElementById('inviteHistory');
     renderInviteSummaryStrip(invites);
-    if (!invites.length) {
+    var scheduled = schedules || [];
+    if (!invites.length && !scheduled.length) {
       el.innerHTML = '<div class="empty"><div class="empty__icon">' + icon('send') + '</div><h2 class="empty__title">No invitations yet</h2><p class="empty__text">Send your first invitation and it will show up here.</p></div>';
       return;
     }
+
     var rows = invites.map(function (inv) {
       var links = inv.batches && inv.batches.length
         ? inv.batches.map(function (b) { return b.htmlLink ? '<a class="btn btn--outline btn--sm" href="' + esc(b.htmlLink) + '" target="_blank" rel="noopener">Open event</a>' : ''; }).join(' ')
@@ -1089,7 +1143,15 @@
         '<td>' + links + ' <button class="btn btn--ghost btn--sm" data-action="deleteInvite" data-id="' + esc(inv.id) + '" aria-label="Delete invite record">Delete</button></td>' +
         '</tr>';
     }).join('');
-    el.innerHTML = '<table class="map" aria-label="Invite history"><thead><tr><th>What</th><th>Google account</th><th>People</th><th>Status</th><th>Sent</th><th></th></tr></thead><tbody>' + rows + '</tbody></table>';
+
+    var history = invites.length
+      ? '<table class="map" aria-label="Invite history"><thead><tr><th>What</th><th>Google account</th><th>People</th><th>Status</th><th>Sent</th><th></th></tr></thead><tbody>' + rows + '</tbody></table>'
+      : '<p class="muted">No completed invitation history yet.</p>';
+
+    el.innerHTML = history +
+      (scheduled.length
+        ? '<h3 class="detail__sub">Scheduled batches</h3>' + renderScheduleTable(scheduled)
+        : '');
   }
 
   function goToInvite(listId) {
@@ -1125,6 +1187,9 @@
   });
 
   document.getElementById('invitePreview').addEventListener('click', refreshInvitePreview);
+  document.getElementById('inviteBatch').addEventListener('change', function () {
+    document.getElementById('inviteBatchFields').hidden = !this.checked;
+  });
 
   document.getElementById('inviteDraftAi').addEventListener('click', function () {
     var listId = document.getElementById('inviteList').value;
@@ -1149,6 +1214,26 @@
     if (!start || !end) { toast('Add a start and end time', 'error'); return; }
     if (new Date(end) <= new Date(start)) { toast('End must be after start', 'error'); return; }
 
+    var batching = document.getElementById('inviteBatch').checked;
+    var batchSize = 0;
+    var batchHours = 0;
+    if (batching) {
+      batchSize = Number(document.getElementById('inviteBatchSize').value);
+      batchHours = Number(document.getElementById('inviteBatchDelay').value);
+      if (!Number.isFinite(batchSize) || batchSize < 1 || batchSize > 1000) {
+        toast('Recipients per event must be between 1 and 1000', 'error');
+        return;
+      }
+      if (!Number.isFinite(batchHours) || batchHours < 0) {
+        toast('The wait between rounds must be zero or more', 'error');
+        return;
+      }
+      if (new Date(start).getTime() <= Date.now()) {
+        toast('The event must start in the future to send invitations in batches', 'error');
+        return;
+      }
+    }
+
     api('/api/invites/preview', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ listId: listId, segments: selectedInviteSegments() }) })
       .then(function (p) {
         var already = (p.alreadyInvited || []).length;
@@ -1161,6 +1246,10 @@
         var extra = reinvite && already
           ? ' It also re-invites ' + already + ' who were already invited, so they will get a second invitation.'
           : '';
+        if (batching) {
+          extra += ' It sends up to ' + batchSize + ' per account now, then one more round every ' + batchHours +
+            ' hours until everyone is invited or the event starts.';
+        }
         return confirmDialog('Send invites?', 'This emails a real calendar invite to ' + reach + ' recipient(s), split across ' + accounts + '.' + extra + ' It cannot be undone.', 'Send')
           .then(function (ok) {
             if (!ok) return;
@@ -1169,6 +1258,8 @@
               listId: listId,
               segments: selectedInviteSegments(),
               force: reinvite || undefined,
+              batchSize: batching ? Math.floor(batchSize) : undefined,
+              delayMinutes: batching ? Math.round(batchHours * 60) : undefined,
               event: {
                 summary: summary,
                 description: document.getElementById('inviteDescription').value,
@@ -1181,7 +1272,12 @@
             return withBusy(document.getElementById('inviteSend'), api('/api/invites', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }))
               .then(function (r) {
                 var unplaced = (r.skipped && r.skipped.unplaced) || 0;
-                if (r.ok && !unplaced) {
+                if (r.schedule) {
+                  toast('Sent ' + r.sent + ' now — ' + r.schedule.remainingCount + ' more scheduled; next round ' +
+                    prettyDate(r.schedule.nextAt), r.batchWarning ? 'error' : 'success');
+                } else if (r.batchWarning) {
+                  toast('Sent ' + r.sent + ', but ' + r.batchWarning, 'error');
+                } else if (r.ok && !unplaced) {
                   toast('Invitations sent (' + r.sent + ' people)', 'success');
                 } else if (r.sent) {
                   var why = (r.invite && r.invite.error) ? r.invite.error : "some didn't go through";
@@ -1203,6 +1299,16 @@
   });
 
   document.getElementById('inviteHistory').addEventListener('click', function (e) {
+    var scheduleBtn = e.target.closest('[data-action="pauseSchedule"],[data-action="resumeSchedule"],[data-action="cancelSchedule"]');
+    if (scheduleBtn) {
+      var action = scheduleBtn.dataset.action;
+      var command = action === 'pauseSchedule' ? 'pause' : action === 'resumeSchedule' ? 'resume' : 'cancel';
+      withBusy(scheduleBtn, api('/api/invites/schedules/' + scheduleBtn.dataset.id + '/' + command, { method: 'POST' }))
+        .then(function () { toast('Scheduled batch updated', 'success'); loadInviteHistory(); })
+        .catch(function (err) { toast(err.message, 'error'); });
+      return;
+    }
+
     var btn = e.target.closest('[data-action="deleteInvite"]');
     if (!btn) return;
     confirmDialog('Delete invite record?', 'This only removes the history entry — the calendar event and invitations remain in Google.', 'Delete').then(function (ok) {
@@ -3194,6 +3300,7 @@
             '<span class="chip chip--neutral">' + esc(spreadLabel(c.distribution.mode)) + '</span>' +
             (c.zoomUserId ? '<span class="chip chip--neutral">Zoom: ' + esc(zoomAccountLabel(c.zoomUserId)) + '</span>' : '') +
             (c.sendByAt ? '<span class="chip chip--neutral">Stop by ' + esc(prettyDate(c.sendByAt)) + '</span>' : '') +
+            (c.nextBatchAt ? '<span class="chip chip--neutral">Next round ' + esc(prettyDate(c.nextBatchAt)) + '</span>' : '') +
             (counts.failed ? '<span class="chip chip--danger">' + counts.failed + " didn't go through</span>" : '') + '</div>' +
           '<div class="conn__meta"><span class="conn__cal">' + icon('calendar') + esc(campListName(c.listId)) + '</span>' +
             '<span class="conn__cal">' + esc(prettyDate(c.event.start)) + '</span></div>' +
@@ -3420,10 +3527,18 @@
     if (stopRaw) body.stopBy = new Date(stopRaw).getTime();
 
     var seq = ++campPlanSeq;
+    var batchInfo = null;
+    if (document.getElementById('campBatch').checked) {
+      batchInfo = {
+        size: Math.max(1, Number(document.getElementById('campBatchSize').value) || 300),
+        hours: Math.max(0, Number(document.getElementById('campBatchDelay').value) || 0),
+        accounts: connectionIds.length
+      };
+    }
     api('/api/campaigns/plan-preview', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
       .then(function (p) {
         if (seq !== campPlanSeq || !el) return;
-        el.innerHTML = campPlanHtml(p);
+        el.innerHTML = campPlanHtml(p, batchInfo);
       })
       .catch(function (e) {
         if (seq !== campPlanSeq || !el) return;
@@ -3431,7 +3546,7 @@
       });
   }
 
-  function campPlanHtml(p) {
+  function campPlanHtml(p, batchInfo) {
     if (!p || !p.total) {
       return '<span class="muted">Nobody to invite on this list with these groups.</span>';
     }
@@ -3443,6 +3558,16 @@
 
     html += ' <span class="muted">About <strong>' + p.totalDays + '</strong> ' + (p.totalDays === 1 ? 'day' : 'days') +
       ' at roughly ' + p.dailyCapacity + ' a day — done by ' + esc(prettyDate(p.finishDate)) + '.</span>';
+
+    if (batchInfo) {
+      var perRound = Math.max(1, batchInfo.size * Math.max(1, batchInfo.accounts));
+      var rounds = Math.max(1, Math.ceil(p.total / perRound));
+      var lastStart = new Date(p.finishDate + 'T12:00:00').getTime() + (rounds - 1) * batchInfo.hours * 3600000;
+      html += '<br><span class="muted">Batched: one event per account per round, up to <strong>' + batchInfo.size +
+        '</strong> each, waiting ' + batchInfo.hours + ' h between rounds. About <strong>' + rounds + '</strong> round' +
+        (rounds === 1 ? '' : 's') + '; the last one starts around ' + esc(prettyDate(lastStart)) +
+        ' (subject to each account’s caps).</span>';
+    }
 
     if (p.byDeadline !== null && p.byDeadline !== undefined) {
       html += p.shortfall > 0
@@ -3537,6 +3662,10 @@
     document.getElementById('campStartAt').value = '';
     document.getElementById('campStopBy').value = '';
     document.getElementById('campStartAtWrap').hidden = true;
+    document.getElementById('campBatch').checked = false;
+    document.getElementById('campBatchSize').value = '300';
+    document.getElementById('campBatchDelay').value = '24';
+    document.getElementById('campBatchFields').hidden = true;
 
     renderCampSenderRows();
     loadCampaignSegments();
@@ -3629,6 +3758,22 @@
       includeAlreadyInvited: document.getElementById('campIncludeInvited').checked,
       sendByAt: sendByAt
     };
+
+    var batching = document.getElementById('campBatch').checked;
+    if (batching) {
+      var batchSize = Number(document.getElementById('campBatchSize').value);
+      var batchHours = Number(document.getElementById('campBatchDelay').value);
+      if (!Number.isFinite(batchSize) || batchSize < 1 || batchSize > 1000) {
+        toast('Recipients per event must be between 1 and 1000', 'error');
+        return;
+      }
+      if (!Number.isFinite(batchHours) || batchHours < 0) {
+        toast('The wait between rounds must be zero or more', 'error');
+        return;
+      }
+      body.eventBatchSize = Math.floor(batchSize);
+      body.batchDelayMinutes = Math.round(batchHours * 60);
+    }
 
     withBusy(btn, api('/api/campaigns', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }))
       .then(function (r) {
@@ -3922,6 +4067,10 @@
   $('#campZoomSave').addEventListener('click', function () { saveCampZoomHost(this); });
   $('#campStartMode').addEventListener('change', function () {
     document.getElementById('campStartAtWrap').hidden = this.value !== 'later';
+    refreshCampPlan();
+  });
+  $('#campBatch').addEventListener('change', function () {
+    document.getElementById('campBatchFields').hidden = !this.checked;
     refreshCampPlan();
   });
   ['campStartAt', 'campStopBy'].forEach(function (id) {
