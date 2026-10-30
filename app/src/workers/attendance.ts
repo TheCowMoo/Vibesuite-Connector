@@ -17,6 +17,7 @@ import { lookupContactByEmail, addTags, updateCustomField } from '../ghl/contact
 import { postWebhook } from '../ghl/webhooks';
 import { matchingRules, type ConditionContext } from '../domain/condition';
 import { tryClaimAttendanceDispatch, releaseAttendanceDispatch } from '../domain/attendanceDispatch';
+import { forEachLimit, withRetry } from '../domain/concurrency';
 import {
   buildAttendanceSegments,
   segmentEntries,
@@ -374,62 +375,73 @@ export async function dispatchSession(
   if (conn) {
     const mode = conn.attendanceDeliveryMode ?? 'both';
 
-    for (const { segment, person } of segmentEntries(segments)) {
-      const email = person.email ? normalizeEmail(person.email) : '';
-      // Walk-ins are new, so they get their own key. Matched outcomes keep the pre-segment key:
-      // deploying this must not replay every past attendee into GHL a second time.
-      const identity = email || person.name || person.participantId || person.registrantId || 'anon';
-      const fingerprint =
-        segment === 'not_invited' ? `${identity}:${segment}:${person.status}` : `${identity}:${person.status}`;
-      const claimed = await tryClaimAttendanceDispatch(sessionId, fingerprint);
-      if (!claimed) continue;
+    await forEachLimit(
+      segmentEntries(segments),
+      env.ATTENDANCE_DISPATCH_CONCURRENCY,
+      async ({ segment, person }) => {
+        const email = person.email ? normalizeEmail(person.email) : '';
+        // Walk-ins are new, so they get their own key. Matched outcomes keep the pre-segment key:
+        // deploying this must not replay every past attendee into GHL a second time.
+        const identity = email || person.name || person.participantId || person.registrantId || 'anon';
+        const fingerprint =
+          segment === 'not_invited' ? `${identity}:${segment}:${person.status}` : `${identity}:${person.status}`;
+        const claimed = await tryClaimAttendanceDispatch(sessionId, fingerprint);
+        if (!claimed) return;
 
-      try {
-        const ctx = buildContext(session, person, report, segment, segments);
+        try {
+          // Retrying the whole entry is safe: tags and custom fields are idempotent, and webhook
+          // failures are caught per rule below rather than thrown.
+          await withRetry(
+            async () => {
+              const ctx = buildContext(session, person, report, segment, segments);
 
-        if (mode === 'api' || mode === 'both') {
-          if (email) {
-            const contact = await lookupContactByEmail(conn, email);
-            if (contact?.id) {
-              const tag = segmentTag(segment, conn.attendanceTags, {
-                attended: env.GHL_TAG_ATTENDED,
-                noShow: env.GHL_TAG_NO_SHOW,
-                notInvited: env.GHL_TAG_NOT_INVITED,
-              });
-              await addTags(conn, contact.id, [tag], `${sessionId}:${fingerprint}:tag`);
-              if (conn.attendanceCustomFieldId) {
-                await updateCustomField(
-                  conn,
-                  contact.id,
-                  conn.attendanceCustomFieldId,
-                  segment,
-                  `${sessionId}:${fingerprint}:segment`,
-                );
+              if (mode === 'api' || mode === 'both') {
+                if (email) {
+                  const contact = await lookupContactByEmail(conn, email);
+                  if (contact?.id) {
+                    const tag = segmentTag(segment, conn.attendanceTags, {
+                      attended: env.GHL_TAG_ATTENDED,
+                      noShow: env.GHL_TAG_NO_SHOW,
+                      notInvited: env.GHL_TAG_NOT_INVITED,
+                    });
+                    await addTags(conn, contact.id, [tag], `${sessionId}:${fingerprint}:tag`);
+                    if (conn.attendanceCustomFieldId) {
+                      await updateCustomField(
+                        conn,
+                        contact.id,
+                        conn.attendanceCustomFieldId,
+                        segment,
+                        `${sessionId}:${fingerprint}:segment`,
+                      );
+                    }
+                  }
+                }
               }
-            }
-          }
-        }
 
-        if (mode === 'webhook' || mode === 'both') {
-          const rules = matchingRules(conn.attendanceRules, ctx);
-          for (const rule of rules) {
-            try {
-              await postWebhook(rule.webhookUrl, buildPayload(session, person, report, segment, segments));
-              logger.info({ sessionId, ruleId: rule.id, email, segment }, 'attendance rule webhook fired');
-            } catch (err) {
-              logger.error({ sessionId, ruleId: rule.id, err: (err as Error).message }, 'attendance rule webhook failed');
-            }
-          }
-        }
+              if (mode === 'webhook' || mode === 'both') {
+                const rules = matchingRules(conn.attendanceRules, ctx);
+                for (const rule of rules) {
+                  try {
+                    await postWebhook(rule.webhookUrl, buildPayload(session, person, report, segment, segments));
+                    logger.info({ sessionId, ruleId: rule.id, email, segment }, 'attendance rule webhook fired');
+                  } catch (err) {
+                    logger.error({ sessionId, ruleId: rule.id, err: (err as Error).message }, 'attendance rule webhook failed');
+                  }
+                }
+              }
+            },
+            { attempts: 3, baseDelayMs: 400 },
+          );
 
-        dispatched += 1;
-        inc('attendance_dispatched_total', { status: person.status, segment });
-      } catch (err) {
-        failed += 1;
-        await releaseAttendanceDispatch(sessionId, fingerprint);
-        logger.error({ sessionId, email, segment, err: (err as Error).message }, 'attendance dispatch failed');
-      }
-    }
+          dispatched += 1;
+          inc('attendance_dispatched_total', { status: person.status, segment });
+        } catch (err) {
+          failed += 1;
+          await releaseAttendanceDispatch(sessionId, fingerprint);
+          logger.error({ sessionId, email, segment, err: (err as Error).message }, 'attendance dispatch failed');
+        }
+      },
+    );
   } else {
     logger.info({ sessionId }, 'no connection linked; skipping GHL contact actions');
   }

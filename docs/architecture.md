@@ -322,7 +322,8 @@ The invited list is resolved by `resolveInvitedEmails()` in this order:
   `GHL_TAG_NOT_INVITED` are the defaults), an optional `attendanceCustomFieldId`, and `attendanceRules`
   webhooks whose context now exposes `segment`, `invited`, `invitedSource`, `attendedFullCount`,
   `partialCount` and `notInvitedCount`. The payload gains `event`, `segment`, `invited`, `invitedSource`,
-  `minutes` and `segmentCounts`.
+  `minutes` and `segmentCounts`. Contacts are updated with a bounded fan-out
+  (`ATTENDANCE_DISPATCH_CONCURRENCY`, default 5) and three attempts with linear backoff.
 - **Roster** — `buildRosterPayloads()` (`domain/attendanceRoster.ts`) emits one POST per non-empty segment
   (`attendance.segment`) or one snapshot (`attendance.session`), with `counts`, `generatedAt` and a
   `revision` that hashes the content without the timestamp. `deliverRoster()` skips an unchanged revision,

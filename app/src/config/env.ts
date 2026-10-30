@@ -63,6 +63,8 @@ const EnvSchema = z.object({
   ATTENDANCE_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(900000),
   ATTENDANCE_FETCH_DELAY_MIN: z.coerce.number().int().min(0).default(15),
   ATTENDANCE_MIN_SECONDS: z.coerce.number().int().min(0).default(60),
+  /** How many contacts are updated in parallel during attendance delivery. */
+  ATTENDANCE_DISPATCH_CONCURRENCY: z.coerce.number().int().min(1).max(20).default(5),
   ATTENDANCE_MATCH_MODE: z.enum(['email', 'email_or_name']).default('email'),
   GHL_TAG_ATTENDED: z.string().default('attended'),
   GHL_TAG_NO_SHOW: z.string().default('no-show'),
