@@ -407,15 +407,22 @@ export async function dispatchSession(
   if (conn) {
     try {
       const ruleResult = await applyWorkflowRules(session, report, segments, conn);
-      const aiResult = await autoAssignAiWorkflows(sessionId, conn);
-      workflows = {
-        applied: ruleResult.applied + aiResult.applied,
-        skipped: ruleResult.skipped + aiResult.skipped,
-        failed: ruleResult.failed + aiResult.failed,
-      };
+      workflows.applied += ruleResult.applied;
+      workflows.skipped += ruleResult.skipped;
+      workflows.failed += ruleResult.failed;
     } catch (err) {
       workflowError = (err as Error).message;
-      logger.error({ sessionId, err: workflowError }, 'attendance workflow routing failed');
+      logger.error({ sessionId, err: workflowError }, 'attendance workflow rules failed');
+    }
+
+    try {
+      const aiResult = await autoAssignAiWorkflows(sessionId, conn);
+      workflows.applied += aiResult.applied;
+      workflows.skipped += aiResult.skipped;
+      workflows.failed += aiResult.failed;
+    } catch (err) {
+      workflowError = (err as Error).message;
+      logger.error({ sessionId, err: workflowError }, 'attendance AI workflow routing failed');
     }
   }
 
