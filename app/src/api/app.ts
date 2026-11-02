@@ -23,6 +23,7 @@ import { senderRoutes } from './routes/senders';
 import { campaignRoutes } from './routes/campaigns';
 import { advisorRoutes } from './routes/advisor';
 import { statsRoutes } from './routes/stats';
+import { deliverabilityRoutes } from './routes/deliverability';
 
 export function buildApp(): FastifyInstance {
   const app = Fastify({ logger: false });
@@ -58,6 +59,7 @@ export function buildApp(): FastifyInstance {
   void app.register(campaignRoutes);
   void app.register(advisorRoutes);
   void app.register(statsRoutes);
+  void app.register(deliverabilityRoutes);
   void app.register(healthRoutes);
   void app.register(metricsRoutes);
   void app.register(webhookRoutes);

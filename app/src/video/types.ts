@@ -17,9 +17,11 @@ export interface AttendeeRecord {
   raw?: Record<string, unknown>;
 }
 
+/** One participant's poll response, exactly as Zoom's report API returns it. */
 export interface PollResult {
-  id?: string;
-  title?: string;
+  name?: string;
+  email?: string;
+  question_details?: Array<{ question?: string; answer?: string }>;
   [key: string]: unknown;
 }
 
@@ -29,6 +31,18 @@ export interface QaEntry {
   email?: string;
   question?: string;
   answer?: string;
+  [key: string]: unknown;
+}
+
+/** One registrant row, including answers to the registration questions. */
+export interface RegistrantRecord {
+  id?: string;
+  email?: string;
+  name?: string;
+  first_name?: string;
+  last_name?: string;
+  status?: string;
+  custom_questions?: Array<{ title?: string; value?: string }>;
   [key: string]: unknown;
 }
 
@@ -71,6 +85,8 @@ export interface ProviderFetchResult {
   attendees: AttendeeRecord[];
   absentees: string[];
   registrants: number;
+  /** Registrant rows with custom registration answers. Optional for providers without them. */
+  registrantRows?: RegistrantRecord[];
   sessionStats: Record<string, string>;
   polls: PollResult[];
   qa: QaEntry[];

@@ -2,7 +2,7 @@ import { allocateEmails } from './campaign';
 
 export interface AccountAllowance {
   connectionId: string;
-  /** How many this mailbox may still send right now (daily and hourly headroom, whichever is lower). */
+  /** How many this mailbox may still send right now (its remaining daily headroom). */
   allowance: number;
   /** Why it cannot send, or absent when it can. */
   reason?: string;

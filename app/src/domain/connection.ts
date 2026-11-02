@@ -68,6 +68,54 @@ export interface AutomationRule {
   webhookUrl: string;
 }
 
+/** A GHL workflow the operator has made available to attendance routing. */
+export interface WorkflowTarget {
+  /** Local id for the UI; stable if the workflow is renamed. */
+  id: string;
+  /** GHL workflow id used by POST /contacts/:contactId/workflow/:workflowId. */
+  workflowId: string;
+  name: string;
+  /** Plain-English guidance shown to the AI router. */
+  criteria?: string;
+}
+
+export type PollConditionOperator =
+  | 'answered'
+  | 'not_answered'
+  | 'equals'
+  | 'not_equals'
+  | 'contains'
+  | 'not_contains';
+
+export interface PollCondition {
+  question: string;
+  operator: PollConditionOperator;
+  answer?: string;
+}
+
+/**
+ * One deterministic workflow rule. Rules are checked in order; the first enabled match wins.
+ * Every entry in `conditions` and `pollConditions` must match (AND).
+ */
+export interface AttendanceWorkflowRule {
+  id: string;
+  name: string;
+  enabled: boolean;
+  conditions: Condition[];
+  pollConditions?: PollCondition[];
+  workflowId: string;
+  eventStartTime?: 'now' | 'session_start';
+}
+
+export interface AttendanceAiWorkflowSettings {
+  enabled: boolean;
+  mode: 'preview' | 'auto';
+  /** 0–1. Proposals below this are shown but not applied. */
+  confidenceThreshold: number;
+  /** 0 means every attendee. A positive number caps AI cost per session. */
+  maxAttendees: number;
+}
+
 export interface Connection {
   id: string;
   name: string;
@@ -87,6 +135,12 @@ export interface Connection {
   attendanceTags?: AttendanceTags;
   /** Optional GHL custom field that receives the segment name. */
   attendanceCustomFieldId?: string;
+  /** GHL workflows that attendance rules (and the AI router) may assign. */
+  attendanceWorkflows?: WorkflowTarget[];
+  /** Deterministic poll/stat rules; first enabled match wins. */
+  attendanceWorkflowRules?: AttendanceWorkflowRule[];
+  /** Optional AI routing on top of the deterministic rules. */
+  attendanceAiWorkflow?: AttendanceAiWorkflowSettings;
   /** External roster webhook for the full segmented result. */
   attendanceRoster?: AttendanceRosterSettings;
   /** True when a roster bearer token is stored (the token itself is encrypted, never returned). */

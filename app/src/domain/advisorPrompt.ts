@@ -13,8 +13,9 @@ export function buildAdvisorPrompt(snapshot: AdvisorSnapshot): string {
     'concrete, conservative changes that protect sender reputation and let campaigns finish.',
     '',
     'Rules:',
-    '- Safety first: never recommend a daily cap above 2000, an hourly cap above 500, or a delay',
-    '  below 1000ms. Prefer spreading load across mailboxes over pushing one mailbox harder.',
+    '- Safety first: never recommend a daily cap above 2000 or a delay below 1000ms. Prefer spreading',
+    '  load across mailboxes over pushing one mailbox harder. Each account sends one blast per day, so',
+    '  reason about the daily cap, not hourly pacing.',
     '- Cite the snapshot numbers in every rationale. Do not invent metrics that are not present.',
     '- Refer to mailboxes and campaigns only by their snapshot labels.',
     '- Only use these action kinds: ' + ADVISOR_ACTION_KINDS.join(', ') + '.',
@@ -70,21 +71,6 @@ export function localRecommendations(snapshot: AdvisorSnapshot): Recommendation[
         rationale: `${m.label} is turned off, so your campaigns are running on fewer accounts.`,
         impact: 'Turning it back on gives you more sending capacity straight away.',
         action: { kind: 'resume_sender', target: m.label },
-      });
-      continue;
-    }
-
-    if (m.hourlyCap && m.sentThisHour >= Math.floor(m.hourlyCap * 0.9)) {
-      push({
-        title: `${m.label} is close to its limit for this hour`,
-        severity: 'warning',
-        rationale: `${m.label} has sent ${m.sentThisHour} of the ${m.hourlyCap} allowed this hour, so it will wait until the next hour before sending more.`,
-        impact: 'A higher hourly limit keeps sending steady instead of stopping and starting.',
-        action: {
-          kind: 'set_sender_hourly_cap',
-          target: m.label,
-          value: Math.min(500, m.hourlyCap + Math.max(10, Math.round(m.hourlyCap * 0.5))),
-        },
       });
       continue;
     }

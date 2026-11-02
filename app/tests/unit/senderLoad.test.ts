@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   DEFAULT_WINDOW,
+  SenderProfileSchema,
   dailyCapFor,
   daysBetween,
   isWithinWindow,
@@ -67,7 +68,6 @@ describe('localParts', () => {
 
 describe('isWithinWindow', () => {
   const win = { ...DEFAULT_WINDOW, timeZone: 'UTC' }; // 09:00–17:00, Mon–Fri
-
   it('inside on a weekday morning', () => {
     expect(isWithinWindow(win, new Date('2026-10-08T10:00:00Z'))).toBe(true); // Thursday
   });
@@ -89,5 +89,38 @@ describe('isWithinWindow', () => {
 
   it('treats an equal start/end as always open', () => {
     expect(isWithinWindow({ ...win, startHour: 9, endHour: 9, days: [] }, new Date('2026-10-08T03:00:00Z'))).toBe(true);
+  });
+});
+
+describe('sender domain overrides', () => {
+  const input = {
+    connectionId: 'c1',
+    dailyCap: 800,
+    window: { ...DEFAULT_WINDOW, timeZone: 'UTC' },
+  };
+
+  it('normalises the sending domain and trims the selector', () => {
+    const parsed = SenderProfileSchema.parse({
+      ...input,
+      sendingDomain: ' Example.COM. ',
+      dkimSelector: ' Google ',
+    });
+    expect(parsed.sendingDomain).toBe('example.com');
+    expect(parsed.dkimSelector).toBe('Google');
+  });
+
+  it('clears an override when the field is blank', () => {
+    const parsed = SenderProfileSchema.parse({ ...input, sendingDomain: '', dkimSelector: '' });
+    expect(parsed.sendingDomain).toBeUndefined();
+    expect(parsed.dkimSelector).toBeUndefined();
+  });
+
+  it('rejects a value that is not a domain', () => {
+    expect(SenderProfileSchema.safeParse({ ...input, sendingDomain: 'not a domain' }).success).toBe(false);
+    expect(SenderProfileSchema.safeParse({ ...input, sendingDomain: 'localhost' }).success).toBe(false);
+  });
+
+  it('rejects a selector with spaces or punctuation', () => {
+    expect(SenderProfileSchema.safeParse({ ...input, dkimSelector: 'not a selector' }).success).toBe(false);
   });
 });

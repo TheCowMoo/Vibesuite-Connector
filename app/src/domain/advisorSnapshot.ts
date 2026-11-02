@@ -3,7 +3,6 @@ export interface MailboxSnapshot {
   enabled: boolean;
   mode: string;
   dailyCap: number;
-  hourlyCap?: number;
   minDelayMs?: number;
   window: { startHour: number; endHour: number; days: number[]; timeZone: string };
   ramp?: { startDailyCap: number; incrementPerDay: number; maxDailyCap: number; startDate: string };
@@ -43,7 +42,6 @@ export interface AdvisorSnapshot {
   settings: {
     tickIntervalMs: number;
     defaultDailyCap: number;
-    defaultHourlyCap: number;
     defaultMinDelayMs: number;
     cooldownOnErrors: number;
     cooldownHours: number;

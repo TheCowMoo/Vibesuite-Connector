@@ -58,8 +58,12 @@ const EnvSchema = z.object({
   SYNC_BACKOFF_DELAY_MS: z.coerce.number().int().positive().default(2000),
   // Catch-up sweep so a dropped push notification cannot strand an RSVP. 0 disables it.
   SYNC_RECONCILE_INTERVAL_MS: z.coerce.number().int().min(0).default(900000),
-  INVITE_BATCH_SIZE: z.coerce.number().int().positive().default(100),
   INVITE_DELAY_MS: z.coerce.number().int().min(0).default(300),
+  /**
+   * Hard ceiling on one Calendar event's guest list. A blast is one event per account, but Google
+   * still has a maximum number of attendees; past this we split only at the provider limit.
+   */
+  MAX_EVENT_ATTENDEES: z.coerce.number().int().min(1).default(3000),
   /** How often the worker looks for a due round of a scheduled (batched) invitation. */
   INVITE_SCHEDULE_TICK_INTERVAL_MS: z.coerce.number().int().positive().default(60000),
   ATTENDANCE_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(900000),
@@ -67,6 +71,8 @@ const EnvSchema = z.object({
   ATTENDANCE_MIN_SECONDS: z.coerce.number().int().min(0).default(60),
   /** How many contacts are updated in parallel during attendance delivery. */
   ATTENDANCE_DISPATCH_CONCURRENCY: z.coerce.number().int().min(1).max(20).default(5),
+  /** Attendees per AI routing request. Smaller batches are easier for the model to follow. */
+  ATTENDANCE_AI_BATCH_SIZE: z.coerce.number().int().min(1).max(100).default(25),
   ATTENDANCE_MATCH_MODE: z.enum(['email', 'email_or_name']).default('email'),
   GHL_TAG_ATTENDED: z.string().default('attended'),
   GHL_TAG_NO_SHOW: z.string().default('no-show'),
@@ -84,10 +90,11 @@ const EnvSchema = z.object({
   SYSTEM_EMAIL_FROM: z.string().email().optional(),
   CAMPAIGN_TICK_INTERVAL_MS: z.coerce.number().int().positive().default(300000),
   CAMPAIGN_DEFAULT_DAILY_CAP: z.coerce.number().int().positive().default(800),
-  CAMPAIGN_DEFAULT_HOURLY_CAP: z.coerce.number().int().positive().default(100),
   CAMPAIGN_DEFAULT_MIN_DELAY_MS: z.coerce.number().int().min(0).default(5000),
   CAMPAIGN_COOLDOWN_ON_ERRORS: z.coerce.number().int().positive().default(3),
   CAMPAIGN_COOLDOWN_HOURS: z.coerce.number().int().positive().default(24),
+  // How long a domain-reputation snapshot stays fresh. Manual "Check now" bypasses it.
+  DOMAIN_HEALTH_CACHE_MINUTES: z.coerce.number().int().positive().default(360),
   LOG_LEVEL: z.string().default('info'),
 });
 

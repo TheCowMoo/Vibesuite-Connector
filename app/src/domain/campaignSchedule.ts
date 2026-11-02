@@ -52,14 +52,12 @@ export interface ReadinessInput {
   now: number;
   capToday: number;
   sentToday: number;
-  hourlyCap?: number;
-  sentThisHour: number;
   /**
    * Treat the send window as open.
    *
    * Used by the one-off invitation path: that is an explicit operator action, not automated pacing,
-   * so a window whose job is to spread a bulk send should not block it. Daily/hourly caps and
-   * cooldowns still apply — this only relaxes the *hours* check.
+   * so a window whose job is to spread a bulk send should not block it. Daily caps and cooldowns
+   * still apply — this only relaxes the *hours* check.
    */
   ignoreWindow?: boolean;
 }
@@ -70,19 +68,14 @@ export interface Readiness {
   allowance: number;
 }
 
-/** Can this mailbox send right now, and how much? */
+/** Can this mailbox send right now, and how much? One blast is capped by the daily headroom. */
 export function senderReadiness(input: ReadinessInput): Readiness {
   if (!input.enabled) return { ready: false, allowance: 0, reason: 'paused' };
   if (input.coolingUntil && input.coolingUntil > input.now) return { ready: false, allowance: 0, reason: 'cooling down' };
   if (!input.inWindow && !input.ignoreWindow) return { ready: false, allowance: 0, reason: 'outside send window' };
 
-  const daily = Math.max(0, input.capToday - input.sentToday);
-  const hourly = input.hourlyCap ? Math.max(0, input.hourlyCap - input.sentThisHour) : Number.POSITIVE_INFINITY;
-  const allowance = Math.min(daily, hourly);
-
-  if (allowance <= 0) {
-    return { ready: false, allowance: 0, reason: daily <= 0 ? 'daily cap reached' : 'hourly cap reached' };
-  }
+  const allowance = Math.max(0, input.capToday - input.sentToday);
+  if (allowance <= 0) return { ready: false, allowance: 0, reason: 'daily cap reached' };
   return { ready: true, allowance };
 }
 

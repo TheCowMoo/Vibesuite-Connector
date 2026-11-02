@@ -14,7 +14,11 @@ import type {
   AutomationRule,
   AttendanceTags,
   AttendanceRosterSettings,
+  AttendanceAiWorkflowSettings,
+  AttendanceWorkflowRule,
+  WorkflowTarget,
 } from '../../domain/connection';
+import { parseWorkflowSettings } from '../../domain/workflowSettings';
 import { bootstrapConnection } from '../../domain/bootstrap';
 import { getSnapshot } from '../../domain/snapshotStore';
 
@@ -42,6 +46,9 @@ interface UpdateConnectionBody {
   attendanceRules?: AutomationRule[];
   attendanceTags?: AttendanceTags;
   attendanceCustomFieldId?: string;
+  attendanceWorkflows?: WorkflowTarget[];
+  attendanceWorkflowRules?: AttendanceWorkflowRule[];
+  attendanceAiWorkflow?: AttendanceAiWorkflowSettings;
   attendanceRoster?: AttendanceRosterSettings & { token?: string };
   clearAttendanceRosterToken?: boolean;
 }
@@ -145,6 +152,27 @@ export async function connectionRoutes(app: FastifyInstance): Promise<void> {
         maybe: body.webhookUrls.maybe || undefined,
         no: body.webhookUrls.no || undefined,
       };
+    }
+
+    // Workflow settings are validated as a whole: rules may only reference a workflow that is in
+    // the same list. Existing values fill in whichever fields this PATCH did not send.
+    const touchesWorkflows =
+      body.attendanceWorkflows !== undefined ||
+      body.attendanceWorkflowRules !== undefined ||
+      body.attendanceAiWorkflow !== undefined;
+    if (touchesWorkflows) {
+      const parsed = parseWorkflowSettings({
+        attendanceWorkflows: body.attendanceWorkflows ?? conn.attendanceWorkflows ?? [],
+        attendanceWorkflowRules: body.attendanceWorkflowRules ?? conn.attendanceWorkflowRules ?? [],
+        attendanceAiWorkflow: body.attendanceAiWorkflow ?? conn.attendanceAiWorkflow,
+      });
+      if (!parsed.ok) {
+        reply.code(400).send({ error: parsed.error, details: parsed.details });
+        return;
+      }
+      conn.attendanceWorkflows = parsed.value.attendanceWorkflows;
+      conn.attendanceWorkflowRules = parsed.value.attendanceWorkflowRules;
+      conn.attendanceAiWorkflow = parsed.value.attendanceAiWorkflow;
     }
 
     conn.updatedAt = Date.now();

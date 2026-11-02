@@ -32,12 +32,7 @@ describe('clampAdvisorAction', () => {
     expect(clampAdvisorAction({ kind: 'set_sender_daily_cap', target: 'Mailbox A', value: 'lots' as never }).ok).toBe(false);
   });
 
-  it('clamps the hourly cap and the delay', () => {
-    // The hard clamp matches the sender profile schema (max 1000); the prompt's
-    // 500/hour figure is only a guideline for the model.
-    const hourly = clampAdvisorAction({ kind: 'set_sender_hourly_cap', target: 'Mailbox A', value: 9999 });
-    expect(hourly.ok && hourly.action.value).toBe(1000);
-
+  it('clamps the delay', () => {
     const delay = clampAdvisorAction({ kind: 'set_sender_min_delay_ms', target: 'Mailbox A', value: 9_000_000 });
     expect(delay.ok && delay.action.value).toBe(600000);
 

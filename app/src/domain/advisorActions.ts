@@ -1,6 +1,5 @@
 export const ADVISOR_ACTION_KINDS = [
   'set_sender_daily_cap',
-  'set_sender_hourly_cap',
   'set_sender_min_delay_ms',
   'set_sender_window',
   'pause_sender',
@@ -74,12 +73,6 @@ export function clampAdvisorAction(input: AdvisorAction | undefined): ClampResul
       const value = clampInt(input?.value, 1, 5000);
       if (value === undefined) return { ok: false, error: 'the daily limit needs to be a number' };
       return { ok: true, action: { kind, target, value }, description: `${target}: max per day → ${value}` };
-    }
-
-    case 'set_sender_hourly_cap': {
-      const value = clampInt(input?.value, 1, 1000);
-      if (value === undefined) return { ok: false, error: 'the hourly limit needs to be a number' };
-      return { ok: true, action: { kind, target, value }, description: `${target}: max per hour → ${value}` };
     }
 
     case 'set_sender_min_delay_ms': {

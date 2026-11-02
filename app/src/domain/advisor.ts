@@ -50,7 +50,6 @@ export async function collectAdvisorSnapshot(): Promise<{ snapshot: AdvisorSnaps
       enabled: gauge.profile.enabled,
       mode: gauge.profile.mode,
       dailyCap: gauge.profile.dailyCap,
-      hourlyCap: gauge.profile.hourlyCap,
       minDelayMs: gauge.profile.minDelayMs,
       window: gauge.profile.window,
       ramp: gauge.profile.ramp,
@@ -101,7 +100,6 @@ export async function collectAdvisorSnapshot(): Promise<{ snapshot: AdvisorSnaps
       settings: {
         tickIntervalMs: env.CAMPAIGN_TICK_INTERVAL_MS,
         defaultDailyCap: env.CAMPAIGN_DEFAULT_DAILY_CAP,
-        defaultHourlyCap: env.CAMPAIGN_DEFAULT_HOURLY_CAP,
         defaultMinDelayMs: env.CAMPAIGN_DEFAULT_MIN_DELAY_MS,
         cooldownOnErrors: env.CAMPAIGN_COOLDOWN_ON_ERRORS,
         cooldownHours: env.CAMPAIGN_COOLDOWN_HOURS,
@@ -185,9 +183,6 @@ async function applySenderAction(action: AdvisorAction, connectionId: string): P
   switch (action.kind) {
     case 'set_sender_daily_cap':
       profile.dailyCap = action.value as number;
-      break;
-    case 'set_sender_hourly_cap':
-      profile.hourlyCap = action.value as number;
       break;
     case 'set_sender_min_delay_ms':
       profile.minDelayMs = action.value as number;

@@ -12,7 +12,6 @@ function mailbox(over: Partial<MailboxSnapshot> = {}): MailboxSnapshot {
     enabled: true,
     mode: 'flat',
     dailyCap: 800,
-    hourlyCap: 100,
     minDelayMs: 5000,
     window: { startHour: 9, endHour: 17, days: [1, 2, 3, 4, 5], timeZone: 'UTC' },
     capToday: 800,
@@ -56,7 +55,6 @@ function snapshot(mailboxes: MailboxSnapshot[], campaigns: CampaignSnapshot[] = 
     settings: {
       tickIntervalMs: 300000,
       defaultDailyCap: 800,
-      defaultHourlyCap: 100,
       defaultMinDelayMs: 5000,
       cooldownOnErrors: 3,
       cooldownHours: 24,
@@ -78,8 +76,8 @@ describe('buildAdvisorPrompt', () => {
   it('states the safety ceilings', () => {
     const prompt = buildAdvisorPrompt(snapshot([mailbox()]));
     expect(prompt).toContain('2000');
-    expect(prompt).toContain('500');
     expect(prompt).toContain('1000ms');
+    expect(prompt).not.toContain('set_sender_hourly_cap');
   });
 });
 
@@ -96,14 +94,6 @@ describe('localRecommendations', () => {
   it('offers to resume a paused mailbox', () => {
     const recs = localRecommendations(snapshot([mailbox({ enabled: false })]));
     expect(recs[0].action?.kind).toBe('resume_sender');
-  });
-
-  it('warns when the hourly ceiling is nearly reached', () => {
-    const recs = localRecommendations(snapshot([mailbox({ hourlyCap: 100, sentThisHour: 95, capToday: 800, sentToday: 95 })]));
-    expect(recs[0].title).toContain('close to its limit');
-    const action = recs[0].action;
-    expect(action?.kind).toBe('set_sender_hourly_cap');
-    expect((action?.value as number) > 100).toBe(true);
   });
 
   it('suggests a higher daily cap after a clean full day', () => {

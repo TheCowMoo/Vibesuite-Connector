@@ -1,4 +1,5 @@
-import type { AttendeeRecord, PollResult, QaEntry } from '../video/types';
+import type { AttendeeRecord, PollResult, QaEntry, RegistrantRecord } from '../video/types';
+import { buildZoomBehavior, behaviorFor, type PollQuestionSummary, type ZoomBehavior } from './zoomBehavior';
 
 export type AttendanceStatus = 'attended' | 'no_show' | 'partial';
 
@@ -19,6 +20,8 @@ export interface AttendancePerson {
   participantId?: string;
   customerKey?: string;
   raw?: Record<string, unknown>;
+  /** Poll answers, Q&A, registration answers and participation stats. */
+  behavior?: ZoomBehavior;
 }
 
 export interface AttendanceReport {
@@ -40,6 +43,16 @@ export interface AttendanceReport {
   sessionStats: Record<string, string>;
   polls: PollResult[];
   qa: QaEntry[];
+  /** Distinct poll questions, respondents and total answers (not the old row count). */
+  pollQuestionCount: number;
+  pollRespondentCount: number;
+  pollAnswerCount: number;
+  /** Per-question answer counts, ready for the session detail. */
+  pollSummary?: PollQuestionSummary[];
+  /** Full registrant rows, including custom registration answers. */
+  registrantDetails?: RegistrantRecord[];
+  sessionStart?: string;
+  sessionEnd?: string;
   generatedAt: number;
 }
 
@@ -60,6 +73,9 @@ export interface BuildReportParams {
   sessionStats?: Record<string, string>;
   polls?: PollResult[];
   qa?: QaEntry[];
+  registrantRows?: RegistrantRecord[];
+  sessionStart?: string;
+  sessionEnd?: string;
   minSeconds?: number;
 }
 
@@ -82,6 +98,15 @@ export function buildReport(params: BuildReportParams): AttendanceReport {
     }
   }
 
+  const behaviorIndex = buildZoomBehavior({
+    people: [...byEmail.values(), ...noEmailAttendees],
+    polls: params.polls ?? [],
+    qa: params.qa ?? [],
+    registrants: params.registrantRows ?? [],
+    sessionStart: params.sessionStart,
+    sessionEnd: params.sessionEnd,
+  });
+
   const toPerson = (email: string | undefined, rec: AttendeeRecord): AttendancePerson => ({
     email,
     name: rec.name,
@@ -96,6 +121,7 @@ export function buildReport(params: BuildReportParams): AttendanceReport {
     participantId: rec.participantId,
     customerKey: rec.customerKey,
     raw: rec.raw,
+    behavior: behaviorFor(behaviorIndex, email, rec.name),
   });
 
   const attended: AttendancePerson[] = [];
@@ -139,6 +165,13 @@ export function buildReport(params: BuildReportParams): AttendanceReport {
     sessionStats: params.sessionStats ?? {},
     polls: params.polls ?? [],
     qa: params.qa ?? [],
+    pollQuestionCount: behaviorIndex.pollQuestions.length,
+    pollRespondentCount: behaviorIndex.pollRespondentCount,
+    pollAnswerCount: behaviorIndex.pollAnswerCount,
+    pollSummary: behaviorIndex.pollSummary,
+    registrantDetails: params.registrantRows ?? [],
+    sessionStart: params.sessionStart,
+    sessionEnd: params.sessionEnd,
     generatedAt: Date.now(),
   };
 }

@@ -43,7 +43,7 @@ async function resolveGhlToken(conn: GhlRequestTarget): Promise<string> {
 export async function ghlRequest<T>(
   conn: GhlRequestTarget,
   config: AxiosRequestConfig,
-  opts: { idempotencyKey?: string } = {}
+  opts: { idempotencyKey?: string; version?: string } = {}
 ): Promise<T> {
   return withRetry(
     async () => {
@@ -56,7 +56,7 @@ export async function ghlRequest<T>(
         if (opts.idempotencyKey) headers['Idempotency-Key'] = opts.idempotencyKey;
         return ghlHttp.request<T>({
           ...config,
-          headers: { ...headers, Authorization: `Bearer ${tok}`, Version: env.GHL_VERSION },
+          headers: { ...headers, Authorization: `Bearer ${tok}`, Version: opts.version ?? env.GHL_VERSION },
         });
       };
 

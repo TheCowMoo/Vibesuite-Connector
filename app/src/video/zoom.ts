@@ -27,6 +27,7 @@ import type {
   PollResult,
   ProviderFetchResult,
   QaEntry,
+  RegistrantRecord,
   SessionType,
   SyncAttempt,
   VideoAuthContext,
@@ -417,6 +418,7 @@ async function fetchOnce(
             .map((a) => (str(a.user_email) || str(a.email) || '').toLowerCase())
             .filter(Boolean),
           registrants: registrantsRaw.length,
+          registrantRows: registrantsRaw as unknown as RegistrantRecord[],
           sessionStats: statsFrom(details),
           polls: pollsRaw as unknown as PollResult[],
           qa: qaRaw as unknown as QaEntry[],
@@ -478,6 +480,7 @@ async function fetchOnce(
       attendees: past.rows.map(mapParticipant),
       absentees: [],
       registrants: 0,
+      registrantRows: [],
       sessionStats: statsFrom(detailsRes.data),
       polls: [],
       qa: [],

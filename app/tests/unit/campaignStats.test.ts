@@ -144,4 +144,17 @@ describe('buildCampaignStats', () => {
     expect(variants[0]).toMatchObject({ variant: 'A', invited: 2, sent: 2, accepted: 1, declined: 1, acceptanceRate: 50 });
     expect(variants[1]).toMatchObject({ variant: 'B', invited: 1, sent: 1, accepted: 1, acceptanceRate: 100 });
   });
+
+  it('orders unlimited variant stats A, B, … Z, AA', () => {
+    const { variants } = buildCampaignStats({
+      recipients: [
+        rec('a@x.com', 'm1', 'sent', 'ev1', 'AA'),
+        rec('b@x.com', 'm1', 'sent', 'ev1', 'Z'),
+        rec('c@x.com', 'm1', 'sent', 'ev1', 'B'),
+        rec('d@x.com', 'm1', 'sent', 'ev1', 'A'),
+      ],
+      rsvpByConnection: {},
+    });
+    expect(variants.map((v) => v.variant)).toEqual(['A', 'B', 'Z', 'AA']);
+  });
 });

@@ -15,9 +15,11 @@ import { stateStore } from '../domain/stateStore';
 import { REPORT_RETRY_WINDOW_MS, syncOutcome } from '../domain/sessionSync';
 import { lookupContactByEmail, addTags, updateCustomField } from '../ghl/contacts';
 import { postWebhook } from '../ghl/webhooks';
-import { matchingRules, type ConditionContext } from '../domain/condition';
+import { matchingRules } from '../domain/condition';
+import { buildAttendanceContext } from '../domain/attendanceContext';
 import { tryClaimAttendanceDispatch, releaseAttendanceDispatch } from '../domain/attendanceDispatch';
 import { forEachLimit, withRetry } from '../domain/concurrency';
+import { applyWorkflowRules, autoAssignAiWorkflows } from '../domain/attendanceWorkflows';
 import {
   buildAttendanceSegments,
   segmentEntries,
@@ -34,69 +36,6 @@ import {
 } from '../domain/attendanceRoster';
 import type { AttendanceRosterSettings, StoredConnection } from '../domain/connection';
 import axios from 'axios';
-
-function buildContext(
-  session: SessionRecord,
-  p: SegmentPerson,
-  report: AttendanceReport,
-  segment: AttendanceSegment,
-  segments: AttendanceSegments,
-): ConditionContext {
-  const ctx: ConditionContext = {};
-
-  // Per attendee
-  ctx.email = p.email ?? '';
-  ctx.name = p.name ?? '';
-  ctx.attendanceStatus = p.status;
-  ctx.segment = segment;
-  ctx.invited = segment === 'not_invited' ? 'false' : 'true';
-  ctx.attendanceMinutes = p.durationSec !== undefined ? String(Math.round(p.durationSec / 60)) : '';
-  ctx.durationSec = p.durationSec !== undefined ? String(p.durationSec) : '';
-  ctx.joinedAt = p.joinedAt ?? '';
-  ctx.leftAt = p.leftAt ?? '';
-  ctx.attentivenessScore = p.attentivenessScore !== undefined ? String(p.attentivenessScore) : '';
-  ctx.isGuest = p.isGuest === undefined ? '' : String(p.isGuest);
-  ctx.registrantId = p.registrantId ?? '';
-  ctx.userId = p.userId ?? '';
-  ctx.participantId = p.participantId ?? '';
-  ctx.customerKey = p.customerKey ?? '';
-
-  // Session
-  ctx.provider = session.provider;
-  ctx.sessionId = session.id;
-  ctx.sessionType = session.sessionType ?? 'meeting';
-  ctx.sessionTitle = session.title;
-  ctx.sessionStart = session.startTime;
-  ctx.sessionEnd = session.endTime;
-
-  const stats = report.sessionStats ?? {};
-  ctx.sessionDurationMin = stats.duration ?? '';
-  ctx.sessionTotalMinutes = stats.total_minutes ?? '';
-  ctx.sessionParticipantsCount = stats.participants_count ?? '';
-  ctx.sessionHostEmail = stats.host_email ?? '';
-  ctx.sessionDept = stats.dept ?? '';
-
-  // Report rollups — the original names keep their meaning, the segment counts are additive.
-  ctx.invitedCount = String(report.invitedCount);
-  ctx.attendedCount = String(report.attendedCount);
-  ctx.noShowCount = String(report.noShowCount);
-  ctx.registrantCount = String(report.registrantCount ?? 0);
-  ctx.absenteeCount = String((report.absentees || []).length);
-  ctx.attendanceRate = String(Math.round((report.attendanceRate ?? 0) * 100));
-  ctx.pollCount = String((report.polls || []).length);
-  ctx.qaCount = String((report.qa || []).length);
-  ctx.attendedFullCount = String(segments.counts.attended);
-  ctx.partialCount = String(segments.counts.partial);
-  ctx.notInvitedCount = String(segments.counts.notInvited);
-  ctx.invitedSource = report.invitedSource ?? 'none';
-
-  // Passthrough for anything else the provider reported.
-  for (const k of Object.keys(stats)) {
-    if (ctx[`stat_${k}`] === undefined) ctx[`stat_${k}`] = stats[k];
-  }
-
-  return ctx;
-}
 
 function buildPayload(
   session: SessionRecord,
@@ -134,8 +73,14 @@ function buildPayload(
     absenteeCount: (report.absentees || []).length,
     attendanceRate: Math.round((report.attendanceRate ?? 0) * 100),
     segmentCounts: segments.counts,
-    pollCount: (report.polls || []).length,
+    pollCount: report.pollQuestionCount ?? 0,
+    pollRespondentCount: report.pollRespondentCount ?? 0,
+    pollAnswerCount: report.pollAnswerCount ?? 0,
     qaCount: (report.qa || []).length,
+    pollAnswers: p.behavior?.pollAnswers ?? [],
+    qa: p.behavior?.qa ?? [],
+    registrationAnswers: p.behavior?.registrationAnswers ?? [],
+    behavior: p.behavior ?? null,
     sessionStats: report.sessionStats ?? {},
     timestamp: new Date().toISOString(),
   };
@@ -287,6 +232,9 @@ export async function syncSession(sessionId: string): Promise<AttendanceReport> 
       sessionStats: fetched.sessionStats,
       polls: fetched.polls,
       qa: fetched.qa,
+      registrantRows: fetched.registrantRows,
+      sessionStart: session.startTime,
+      sessionEnd: session.endTime,
       minSeconds: env.ATTENDANCE_MIN_SECONDS,
     });
 
@@ -345,6 +293,8 @@ export interface DispatchResult {
   failed: number;
   segments: AttendanceSegments['counts'];
   roster: RosterDeliveryResult;
+  workflows: { applied: number; skipped: number; failed: number };
+  workflowError?: string;
 }
 
 /**
@@ -369,7 +319,13 @@ export async function dispatchSession(
 
   if (opts.rosterOnly) {
     const roster = await deliverRoster(session, report, segments, conn, opts.forceRoster === true);
-    return { dispatched: 0, failed: 0, segments: segments.counts, roster };
+    return {
+      dispatched: 0,
+      failed: 0,
+      segments: segments.counts,
+      roster,
+      workflows: { applied: 0, skipped: 0, failed: 0 },
+    };
   }
 
   if (conn) {
@@ -393,7 +349,7 @@ export async function dispatchSession(
           // failures are caught per rule below rather than thrown.
           await withRetry(
             async () => {
-              const ctx = buildContext(session, person, report, segment, segments);
+              const ctx = buildAttendanceContext(session, person, report, segment, segments);
 
               if (mode === 'api' || mode === 'both') {
                 if (email) {
@@ -446,8 +402,25 @@ export async function dispatchSession(
     logger.info({ sessionId }, 'no connection linked; skipping GHL contact actions');
   }
 
+  let workflows = { applied: 0, skipped: 0, failed: 0 };
+  let workflowError: string | undefined;
+  if (conn) {
+    try {
+      const ruleResult = await applyWorkflowRules(session, report, segments, conn);
+      const aiResult = await autoAssignAiWorkflows(sessionId, conn);
+      workflows = {
+        applied: ruleResult.applied + aiResult.applied,
+        skipped: ruleResult.skipped + aiResult.skipped,
+        failed: ruleResult.failed + aiResult.failed,
+      };
+    } catch (err) {
+      workflowError = (err as Error).message;
+      logger.error({ sessionId, err: workflowError }, 'attendance workflow routing failed');
+    }
+  }
+
   const roster = await deliverRoster(session, report, segments, conn, opts.forceRoster === true);
-  return { dispatched, failed, segments: segments.counts, roster };
+  return { dispatched, failed, segments: segments.counts, roster, workflows, workflowError };
 }
 
 /** Pick a representative person for the sample payload, preferring a matched attendee. */

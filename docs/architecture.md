@@ -51,7 +51,7 @@ calendar id, location id, and optional webhook URLs. All runtime keys are namesp
 | `conn:{id}:map:event:{eventId}` | event -> `{appointmentId, contactId}` |
 | `conn:{id}:map:contact:{email}` | email -> contactId cache (1h TTL) |
 | `oauth:state:{state}` | pending OAuth state -> connectionId (10-min TTL) |
-| `sender:profile:{conn}` | per-mailbox load profile (cap, hourly, delay, ramp, window) |
+| `sender:profile:{conn}` | per-mailbox load profile (daily cap, delay, ramp, window) |
 | `sender:day:{conn}:{YYYY-MM-DD}` | hash `sent` / `failed` counters for the mailbox (35-day TTL) |
 | `sender:hour:{conn}:{YYYY-MM-DDTHH}` | hourly send counter (3-hour TTL) |
 | `sender:state:{conn}` | health state: `errorStreak`, `cooldownUntil`, `lastSentAt`, `lastError` |
@@ -60,18 +60,28 @@ calendar id, location id, and optional webhook URLs. All runtime keys are namesp
 | `campaign:{id}:queue:{conn}` | list of pending emails assigned to that mailbox |
 | `campaign:{id}:sender:{conn}` | hash `sent` / `failed` for that mailbox inside the campaign |
 | `campaign:{id}:dispatch:{email}` | idempotency guard: a recipient is invited once per campaign (30-day TTL) |
+| `domain:health:{domain}` | cached DNS snapshot for one sending domain (6-hour TTL by default) |
+| `domain:health:index` | set of domains that have a cached snapshot |
+| `domain:health:lock:{domain}` | refresh lock, so two operators cannot fire the same DNS burst (`SET NX EX 90`) |
+| `conn:{id}:calendarEmail` | real address behind a `primary`/resource calendar (24-hour TTL; `-` means Google had none) |
 | `advisor:analysis` | latest Advisor analysis (snapshot + label→id targets + recommendations) |
 | `advisor:applyLog` | append-only audit of every Apply, newest first (200 max) |
+| `session:{id}` | session record, including workflow assignments and the last preview |
+| `session:{id}:attendance` | normalized report: per-person behavior, poll summary, raw Q&A/registration rows |
+| `session:{id}:dispatch:seen:{fp}` | per-person attendance delivery guard (5-min TTL) |
+| `session:{id}:workflow:{email}` | the GHL workflow already applied to this person in this call (30-day TTL) |
+| `session:{id}:workflow:lock:{email}` | short lock around one workflow application (`SET NX EX 300`) |
 
 ## Senders & campaigns
 
-A **Sender** is a connected Google account plus a load profile: `dailyCap`, `hourlyCap`,
-`minDelayMs`, an optional warming **ramp** (`startDailyCap` + `incrementPerDay` + `maxDailyCap`
-from a start date), a **send window** (hours + weekdays + IANA timezone, evaluated with Node's
-built-in `Intl.DateTimeFormat`) and a health state with an automatic **cooldown** after repeated
-failures. Limits are **per mailbox and global** — every campaign drawing on that mailbox shares one
-counter. `dailyCapFor()` always clamps the ramp value to `dailyCap`, so raising the ramp can never
-exceed the hard ceiling.
+A **Sender** is a connected Google account plus a load profile: `dailyCap`, `minDelayMs`, an
+optional warming **ramp** (`startDailyCap` + `incrementPerDay` + `maxDailyCap` from a start date), a
+**send window** (hours + weekdays + IANA timezone, evaluated with Node's built-in
+`Intl.DateTimeFormat`) and a health state with an automatic **cooldown** after repeated failures.
+`dailyCap` is the blast size: one send puts every recipient this account may contact today on a
+single Calendar event. Limits are **per mailbox and global** — every campaign drawing on that mailbox
+shares one daily counter. `dailyCapFor()` always clamps the ramp value to `dailyCap`, so raising the
+ramp can never exceed the hard ceiling.
 
 A **Campaign** freezes an audience (`listId` + optional segment names), an event payload
 (title/description/start/end/timezone and an optional Zoom join link resolved from the linked
@@ -81,12 +91,13 @@ a weighted-share split honouring per-sender `quota`, with the rounding remainder
 round-robin and the result assigned with `allocateEmails()` so each mailbox's queue is interleaved
 from the source order rather than a contiguous block.
 
-`sendCampaignBatch()` then sends at most one batch per mailbox, bounded by
-`min(headroom, maxPerSender, queueLength)`. Each recipient is claimed with a `SET NX` key before
-it is included, so a retry can never double-invite. Successes bump the mailbox day/hour counters,
-the campaign counters and the list's invited set; failures mark the recipients, increment the
-sender `errorStreak`, and are re-queued at the front so another mailbox (or the next tick) can pick
-them up. Once `errorStreak` reaches `CAMPAIGN_COOLDOWN_ON_ERRORS` the mailbox enters a
+`sendCampaignBatch()` then sends one blast per mailbox, bounded by
+`min(daily headroom, queueLength)`. The blast is one Calendar event per account (one per active copy
+variant); only Google's guest-list ceiling can split it. Each recipient is claimed with a `SET NX`
+key before it is included, so a retry can never double-invite. Successes bump the mailbox day
+counter, the campaign counters and the list's invited set; failures mark the recipients, increment
+the sender `errorStreak`, and are re-queued at the front so another mailbox (or the next tick) can
+pick them up. Once `errorStreak` reaches `CAMPAIGN_COOLDOWN_ON_ERRORS` the mailbox enters a
 `CAMPAIGN_COOLDOWN_HOURS` cooldown and is skipped until it expires or an operator hits Resume.
 The campaign flips to `completed` when no mailbox has work left. `planSchedule()` powers the
 capacity planner by walking day by day and summing each mailbox's cap for that date.
@@ -103,8 +114,9 @@ rather than one queue per campaign.
 gives every campaign an equal slice of the mailbox's allowance before letting leftover capacity
 flow back down the priority order — a huge high-priority campaign cannot starve a small one, and
 the small one still finishes. `senderReadiness()` derives the allowance from the daily headroom,
-the hourly headroom, the send window and any cooldown; `dueForNextBatch()` then enforces
-`minDelayMs` between batches so sends are never back-to-back.
+the send window and any cooldown; `dueForNextBatch()` then enforces `minDelayMs` between passes so
+sends are never back-to-back. There is no hourly cap: one pass is one blast per account, sized by
+the daily cap.
 
 After the send pass, `redistributeStranded()` moves queued recipients off mailboxes that cannot
 progress (paused, or inside a cooldown) onto healthy mailboxes in the same campaign, so a single
@@ -323,7 +335,10 @@ The invited list is resolved by `resolveInvitedEmails()` in this order:
   webhooks whose context now exposes `segment`, `invited`, `invitedSource`, `attendedFullCount`,
   `partialCount` and `notInvitedCount`. The payload gains `event`, `segment`, `invited`, `invitedSource`,
   `minutes` and `segmentCounts`. Contacts are updated with a bounded fan-out
-  (`ATTENDANCE_DISPATCH_CONCURRENCY`, default 5) and three attempts with linear backoff.
+  (`ATTENDANCE_DISPATCH_CONCURRENCY`, default 5) and three attempts with linear backoff. The payload also
+  carries `pollAnswers`, `qa`, `registrationAnswers`, `behavior`, `pollQuestionCount`,
+  `pollRespondentCount` and `pollAnswerCount`; `pollCount` now means distinct poll questions, not the
+  number of respondent rows (which was the old accidental meaning).
 - **Roster** — `buildRosterPayloads()` (`domain/attendanceRoster.ts`) emits one POST per non-empty segment
   (`attendance.segment`) or one snapshot (`attendance.session`), with `counts`, `generatedAt` and a
   `revision` that hashes the content without the timestamp. `deliverRoster()` skips an unchanged revision,
@@ -336,6 +351,71 @@ The invited list is resolved by `resolveInvitedEmails()` in this order:
   fatal.
 - **API** — `POST /api/sessions/:id/dispatch` accepts `{ rosterOnly, forceRoster }`; the response reports
   `dispatched`, `failed`, the segment counts and a `roster` block (`sent`, `skipped`, `reason`, `error`).
+  It also reports `workflows` (`applied`, `skipped`, `failed`) and `workflowError` when routing itself failed.
+
+### Routing attendance into GHL workflows
+
+A second, independent channel can put the contact into a GoHighLevel workflow. It is configured per
+connection in **Attendance automations**, alongside (not instead of) tags, webhooks and the roster.
+
+**Normalisation.** `zoom.ts` already fetched the poll and Q&A report rows; `buildZoomBehavior()`
+(`domain/zoomBehavior.ts`, pure) joins them to the attendee list and produces one `ZoomBehavior` per
+person: poll answers, Q&A questions and answers, registration answers, joined-late / left-early minutes,
+attended portion, device, location, network type, microphone, camera, connection type and share flags.
+Email is the key; a name is only used when it is unique among the attendees, so two people with the same
+name never inherit each other's answers. Rows that cannot be attributed still contribute to the
+session-level question/answer counts. `AttendancePerson.behavior`, `SegmentPerson.behavior` and the
+roster payload carry the same object. Q&A is only available when Zoom exposes it (usually webinars);
+chat, reactions and transcripts are **not** in Zoom's report API and are not claimed here.
+
+Poll non-response is inferred: every behaviour object also holds the session's poll questions. A
+`did not answer` condition is true for an attendee when the question ran in the session but they have no
+matching answer, and false when the question never ran (so a skipped poll cannot fire every attendee).
+
+**Deterministic rules.** `attendanceWorkflowRules` is an ordered list; the first enabled rule whose
+generic conditions (`domain/condition.ts`) **and** poll conditions all match wins. An empty rule is a
+catch-all. Poll operators are `answered`, `not_answered`, `equals`, `not_equals`, `contains` and
+`not_contains`, and are evaluated by `domain/workflowRules.ts` with no I/O. A rule points at a
+`WorkflowTarget` (local `id`, GHL `workflowId`, display name, optional AI criteria) on the same
+connection, so a typo cannot send contacts to an arbitrary workflow. `eventStartTime` is either `now` or
+the call's start.
+
+**GHL call.** `addContactToWorkflow()` (`ghl/contacts.ts`) uses
+`POST /contacts/{contactId}/workflow/{workflowId}` with `Version: v3` (confirmed in the HighLevel
+reference) and `{ eventStartTime }`. The workflow endpoint is v3 even when `GHL_VERSION` is the usual
+`2021-07-28`, so `ghlRequest()` takes a per-request version override. The contact is looked up by email
+first; a missing contact is a recorded failure, not a crash.
+
+**One workflow per person per call.** Before the GHL call, `session:{id}:workflow:{email}` is read; a
+different workflow is skipped, the same workflow is skipped as already applied. A 300-second
+`session:{id}:workflow:lock:{email}` (`SET NX EX`) keeps two dispatch runs from racing. The marker is set
+only after GHL accepts and lasts 30 days. An explicit manual assignment can pass `force`, which adds the
+new workflow and moves the marker; it does not remove the contact from the old workflow (GHL's delete
+endpoint is deliberately not used here).
+
+**AI routing (opt-in).** When `attendanceAiWorkflow.enabled` is true, people **no rule matched** are sent
+to the configured AI provider in batches of `ATTENDANCE_AI_BATCH_SIZE` (default 25). The prompt contains
+`p1`, `p2`, … identifiers, the segment/status, minutes, attentiveness and the curated behaviour; it does
+not contain the attendee name/email columns. Free-text poll, Q&A and registration answers are sent as the
+attendee typed them, so the operator should treat AI routing as a data-sharing decision. The model may
+only return a `workflowId` from the target list. Unknown attendee ids and unknown workflow ids are dropped
+by `validateAiWorkflowResponse()` before anything reaches GHL.
+`confidenceThreshold` (default 0.7) makes lower-confidence proposals visible but ineligible. `mode:
+'preview'` is the default: the operator reviews proposals in the call detail and applies selected rows.
+`mode: 'auto'` applies eligible AI proposals during dispatch. `maxAttendees` (panel default 25; 0 = all)
+caps cost and keeps a preview inside the request timeout; it takes the first N unmatched in attended →
+partial → no-show → not-invited order. The preview is cached for ten minutes against a
+hash of the report, attendees, rules, targets and AI settings, so reopening the dialog does not spend tokens
+again. Automatic mode records that hash on the session too, so an hourly re-sync with identical content
+does not re-send the same attendees; a new attendee, answer, rule or setting changes the hash and runs it
+again.
+
+**API.** `POST /api/sessions/:id/workflows/preview` returns `{ preview }`;
+`POST /api/sessions/:id/workflows/apply` takes `{ selected: [{ email, workflowId, force? }] }`;
+`POST /api/sessions/:id/workflows/assign` takes one `{ email, workflowId, force? }`. Every attempt is
+appended to `session.workflowAssignments` (newest first, cap 1000) and shown in the call detail with
+source, status, confidence, reason and error. The report itself, including per-person behaviour and the
+raw poll/Q&A/registration rows, lives in `session:{id}:attendance` as before.
 
 The link a calendar invite carries comes from `sessionJoinUrl()` (`domain/joinLink.ts`), in priority
 order:
@@ -404,14 +484,13 @@ exactly what the model received. The label → real-id mapping lives in `analysi
 server and is never sent to the provider.
 
 Recommendations come from two sources: the model (ids `ai-*`) and `localRecommendations()` (ids
-`local-*`), a deterministic rule set for cooldowns, paused mailboxes, hour-ceiling stalls, clean
-full days, >10% failure rates and single-mailbox campaigns. The rules keep the tab useful when no
-AI key is configured, and the two sources are merged so a provider outage degrades instead of
-breaking.
+`local-*`), a deterministic rule set for cooldowns, paused mailboxes, clean full days, >10% failure
+rates and single-mailbox campaigns. The rules keep the tab useful when no AI key is configured, and
+the two sources are merged so a provider outage degrades instead of breaking.
 
 Every model-proposed action is passed through `clampAdvisorAction()`, which rejects unknown kinds
-and clamps every number into the same bounds the manual UI enforces (daily cap 1–5000, hourly cap
-1–1000, delay 0–600000 ms, hours 0–23, weekday subset of 0–6, priority 0–10, status
+and clamps every number into the same bounds the manual UI enforces (daily cap 1–5000,
+delay 0–600000 ms, hours 0–23, weekday subset of 0–6, priority 0–10, status
 `active|paused`). An action that fails to clamp is downgraded to advisory-only rather than applied.
 Apply resolves the label back to the real id, mutates the sender profile or campaign, marks the
 recommendation `applied` and appends a line to the append-only `advisor:applyLog`. "Ask a
@@ -447,12 +526,19 @@ the browser for the requested period, never persisted, and disappears automatica
 activity exists — the `hasActivity` flag is computed across all campaigns and sessions, so an empty
 *period* on an established account still shows honest zeros rather than samples.
 
-### Batched invitations: one event per account per round
+### One blast per account (and optional rounds)
 
-Both the one-off Invitations tab and campaigns can send in **rounds**. A round means: every chosen
-account creates **one** calendar event with at most `eventBatchSize` recipients (default 300 when enabled),
-then the plan waits `batchDelayMinutes` before the next round. With three accounts, a round is up to three
-events and 900 invitations.
+The default is **one Calendar event per sending account**. Every recipient that account may contact
+this pass goes on that event: `planEventGroups()` returns one group, and only the provider's
+`MAX_EVENT_ATTENDEES` ceiling (3,000 by default) can split it into a `(1/2)` follow-up. There is no
+`INVITE_BATCH_SIZE` chunking and no 200-per-tick ceiling: `dailyCap` sets the blast size, and the
+next blast waits until the daily headroom reopens. A single event may exceed Google's ceiling only
+if the operator raises that environment value.
+
+Both the one-off Invitations tab and campaigns can still send in **rounds**. A round is opt-in:
+every chosen account creates **one** event with at most `eventBatchSize` recipients (default 300
+when enabled), then the plan waits `batchDelayMinutes` before the next round. With three accounts,
+a round is up to three events (one per variant per account) and `3 × eventBatchSize` invitations.
 
 **One-off invitations** (`POST /api/invites` with `batchSize`/`delayMinutes`):
 
@@ -461,7 +547,7 @@ events and 900 invitations.
 - `startInviteScheduler()` (`scheduler/invites.ts`, `INVITE_SCHEDULE_TICK_INTERVAL_MS`) sends due rounds via
   `runScheduledInviteRound()`. Each round:
   - re-checks `list:{id}:invited` unless the schedule was created with `force`;
-  - caps each account at `min(batchSize, current allowance)` and plans the split with the same
+  - caps each account at `min(batchSize, daily allowance)` and plans the split with the same
     `planInviteSplit()` the synchronous route uses;
   - sends one event per account through `sendInviteRound()`, appends the event IDs to the original
     `InviteRecord`, and stores the round on the schedule.
@@ -473,13 +559,13 @@ events and 900 invitations.
 
 **Campaigns** (`eventBatchSize`, `batchDelayMinutes`, `nextBatchAt`, `lastBatchAt`):
 
-- Opt-in fields on the campaign. `sendFromSender()` caps the claimed batch at `eventBatchSize` and creates
-  exactly one event per active variant per account; with batching off, the original chunking and numbered suffix
-  are untouched.
+- Opt-in fields on the campaign. `sendFromSender()` claims up to the account's daily headroom (or
+  `eventBatchSize` when batching) and creates exactly one event per active variant per account through
+  `planEventGroups()`. With batching off, that is one event per account for the whole claimed blast.
 - `activeCampaigns(now)` skips a campaign whose `nextBatchAt` has not arrived. After a tick in which a
   campaign actually sent, `markBatchRound()` sets `nextBatchAt = now + delay`; the manual “Send a batch”
   action uses the same helper and refuses while the gate is closed.
-- Daily/hourly caps, the sending window and `minDelayMs` still apply inside a round, so a capped account can
+- The daily cap, the sending window and `minDelayMs` still apply inside a round, so a capped account can
   send fewer than `eventBatchSize` and the rest waits for the next round.
 - `applyLifecycle()` ends a batched campaign at the earlier of `sendByAt` and the event start; a manual batch
   after the event start is refused.
@@ -487,19 +573,21 @@ events and 900 invitations.
 **Shared semantics:** delay from the end of the previous round; remainder carried forward; a failed event is
 retried for those recipients in the next round; no round begins at or after the event start.
 
-### A/B/C/D copy variants and test copies
+### Copy variants (unlimited) and test copies
 
-A campaign can carry up to four copy variants (`copyVariants: [{ id: 'A'|'B'|'C'|'D', summary, description? }]`).
-Variant A is mirrored into the legacy `event.summary`/`event.description`, so cards, attendance labels and older
-clients keep reading one coherent subject.
+A campaign can carry any number of copy variants (`copyVariants: [{ id: 'A', summary, description? }]`).
+IDs are Excel-style letters (A, B, …, Z, AA, AB, …); the schema requires unique IDs and variant A as the
+base, but has no maximum. Variant A is mirrored into the legacy `event.summary`/`event.description`, so cards,
+attendance labels and older clients keep reading one coherent subject.
 
 - At **Begin sending**, `startCampaign()` assigns every audience email round-robin across the active variants
   (even split, deterministic) and writes the `campaign:{id}:variants` hash. The recipient row also stores
   `variant`, so the queue can keep carrying plain email addresses and redistribution does not lose the assignment.
-- `sendFromSender()` groups its claimed batch by variant and creates **one event per active variant** in batched
-  mode (or the usual chunks in legacy mode). `eventBatchSize` remains the total per account per round, so four
-  variants × three accounts can mean up to twelve smaller events rather than three large ones. Google Calendar has
-  one summary/description per event, so this is unavoidable for real per-recipient copy.
+- `sendFromSender()` groups its claimed batch by variant and creates **one event per active variant per account**.
+  `eventBatchSize` remains the total per account per round, so N variants × three accounts can mean up to 3N
+  smaller events rather than three large ones. Google Calendar has one summary/description per event, so this is
+  unavoidable for real per-recipient copy. Event creation is paced and retried; many variants can otherwise fire
+  a burst of `events.insert` calls.
 - `markInvited()` records the variant's subject. `buildCampaignStats()` adds a `variants` funnel alongside the
   aggregate funnel and per-sender table, using the existing recipient `eventId` and RSVP map. There is no
   open/click tracking, so the winner is a manual read of RSVP/attendance, not an automatic decision.
@@ -512,6 +600,46 @@ recipient rows, queues, caps, stats or invited-set entries. The event ID is stor
 `campaign:test-event:{connectionId}:{eventId}` for 30 days, and `dispatchChange()` skips those IDs so a test
 RSVP cannot create/update a GHL contact or fire attendance/webhook rules. The test event remains on the sender's
 calendar, marked `[TEST]`.
+
+## Domain reputation
+
+`GET /api/deliverability` is a cache-only read of what DNS publishes for the domains behind the sending
+accounts. `POST /api/deliverability/refresh` (owner/admin, optional `{ domain }`) is the only path that
+queries DNS, and it bypasses the cache.
+
+**Where the domain comes from.** `resolveSenderDomain()` in `domainHealth.ts` tries, in order: the
+per-account `sendingDomain` override, `googleSubject`, the email domain in `googleCalendarId`, and finally the
+address `calendars.get()` returns for `primary` (cached for a day in `conn:{id}:calendarEmail`). A
+`*.calendar.google.com` id is a shared/resource calendar and is never treated as a domain. Accounts that
+still cannot be resolved are returned in `unresolved` with a reason and a link to Sending accounts. Domains
+are lowercased, validated and deduped; several accounts on one domain share a card. Consumer domains are
+flagged `providerManaged` and never produce a critical status or a fix suggestion.
+
+**Checks.** `domainHealth.ts` is pure — it takes TXT/MX strings and returns verdicts, so the rules are
+testable without a resolver. `domainHealthCheck.ts` does the lookups with `node:dns/promises` (no new
+dependency) and probes every selector: `google`, `googlemail`, `default`, `selector1/2`, `s1`, `k1`, `mail`,
+`dkim`, or just the account's `dkimSelector` when set. SPF must be single, include `_spf.google.com`, end in
+`-all` and stay inside the ten-lookup estimate; DMARC must be single, `p=quarantine|reject` at `pct=100`;
+DKIM needs a non-empty `p=` (an empty one is a revocation); MX must exist and not be a null MX. Spamhaus DBL
+(`dbl.spamhaus.org`) and SURBL (`multi.surbl.org`) are queried directly, and their blocked-resolver replies
+(`127.255.255.x`, `127.0.0.1`) are classified `unavailable` — never `listed`. MTA-STS and BIMI are
+informational only.
+
+**Status precedence.** `critical` means a failed SPF, DMARC or blocklist check. Missing DKIM, `p=none`,
+partial `pct`, soft-fail SPF, a missing/null MX, or an unavailable blocklist means `warning`. Everything else
+is `healthy`. `provider_managed` and `unchecked` are the remaining two states.
+
+**Caching and concurrency.** Reports live in `domain:health:{domain}` for
+`DOMAIN_HEALTH_CACHE_MINUTES` (360 by default) and are indexed in `domain:health:index`. Refresh runs three
+domains at a time through `forEachLimit`, takes `domain:health:lock:{domain}` (`SET NX EX 90`) per domain, and
+releases it in `finally`. There is no scheduler in v1: the page reads cache, and a button press is what
+triggers DNS. The campaign wizard reads the same cached payload and shows a non-blocking warning when a
+selected sender's domain is critical or warning.
+
+**What it deliberately does not claim.** Google sends calendar invitations from shared infrastructure, so IP
+blacklists and Postmaster data would describe Google, not the customer. Bounces and complaints are not exposed
+by the Calendar API. The page says so, and the DKIM check is labelled as "the key is published", not "Google
+signs with it".
 
 ## Security model
 
@@ -580,7 +708,7 @@ deliberately leaves `#campaignNew` visible, because that is the tour's opening t
 
 Navigation lives in a **left rail** (`.rail`, `--rail-w: 224px`) grouped by plain labels: Campaigns
 and Invitations first, then *Set up* (Google accounts, Contact lists, Sending accounts, Documents),
-*Insights* (Statistics, Who attended, Assistant) and *Workspace* (People, Settings). A slim `.topbar` carries
+*Insights* (Statistics, Who attended, Deliverability, Assistant) and *Workspace* (People, Settings). A slim `.topbar` carries
 only the brand and the help/account menus. Below 900px the rail flattens into a horizontal scrolling
 strip and the group labels hide.
 
@@ -627,8 +755,8 @@ send onward; there is no backfill.
 
 The Invitations tab sends **now**, from one or more accounts. `planInviteSplit()`
 (`domain/invitePlan.ts`) splits the audience evenly across the chosen accounts, each capped at its own
-remaining headroom via `senderReadiness()` — the same call the campaign scheduler makes, so
-daily/hourly caps, cooldowns and a paused account all apply. The **send window is deliberately
+remaining headroom via `senderReadiness()` — the same call the campaign scheduler makes, so the
+daily cap, cooldowns and a paused account all apply. The **send window is deliberately
 ignored** here (`ignoreWindow: true`): it exists to pace a bulk campaign, and a manual send is an
 explicit act — refusing it at 9pm because a default window says 9–5 would be surprising. Campaigns
 still honour it. Because the counters
@@ -636,9 +764,9 @@ still honour it. Because the counters
 **spends the same budget a campaign would**. A send that exceeds total headroom sends what it can and
 reports the remainder as `unplaced` rather than refusing outright or over-sending.
 
-Events are chunked **per account**, not across the whole audience, so the normal case (one chunk per
-account) produces no `(1/3)` suffix and a guest never receives a numbered title. The suffix only
-returns when a single account needs splitting.
+Each account creates **one event** with its share of the audience, not across the whole audience, so a
+guest receives a single, unnumbered invitation. The `(1/3)` suffix only returns when the account's
+share exceeds Google's per-event guest ceiling.
 
 `POST /api/invites/capacity` reports per-account headroom for the picker. It is deliberately **not**
 role-gated, unlike `/api/senders` — sending invitations is open to every role, so the picker has to
@@ -660,10 +788,10 @@ API routes and Redis keys keep their original names, so use this table when read
 | Statistics | `stats`, `/api/stats/overview`, `statsOverview` |
 | Campaigns | `campaign`, `/api/campaigns`, `campaign:{id}` |
 | Sending accounts | `sender`, `/api/senders`, `sender:*` |
+| Deliverability | `domainHealth`, `/api/deliverability`, `domain:health:*` |
 | Assistant | `advisor`, `/api/advisor`, `advisor:analysis` |
 | People | `team`, `users`, `/api/team` |
 | "max per day" | `dailyCap` |
-| "max per hour" | `hourlyCap` |
 | "pause between batches" | `minDelayMs` |
 | "warm up slowly" | `mode: 'ramp'` |
 | "sending hours" | `window` |

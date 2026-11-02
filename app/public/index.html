@@ -58,6 +58,7 @@
       <div class="rail__group">Insights</div>
       <button class="rail__link" data-view="stats"><span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="21" x2="21" y2="21"/><rect x="5" y="11" width="4" height="10"/><rect x="11" y="6" width="4" height="15"/><rect x="17" y="14" width="4" height="7"/></svg></span>Statistics</button>
       <button class="rail__link" data-view="attendance"><span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg></span>Who attended</button>
+      <button class="rail__link" data-view="deliverability" data-role="admin" hidden><span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg></span>Deliverability</button>
       <button class="rail__link" data-view="advisor" data-role="admin" hidden><span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1"/><circle cx="12" cy="12" r="2.5"/></svg></span>Assistant</button>
 
       <div class="rail__group">Workspace</div>
@@ -181,7 +182,7 @@
           <div class="field">
             <label class="daychk"><input type="checkbox" id="inviteBatch" /><span>Send in batches (one event per account per round)</span></label>
             <div class="invite-row" id="inviteBatchFields" hidden>
-              <label class="field"><span class="field__label">Recipients per event</span><input type="number" id="inviteBatchSize" min="1" max="1000" value="300" /></label>
+              <label class="field"><span class="field__label">Recipients per account per round</span><input type="number" id="inviteBatchSize" min="1" max="1000" value="300" /></label>
               <label class="field"><span class="field__label">Wait between rounds (hours)</span><input type="number" id="inviteBatchDelay" min="0" step="1" value="24" /></label>
             </div>
             <span class="field__hint">Each account creates one event per round. Anything left over is invited after the delay, and no round starts after the event begins.</span>
@@ -232,6 +233,27 @@
 
     <div class="summary" id="attendanceSummaryStrip"></div>
     <div id="sessionsList"></div>
+  </section>
+
+  <!-- Deliverability -->
+  <section id="view-deliverability" class="view" hidden>
+    <div class="page-head">
+      <div>
+        <h1 class="page-head__title">Domain reputation</h1>
+        <p class="page-head__sub">What the internet can verify about the domains behind your sending accounts.</p>
+      </div>
+      <button class="btn btn--primary" id="deliverabilityCheckAll">Check all</button>
+    </div>
+
+    <div class="stats" id="deliverabilitySummary"></div>
+
+    <div class="card deliverability-note">
+      <p class="muted">Google sends calendar invitations from its own infrastructure, so this page checks your domain's DNS — not Google's IP addresses. It cannot show inbox placement or a Google Postmaster score. An IP blacklist would test Google, not your domain.</p>
+      <p class="muted">A published DKIM key proves the key exists, not that Google signs with it. DMARC is checked on the exact sending domain; a record on a parent domain is not inferred. If either matters, send yourself a Gmail test.</p>
+    </div>
+
+    <div id="deliverabilityList"></div>
+    <div id="deliverabilityUnresolved"></div>
   </section>
 
   <!-- Advisor -->
@@ -683,6 +705,31 @@
       </div>
       <label class="field"><span class="field__label">Segment custom field ID (optional)</span><input id="attCustomField" placeholder="GHL custom field id" /></label>
 
+      <h3 class="detail__sub">GHL workflows</h3>
+      <p class="hint">Add each GoHighLevel workflow this account may use. Paste the workflow ID from the GHL workflow URL; the name is only for this panel.</p>
+      <div id="attendanceWorkflowsList"></div>
+      <button class="btn btn--ghost btn--sm" id="attendanceAddWorkflowBtn">+ Add workflow</button>
+
+      <h3 class="detail__sub">GHL workflow rules</h3>
+      <p class="hint">First enabled match wins. Every condition and poll condition must match. These run automatically during “Send to GHL” and every scheduled sync.</p>
+      <div id="attendanceWorkflowRulesList"></div>
+      <button class="btn btn--ghost btn--sm" id="attendanceAddWorkflowRuleBtn">+ Add workflow rule</button>
+
+      <h3 class="detail__sub">AI workflow routing (optional)</h3>
+      <p class="hint">Runs after the rules for people no rule matched. The model sees anonymous attendee IDs and behavior (including poll, Q&amp;A and registration answers); the attendee name/email fields are not sent, but free-text answers may contain whatever the attendee typed.</p>
+      <label class="daychk"><input type="checkbox" id="attAiEnabled" /><span>Enable AI routing</span></label>
+      <div class="sender__grid">
+        <label class="field"><span class="field__label">Mode</span>
+          <select id="attAiMode">
+            <option value="preview">Preview then apply (safe default)</option>
+            <option value="auto">Automatic</option>
+          </select>
+        </label>
+        <label class="field"><span class="field__label">Confidence threshold</span><input id="attAiThreshold" type="number" min="0" max="1" step="0.05" value="0.7" /></label>
+        <label class="field"><span class="field__label">Max attendees per session (0 = all)</span><input id="attAiMax" type="number" min="0" step="1" value="25" /></label>
+      </div>
+      <p class="muted" id="attAiNote">Preview only proposes; nothing is applied until you review it in the call details. Automatic applies proposals at or above the threshold.</p>
+
       <h3 class="detail__sub">Roster webhook</h3>
       <p class="hint">Optional. Sends each segment (or one snapshot) to your own endpoint, with a revision so an unchanged result is not resent.</p>
       <label class="field"><span class="field__label">Roster URL (optional)</span><input id="attRosterUrl" placeholder="https://hooks.example.com/attendance" /></label>
@@ -693,7 +740,7 @@
       <p class="muted" id="attRosterTokenState"></p>
       <label class="daychk"><input type="checkbox" id="attRosterClearToken" /><span>Remove the stored token</span></label>
 
-      <h3 class="detail__sub">Rules</h3>
+      <h3 class="detail__sub">Webhook rules</h3>
       <p class="hint">Each rule fires its webhook when ALL of its conditions match an attendee outcome. Fields and values come from the video-attendance catalog.</p>
       <div id="attendanceRulesList"></div>
       <button class="btn btn--ghost btn--sm" id="attendanceAddRuleBtn">+ Add rule</button>
@@ -808,13 +855,14 @@
     <div class="field">
       <label class="daychk"><input type="checkbox" id="campBatch" /><span>Send in batches (one round at a time)</span></label>
       <div class="invite-row" id="campBatchFields" hidden>
-        <label class="field"><span class="field__label">Recipients per event</span><input type="number" id="campBatchSize" min="1" max="1000" value="300" /></label>
+        <label class="field"><span class="field__label">Recipients per account per round</span><input type="number" id="campBatchSize" min="1" max="1000" value="300" /></label>
         <label class="field"><span class="field__label">Wait between rounds (hours)</span><input type="number" id="campBatchDelay" min="0" step="1" value="24" /></label>
       </div>
-      <span class="field__hint">Each active variant creates one event per account per round. Mailbox caps still apply, so a round can be smaller than the batch size.</span>
+      <span class="field__hint">Each active variant creates one event per account per round. Leave this off for one blast per account, sized by Max per day. Mailbox caps still apply, so a round can be smaller than the batch size.</span>
     </div>
     <div class="field"><span class="field__label">Who this will reach</span><div id="campAudience" aria-live="polite"><span class="muted">Pick a contact list to see who will be invited.</span></div></div>
-    <div class="field"><span class="field__label">When it will finish</span><div id="campPlan" aria-live="polite"><span class="muted">Pick a contact list and at least one sending account to see the pace.</span></div></div>
+    <div class="field"><span class="field__label">When it will finish</span><div id="campPlan" aria-live="polite"><span class="muted">Pick a contact list and at least one sending account to see the pace.</span></div>
+      <div id="campDomainWarn" class="camp-warn" hidden></div></div>
     <label class="field"><span class="field__label">Email subject</span><input id="campSummary" placeholder="Webinar: ..." /></label>
     <div class="invite-row">
       <label class="field"><span class="field__label">Event starts</span><input type="datetime-local" id="campStart" /><span class="field__hint" data-hint-for="campStart"></span></label>
@@ -823,9 +871,10 @@
     <p class="field__hint" id="campTzHint"></p>
     <label class="field"><span class="field__label">Description</span><textarea id="campDesc" rows="2" placeholder="Agenda, speaker, what to expect..."></textarea></label>
     <div class="field">
-      <label class="daychk"><input type="checkbox" id="campVariantsOn" /><span>Test different copy (A/B/C/D)</span></label>
-      <span class="field__hint">A is the subject and description above. Add B, C or D to split the audience evenly. Each active variant creates its own calendar event.</span>
+      <label class="daychk"><input type="checkbox" id="campVariantsOn" /><span>Test different copy (unlimited variants)</span></label>
+      <span class="field__hint">A is the subject and description above. Add as many alternates as you like (B, C, D, E…). Each active variant creates its own calendar event per sending account.</span>
       <div id="campVariantsList"></div>
+      <p class="field__hint" id="campVariantsHint" hidden></p>
       <button type="button" class="btn btn--ghost btn--sm" id="campAddVariant" hidden>Add another variant</button>
     </div>
     <div class="field"><span class="field__label">Which Google accounts send this</span><div id="campSenders"></div></div>

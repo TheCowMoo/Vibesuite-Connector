@@ -22,11 +22,16 @@ export const CampaignEventSchema = z.object({
   timeZone: z.string().optional(),
 });
 
-export const COPY_VARIANT_IDS = ['A', 'B', 'C', 'D'] as const;
-export type CopyVariantId = (typeof COPY_VARIANT_IDS)[number];
+/** A copy variant id. Excel-style letters (A, B, …, Z, AA, AB, …) with no practical limit. */
+export type CopyVariantId = string;
 
 export const CopyVariantSchema = z.object({
-  id: z.enum(['A', 'B', 'C', 'D']),
+  id: z
+    .string()
+    .trim()
+    .toUpperCase()
+    .regex(/^[A-Z]+$/, 'variant ids are letters: A, B, C, …')
+    .max(10),
   summary: z.string().min(1),
   description: z.string().optional(),
 });
@@ -35,7 +40,6 @@ export type CopyVariant = z.infer<typeof CopyVariantSchema>;
 export const CopyVariantsSchema = z
   .array(CopyVariantSchema)
   .min(1)
-  .max(4)
   .refine((variants) => new Set(variants.map((v) => v.id)).size === variants.length, {
     message: 'copy variant ids must be unique',
   })
@@ -54,7 +58,7 @@ export const CampaignSchema = z.object({
   zoomUserId: z.string().optional(),
   event: CampaignEventSchema,
   /**
-   * Optional A/B/C/D copy test. Each active variant gets its own calendar event(s), because Google
+   * Optional copy test. Each active variant gets its own calendar event(s), because Google
    * Calendar has one summary/description per event. Absent means the original single-copy campaign.
    */
   copyVariants: CopyVariantsSchema.optional(),
@@ -94,7 +98,7 @@ export interface RecipientRecord {
   status: RecipientStatus;
   sentAt?: number;
   eventId?: string;
-  /** Which A/B/C/D copy variant this recipient received. Absent on pre-variant campaigns. */
+  /** Which copy variant this recipient received. Absent on pre-variant campaigns. */
   variant?: CopyVariantId;
   error?: string;
 }

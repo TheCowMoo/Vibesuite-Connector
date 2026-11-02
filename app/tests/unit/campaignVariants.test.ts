@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { assignVariants, campaignVariants, groupEmailsByVariant, mirrorPrimaryVariant } from '../../src/domain/campaignVariants';
+import {
+  assignVariants,
+  campaignVariants,
+  groupEmailsByVariant,
+  mirrorPrimaryVariant,
+  variantRank,
+} from '../../src/domain/campaignVariants';
 import { CopyVariantsSchema, type CopyVariant } from '../../src/domain/campaign';
 
 const variants: CopyVariant[] = [
@@ -9,6 +15,25 @@ const variants: CopyVariant[] = [
   { id: 'D', summary: 'Fourth' },
 ];
 
+const manyVariants: CopyVariant[] = [
+  ...variants,
+  { id: 'E', summary: 'Fifth' },
+  { id: 'F', summary: 'Sixth' },
+  { id: 'Z', summary: 'Twenty-sixth' },
+  { id: 'AA', summary: 'Twenty-seventh' },
+];
+
+describe('variantRank', () => {
+  it('orders A, B, … Z, AA, AB like a spreadsheet', () => {
+    expect(variantRank('A')).toBe(1);
+    expect(variantRank('Z')).toBe(26);
+    expect(variantRank('AA')).toBe(27);
+    expect(variantRank('AB')).toBe(28);
+    expect([...manyVariants].sort((a, b) => variantRank(a.id) - variantRank(b.id)).map((v) => v.id))
+      .toEqual(['A', 'B', 'C', 'D', 'E', 'F', 'Z', 'AA']);
+  });
+});
+
 describe('campaignVariants', () => {
   it('falls back to the event copy as variant A', () => {
     expect(campaignVariants({ event: { summary: 'Webinar', description: 'Join us' } })).toEqual([
@@ -16,9 +41,14 @@ describe('campaignVariants', () => {
     ]);
   });
 
-  it('returns variants in A/B/C/D order', () => {
+  it('returns variants in calendar order, not insertion order', () => {
     const camp = { event: { summary: 'base' }, copyVariants: [variants[3], variants[1], variants[0]] };
     expect(campaignVariants(camp).map((v) => v.id)).toEqual(['A', 'B', 'D']);
+  });
+
+  it('keeps every variant when there are more than four', () => {
+    const camp = { event: { summary: 'base' }, copyVariants: [...manyVariants].reverse() };
+    expect(campaignVariants(camp).map((v) => v.id)).toEqual(['A', 'B', 'C', 'D', 'E', 'F', 'Z', 'AA']);
   });
 });
 
@@ -77,11 +107,19 @@ describe('CopyVariantsSchema', () => {
     expect(CopyVariantsSchema.safeParse([variants[0], variants[1]]).success).toBe(true);
   });
 
+  it('accepts more than four variants', () => {
+    expect(CopyVariantsSchema.safeParse(manyVariants).success).toBe(true);
+  });
+
   it('requires variant A as the base', () => {
     expect(CopyVariantsSchema.safeParse([variants[1], variants[2]]).success).toBe(false);
   });
 
   it('rejects duplicate ids', () => {
     expect(CopyVariantsSchema.safeParse([variants[0], variants[0]]).success).toBe(false);
+  });
+
+  it('rejects ids that are not letters', () => {
+    expect(CopyVariantsSchema.safeParse([variants[0], { id: '1', summary: 'Numeric' }]).success).toBe(false);
   });
 });

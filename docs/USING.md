@@ -31,6 +31,8 @@ Google accounts (who sends) + Contact list (who receives) + Event details
 
 - **Documents** — brand and product notes the AI reads when it sorts a list or drafts an invitation. Better
   documents make better groups and better copy.
+- **Deliverability** (owner/admin) — what the internet can verify about the domains behind your sending
+  accounts: SPF, DKIM, DMARC, MX and public domain blocklists.
 - **Assistant** (owner/admin) — reviews recent activity and proposes changes you can apply.
 - **People** (owner/admin) — team accounts and roles. Members can browse the product; campaign actions are
   owner/admin.
@@ -68,11 +70,21 @@ This is where the mailbox limits live (`owner`/`admin` only; visible to everyone
 
 | Field | What it controls |
 |---|---|
-| max per day | Hard ceiling for that mailbox per day, across **all** campaigns and one-off invites |
-| max per hour | Hourly ceiling, same sharing rule |
-| pause between batches | Minimum gap between send batches, so traffic is never back-to-back |
+| max per day | Hard ceiling for that mailbox per day, across **all** campaigns and one-off invites. One send is one blast, up to this many recipients |
+| pause between batches | Minimum gap between send passes, so traffic is never back-to-back. It never splits one blast |
 | warm up slowly | Starts at a lower daily cap and raises it day by day up to max per day |
 | sending hours | Weekdays + hours + timezone in which **campaigns** may send |
+| sending domain | The domain this mailbox sends from. Blank means auto-detect from the calendar |
+| DKIM selector | The selector to check. Blank probes `google` and other common Workspace selectors |
+
+Each account sends **one Calendar event per blast**, with every recipient it is allowed to contact that
+day on it. If the audience is larger than max per day, the rest goes out in the next blast on the next
+day. Google's guest-list ceiling is the only thing that can split a single blast.
+
+The last two fields exist for calendars Google will not name: a **primary** calendar, or a shared/resource
+calendar (`*.calendar.google.com`). Leave them blank for ordinary `owner@yourdomain.com` calendars — the
+domain is read from the address. If the domain still cannot be worked out, Deliverability lists the account
+and links straight back here.
 
 If a mailbox keeps failing, it rests automatically for a while (a **cooldown**) and campaigns move its
 queue to healthier mailboxes. You can also pause it by hand, or use **Send now** to bypass the pacing for
@@ -119,7 +131,7 @@ panel also retries the other call type and the other connected hosts on its own 
   back to the attended tag, so existing workflows do not change.
 - **Segment custom field** — optional GHL field ID that receives `attended` / `partial` / `no_show` /
   `not_invited`.
-- **Rules** — per-person webhook rules. Conditions can now target `segment`, `invited` and
+- **Webhook rules** — per-person webhook rules. Conditions can now target `segment`, `invited` and
   `invitedSource`, alongside minutes watched and session fields.
 - **Roster webhook** — optional URL that receives each whole segment, or one snapshot containing all
   segments. Every request carries a `revision`; an unchanged result is not resent. Add an optional bearer
@@ -144,6 +156,45 @@ no-shows are invented.
 delivery runs automatically after a successful sync; the roster is skipped when its content has not
 changed.
 
+### Routing attendees into GHL workflows
+
+The same **Attendance automations** dialog has a **GHL workflows** section. Add a workflow by pasting its
+GHL workflow ID (the part after `/workflow/` in the GHL workflow URL) and a name for this panel. The
+display name is only for you; the ID is what GHL receives.
+
+Then create **GHL workflow rules**. Rules are checked from top to bottom and the first enabled match wins,
+so put the narrowest rule first. Every normal condition and every Zoom poll condition must match:
+
+- Normal conditions use the video-attendance catalog — status, segment, minutes, focus score, attendance
+  percentage, poll count/answers, Q&A, registration answers, joined-late/left-early, device/location/
+  network and the session fields.
+- Poll conditions target one exact poll question: **answered**, **did not answer**, **answer is**,
+  **answer contains**, **answer is not** or **answer does not contain**. "Did not answer" only fires when
+  that question actually ran in the call, so a poll you forgot to launch does not tag everyone.
+- If you leave a rule with no conditions at all it is a catch-all. That is useful as the last rule, and
+  dangerous as the first.
+
+**Workflow event start time** is either **Now** or **the call's start time**. It is the timestamp GHL uses
+for time-based workflow steps.
+
+Open a call's **Details** to see poll answers by question, every Q&A entry, registration answers, and the
+poll/Q&A/registration/late columns on each attendee. **Preview routes** shows what the rules and (if
+enabled) AI would do before anything is sent. Tick the rows you want and **Apply selected**. Already
+applied workflows are skipped; one workflow per person per call is the default. To add a second one
+deliberately, use the manual email + workflow control and confirm. **Create rule from this answer** on a
+poll opens Attendance automations with a pre-filled poll rule.
+
+AI routing is optional and off by default. Add a short "what is this workflow for?" note on each workflow,
+then enable AI, choose **Preview then apply** (safe) or **Automatic**, set a confidence threshold (0.7 is
+a reasonable start) and, if you want a cost cap, the maximum attendees per call (default 25; 0 = all; the
+first N unmatched in attended → partial → no-show → not-invited order). The model only sees
+anonymous `p1`, `p2`, … rows and the behavior above — not the attendee name/email fields — and it can only
+choose from the workflow IDs you added. Free-text poll, Q&A and registration answers are sent as the
+attendee typed them, so treat AI routing as a data-sharing decision. In preview mode nothing is applied
+until you review it; automatic mode applies only proposals at or above the threshold. AI runs **after**
+the deterministic rules, and only for people those rules did not match.
+
+
 ### Replies in GoHighLevel
 
 RSVP handling is configured **per Google account**, not per campaign: **Google accounts → Automations** on
@@ -164,7 +215,7 @@ the same mapping.
 | Reporting | History table | Full funnel + per-mailbox attribution + attendance |
 | Use it when | "Send this now to the people I can reach today" | "Invite 3,000 people over the next week, safely" |
 
-A one-off send **spends the same mailbox budget** a campaign would: the daily/hourly counters are keyed by
+A one-off send **spends the same mailbox budget** a campaign would: the daily counter is keyed by
 mailbox, not by feature.
 
 ## Sending a one-off invitation
@@ -174,12 +225,13 @@ mailbox, not by feature.
 3. Pick the contact list and, if you want, specific groups. The preview shows exactly who will receive it.
 4. If anyone on that list was already invited, a **“Also invite people who were already invited”** checkbox
    appears with a count and the previous event they were invited to. Leave it off unless you mean it.
-5. **Send in batches** (optional): tick it, set **Recipients per event** (default 300) and **Wait between
-   rounds** (hours). The first round goes out immediately; the worker sends the later rounds.
+5. **Send in batches** (optional): tick it, set **Recipients per account per round** (default 300) and
+   **Wait between rounds** (hours). The first round goes out immediately; the worker sends the later rounds.
 6. **Preview**, then **Send invitations**.
 
 The result tells you what went out and what could not be placed today. Nothing is recalled once sent.
-Events are chunked per account, so a guest normally receives a single, unnumbered invitation.
+Each account sends one event with its share, so a guest receives a single, unnumbered invitation. The
+only numbered split is Google's guest-list ceiling.
 
 ### Sending a one-off in rounds
 
@@ -192,7 +244,7 @@ A round is **one event per selected account**. With three accounts and 300 recip
 - Rounds stop at the event start. Anyone left at that point is reported as not invited.
 - The invited set is re-checked every round, so someone invited elsewhere in the meantime is skipped.
 - A failed event's recipients stay queued for the next round.
-- Batching off (the default) keeps the original single-send behaviour exactly.
+- Batching off (the default) means one event per account, with every recipient that account can send today.
 
 ## Running a campaign
 
@@ -216,8 +268,8 @@ open the tabs and read the numbers. (With auth disabled everyone is effectively 
 | Start sending | **As soon as I press Begin sending**, or **At a specific time** |
 | Stop sending by (optional) | A hard deadline; presets add +1 day / +3 days / +1 week |
 | Send in batches | Optional: a round creates one event per active variant per account, then waits |
-| Recipients per event / wait between rounds | Appear when batching is on; defaults 300 and 24 h |
-| Test different copy (A/B/C/D) | Optional: A is the subject/description above; add B, C or D to split the audience evenly |
+| Round size per account / wait between rounds | Appear when batching is on; defaults 300 and 24 h |
+| Test different copy (unlimited variants) | Optional: A is the subject/description above; add B, C, D, E… to split the audience evenly |
 | Who this will reach | Live count, already minus anyone invited before |
 | When it will finish | Live estimate from the selected mailboxes and their caps |
 | Email subject / Description | What the invitation says |
@@ -232,12 +284,13 @@ If **Send in batches** is on, the estimate also shows roughly how many rounds th
 one starts. It assumes every account can send its full per-round amount, so a lower cap makes the real finish
 later — the note says so.
 
-### Testing copy (A/B/C/D)
+### Testing copy (unlimited variants)
 
-Tick **Test different copy (A/B/C/D)** in the campaign wizard to add alternates to the subject/description
-above (variant A). On **Begin sending**, recipients are split as evenly as possible across A/B/C/D and each
-active variant gets its own calendar event. With batching, the per-event limit is shared across the variants,
-so four variants on one account produce four smaller events in that round.
+Tick **Test different copy (unlimited variants)** in the campaign wizard to add alternates to the
+subject/description above (variant A). On **Begin sending**, recipients are split as evenly as possible
+across all variants and each active variant gets its own calendar event per account. With batching, the
+per-event limit is shared across the variants, so N variants on one account produce N smaller events in
+that round. There is no four-variant ceiling: add as many as you like (A, B, …, Z, AA, AB, …).
 
 Open **Campaigns → Details** to see every variant and **Send test copy**. A test:
 
@@ -251,7 +304,7 @@ the call is synced), RSVP rate and acceptance rate. The app has no open/click tr
 yourself from those numbers — there is no automatic winner.
 
 Variants are fixed when sending starts. While a campaign is a draft or scheduled, **Details → Edit copy** lets
-you change A/B/C/D; once the audience is frozen, the copy is locked.
+you add, remove or change any variant; once the audience is frozen, the copy is locked.
 
 **Create campaign** saves it as a draft — or as **Scheduled** when you chose a later start. Nothing is frozen
 yet either way, and every field can still be changed.
@@ -292,10 +345,10 @@ The `⋯` menu holds the occasional actions: **Add / Change Zoom host**, **Add /
 while the campaign is live), **End sending**, **Delete**.
 
 - **Pause** stops new sends immediately. Nothing is lost, and a batched campaign keeps its next round time.
-- **Send a batch** runs one manual pass for that campaign (up to 200 per mailbox, or the campaign's per-round
-  limit when batching is on). It skips the "pause between batches" delay, but the caps, sending hours and
-  cooldowns still apply. While a batched campaign is between rounds, it refuses and tells you when the next
-  round opens.
+- **Send a batch** runs one manual pass for that campaign (up to the mailbox's daily headroom, or the
+  campaign's per-round limit when batching is on). It skips the "pause between batches" delay, but the
+  daily cap, sending hours and cooldowns still apply. While a batched campaign is between rounds, it
+  refuses and tells you when the next round opens.
 - **End sending** asks for confirmation and tells you how many people will never be invited. It is **not a
   recall**: invitations already delivered stay in people's calendars.
 - **Delete** removes the campaign and its per-recipient history. Use **End** if you only want it to stop.
@@ -305,14 +358,16 @@ while the campaign is live), **End sending**, **Delete**.
 You set the ceiling; the scheduler decides the moment-to-moment order.
 
 - **Caps belong to the mailbox.** Every campaign and one-off invite using that mailbox shares the same daily
-  and hourly counter. Two concurrent campaigns split one budget; they do not double it.
+  counter. Two concurrent campaigns split one budget; they do not double it.
 - **A campaign's share only splits it internally** — the "split evenly / use my shares" setting decides who
   in *this* campaign sends which slice, not what the mailbox sends overall.
 - **Sending hours** (on the sending account) gate campaigns. Outside them, nothing is sent, and the work
   simply waits for the window.
-- **Batch delays** keep sends from being back-to-back. **Warm-up** raises a new mailbox's daily cap gradually.
-- **Batched rounds add a second ceiling.** A batched one-off or campaign sends at most the per-event limit
-  from each account, then waits. Daily/hourly caps still apply, so a 100/day cap with a 300 batch sends 100
+- **One blast per account.** The daily headroom goes on one Calendar event (one per active copy variant).
+  There is no hidden 100- or 200-recipient split; the next event only happens when the daily cap reopens.
+- **Batch delays** keep send passes from being back-to-back. **Warm-up** raises a new mailbox's daily cap gradually.
+- **Batched rounds add a second ceiling.** A batched one-off or campaign sends at most the per-round limit
+  from each account, then waits. The daily cap still applies, so a 100/day cap with a 300 round sends 100
   in that round and takes longer than the caps alone would. Rounds never start at or after the event.
 - **One mailbox is one resource.** When several campaigns share it, each gets a fair slice of the allowance,
   then leftover capacity flows to the priority order — a huge campaign cannot starve a small one.
@@ -343,10 +398,11 @@ You set the ceiling; the scheduler decides the moment-to-moment order.
 10. **A batched send stops at the event start.** No round begins after it; anyone left stays uninvited and is
     reported in the schedule's error line.
 11. **A round is one event per account, not one event overall.** Without copy variants, three accounts create
-    three events per round, each with its own event ID; attendance reads all of them. Each active A/B/C/D
-    variant adds another event per account.
-12. **A/B/C/D adds events, not recipients.** Each active variant gets its own event, so four variants on three
-    accounts can create up to twelve events in a round; the total recipients per account per round is unchanged.
+    three events per round, each with its own event ID; attendance reads all of them. Each active variant adds
+    another event per account.
+12. **Copy variants add events, not recipients.** Each active variant gets its own event, so N variants on three
+    accounts can create up to 3N events in a round; the total recipients per account per round is unchanged.
+    There is no four-variant limit.
 13. **A test copy does not count as an invitation.** It sends a real `[TEST]` calendar invite but never enters
     the queue, the invited set or the campaign stats; its RSVPs are ignored by the sync pipeline.
 
@@ -399,6 +455,40 @@ different denominators, and a person can appear in more than one campaign.
 
 Open and bounce rates are deliberately absent — the CRM reminder layer that would measure them does not
 exist yet. RSVP answers are the only reply signal.
+
+## Checking a domain (Deliverability)
+
+**Deliverability** (owner/admin) answers one question: what can the internet verify about the domains your
+sending accounts use? It is informational and never blocks a campaign.
+
+One card per domain, deduped across accounts, with a badge for each check:
+
+| Check | Passes when |
+|---|---|
+| MX | The domain has at least one real mail server |
+| SPF | One record, includes `_spf.google.com`, ends in `-all`, and stays inside the 10-lookup limit |
+| DKIM | A usable key is published at the account's selector (or any common Google/Workspace selector) |
+| DMARC | `p=quarantine` or `p=reject` at `pct=100` |
+| Blocklists | Clean on Spamhaus DBL and SURBL (an unreachable resolver shows as *unavailable*, not *listed*) |
+| MTA-STS / BIMI | Shown for information; they never change the overall status |
+
+**Check all** and **Check now** query DNS immediately. Opening the page only reads the cache, which lasts six
+hours by default (`DOMAIN_HEALTH_CACHE_MINUTES`). Only sending-account domains are checked — there is no
+separate list of domains to maintain.
+
+Consumer domains (`gmail.com`, `outlook.com`, `yahoo.com` and similar) show **Managed by Google**. Their checks
+are displayed for information but are never treated as something you can fix. Accounts whose calendar hides
+the domain (`primary`, or a `*.calendar.google.com` resource calendar) appear under **Accounts without a
+sending domain**, with a link back to Sending accounts.
+
+What this page cannot tell you: inbox placement, a Google Postmaster score, or how Google's sending IPs are
+regarded. Google sends these invitations from its own infrastructure, so an IP blacklist would test Google,
+not your domain. A published DKIM key also only proves the key exists, not that Google signs with it — send
+yourself a Gmail test if that matters. DMARC is checked on the exact sending domain; a record on a parent
+domain is not inferred.
+
+If a selected sender's domain needs attention, the campaign wizard adds a non-blocking note with the top
+findings and a link here. Sending is never stopped by it.
 
 ## Common scenarios
 

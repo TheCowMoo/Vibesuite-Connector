@@ -1,10 +1,17 @@
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyReply } from 'fastify';
 import { createSession, getSession, listSessions, deleteSession, saveSession } from '../../domain/sessionStore';
 import { getAttendance } from '../../domain/attendanceStore';
 import { syncSession, dispatchSession } from '../../workers/attendance';
 import { getProvider } from '../../video';
 import { normalizeZoomCallId } from '../../video/zoomId';
 import type { SessionType, VideoProvider } from '../../video/types';
+import {
+  applyWorkflowPreview,
+  assignWorkflowToPerson,
+  previewWorkflowAssignments,
+  WorkflowRoutingError,
+  type WorkflowSelection,
+} from '../../domain/attendanceWorkflows';
 
 export async function sessionRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/sessions', async () => {
@@ -215,4 +222,67 @@ export async function sessionRoutes(app: FastifyInstance): Promise<void> {
     await deleteSession((req.params as { id: string }).id);
     return { ok: true };
   });
+
+  app.post('/api/sessions/:id/workflows/preview', async (req, reply) => {
+    const id = (req.params as { id: string }).id;
+    try {
+      const preview = await previewWorkflowAssignments(id);
+      return { ok: true, preview };
+    } catch (err) {
+      return workflowRouteError(reply, err);
+    }
+  });
+
+  app.post('/api/sessions/:id/workflows/apply', async (req, reply) => {
+    const id = (req.params as { id: string }).id;
+    const b = (req.body || {}) as { selected?: unknown };
+    const selected: WorkflowSelection[] = Array.isArray(b.selected)
+      ? b.selected
+          .filter((s): s is Record<string, unknown> => !!s && typeof s === 'object')
+          .map((s) => ({
+            email: String(s.email ?? ''),
+            workflowId: String(s.workflowId ?? ''),
+            force: s.force === true,
+          }))
+          .filter((s) => s.email && s.workflowId)
+      : [];
+
+    if (!selected.length) {
+      reply.code(400).send({ error: 'select at least one person and workflow' });
+      return;
+    }
+
+    try {
+      const result = await applyWorkflowPreview(id, selected);
+      return { ok: true, ...result };
+    } catch (err) {
+      return workflowRouteError(reply, err);
+    }
+  });
+
+  app.post('/api/sessions/:id/workflows/assign', async (req, reply) => {
+    const id = (req.params as { id: string }).id;
+    const b = (req.body || {}) as { email?: unknown; workflowId?: unknown; force?: unknown };
+    const email = typeof b.email === 'string' ? b.email.trim() : '';
+    const workflowId = typeof b.workflowId === 'string' ? b.workflowId.trim() : '';
+    if (!email || !workflowId) {
+      reply.code(400).send({ error: 'email and workflowId are required' });
+      return;
+    }
+
+    try {
+      const assignment = await assignWorkflowToPerson(id, email, workflowId, b.force === true);
+      return { ok: true, assignment };
+    } catch (err) {
+      return workflowRouteError(reply, err);
+    }
+  });
+}
+
+function workflowRouteError(reply: FastifyReply, err: unknown): void {
+  if (err instanceof WorkflowRoutingError) {
+    reply.code(err.status).send({ error: err.message });
+    return;
+  }
+  reply.code(500).send({ error: err instanceof Error ? err.message : String(err) });
 }

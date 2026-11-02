@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { isValidDomain, normalizeDomain } from './domainHealth';
 
 export type SenderMode = 'flat' | 'ramp';
 
@@ -21,10 +22,34 @@ export const SenderProfileSchema = z.object({
   enabled: z.boolean().default(true),
   mode: z.enum(['flat', 'ramp']).default('flat'),
   dailyCap: z.number().int().min(1).max(5000),
-  hourlyCap: z.number().int().min(1).max(1000).optional(),
   minDelayMs: z.number().int().min(0).max(600000).optional(),
   ramp: SenderRampSchema.optional(),
   window: SenderWindowSchema,
+  /**
+   * The domain this account sends from. Blank means "work it out from the calendar ID (or Google)".
+   * The override exists because a `primary` or resource calendar does not reveal its domain.
+   */
+  sendingDomain: z.preprocess(
+    (v) => (typeof v === 'string' && v.trim() === '' ? undefined : v),
+    z
+      .string()
+      .trim()
+      .toLowerCase()
+      .max(253)
+      .refine((v) => isValidDomain(v), { message: 'Enter a domain like example.com' })
+      .transform((v) => normalizeDomain(v))
+      .optional(),
+  ),
+  /** Blank means "probe the common Google/Workspace selectors". */
+  dkimSelector: z.preprocess(
+    (v) => (typeof v === 'string' && v.trim() === '' ? undefined : v),
+    z
+      .string()
+      .trim()
+      .max(63)
+      .regex(/^[A-Za-z0-9._-]+$/, 'Use letters, digits, dots, hyphens or underscores')
+      .optional(),
+  ),
 });
 
 export type SenderWindow = z.infer<typeof SenderWindowSchema>;

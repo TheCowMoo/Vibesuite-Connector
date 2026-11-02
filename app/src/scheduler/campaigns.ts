@@ -46,7 +46,7 @@ async function activeCampaigns(now = Date.now()) {
  * priority-ordered budget, then send one batch per campaign slice. This is where
  * multi-campaign arbitration happens — a mailbox is a shared, rate-limited resource.
  */
-async function runMailbox(connectionId: string, maxPerSender: number, now: Date, ignoreDelay: boolean): Promise<MailboxTickResult> {
+async function runMailbox(connectionId: string, now: Date, ignoreDelay: boolean): Promise<MailboxTickResult> {
   const base: MailboxTickResult = { connectionId, sent: 0, failed: 0, campaigns: [], sentByCampaign: {} };
   const active = await activeCampaigns(now.getTime());
 
@@ -69,8 +69,6 @@ async function runMailbox(connectionId: string, maxPerSender: number, now: Date,
     now: now.getTime(),
     capToday: gauge.capToday,
     sentToday: gauge.sentToday,
-    hourlyCap: profile.hourlyCap,
-    sentThisHour: gauge.sentThisHour,
   });
   if (!readiness.ready) return { ...base, reason: readiness.reason };
 
@@ -79,14 +77,9 @@ async function runMailbox(connectionId: string, maxPerSender: number, now: Date,
   }
 
   const ordered = orderClaims(claims);
-  // A batched campaign asks for up to its own per-round ceiling, which can be higher than the
-  // scheduler's normal per-mailbox tick budget. Raise the pool only as far as a batch requires;
-  // non-batched claims are still capped at `maxPerSender` below.
-  const batchCeiling = ordered.reduce((max, claim) => {
-    const camp = active.find((c) => c.id === claim.campaignId);
-    return Math.max(max, camp?.eventBatchSize ?? 0);
-  }, 0);
-  const budget = allocateBatch(Math.min(readiness.allowance, Math.max(maxPerSender, batchCeiling)), ordered);
+  // One blast per account: the daily headroom is the budget. A batched campaign still caps each
+  // round at its own `eventBatchSize`; a normal campaign uses the whole allowance in one pass.
+  const budget = allocateBatch(readiness.allowance, ordered);
   const campaigns: string[] = [];
   const sentByCampaign: Record<string, number> = {};
   let sent = 0;
@@ -97,7 +90,7 @@ async function runMailbox(connectionId: string, maxPerSender: number, now: Date,
     const ps = camp && camp.senders.find((s) => s.connectionId === connectionId);
     if (!camp || !ps) continue;
 
-    const cap = camp.eventBatchSize && camp.eventBatchSize > 0 ? camp.eventBatchSize : maxPerSender;
+    const cap = camp.eventBatchSize && camp.eventBatchSize > 0 ? camp.eventBatchSize : Number.MAX_SAFE_INTEGER;
     const take = Math.min(budget[claim.campaignId] ?? 0, cap);
     if (take <= 0) continue;
 
@@ -163,9 +156,8 @@ async function applyLifecycle(now: Date): Promise<void> {
 }
 
 /** One full pass over every mailbox that has campaign work queued. */
-export async function runCampaignTick(options: { maxPerSender?: number; now?: Date } = {}): Promise<TickResult> {
+export async function runCampaignTick(options: { now?: Date } = {}): Promise<TickResult> {
   const now = options.now ?? new Date();
-  const maxPerSender = options.maxPerSender ?? 200;
 
   // Lifecycle first, so the send pass only sees campaigns that should actually be sending.
   await applyLifecycle(now);
@@ -189,7 +181,7 @@ export async function runCampaignTick(options: { maxPerSender?: number; now?: Da
 
   for (const connectionId of mailboxes) {
     try {
-      const res = await runMailbox(connectionId, maxPerSender, now, false);
+      const res = await runMailbox(connectionId, now, false);
       sent += res.sent;
       failed += res.failed;
       if (res.sentByCampaign) {
@@ -243,9 +235,9 @@ export async function runCampaignTick(options: { maxPerSender?: number; now?: Da
   return { mailboxes: worked, sent, failed, redistributed, campaigns: [...campaigns] };
 }
 
-/** Operator-pressed "send now" for a single mailbox (caps still apply, pacing does not). */
-export async function runSenderNow(connectionId: string, maxPerSender = 200): Promise<MailboxTickResult> {
-  return runMailbox(connectionId, maxPerSender, new Date(), true);
+/** Operator-pressed "send now" for a single mailbox (daily cap still applies, pacing does not). */
+export async function runSenderNow(connectionId: string): Promise<MailboxTickResult> {
+  return runMailbox(connectionId, new Date(), true);
 }
 
 /**

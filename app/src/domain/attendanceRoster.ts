@@ -63,6 +63,7 @@ function rosterPerson(person: SegmentPerson): SegmentPerson {
     minutes: person.minutes,
     joinedAt: person.joinedAt,
     leftAt: person.leftAt,
+    behavior: person.behavior,
   };
 }
 

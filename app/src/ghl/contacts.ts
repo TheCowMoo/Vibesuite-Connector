@@ -55,3 +55,34 @@ export async function addNote(conn: StoredConnection, contactId: string, body: s
   await ghlRequest(conn, { method: 'POST', url: `/contacts/${contactId}/notes`, data: { body } }, { idempotencyKey });
 }
 
+/**
+ * Add a contact to a GHL workflow.
+ *
+ * The workflow endpoint is v3 even when the connection's default API version is v2, so this is the
+ * one call that overrides the Version header. `eventStartTime` is the timestamp GHL uses for
+ * time-based workflow steps; pass the session start (or now) explicitly rather than relying on the
+ * server clock.
+ */
+export async function addContactToWorkflow(
+  conn: StoredConnection,
+  contactId: string,
+  workflowId: string,
+  eventStartTime: string,
+  idempotencyKey?: string,
+): Promise<boolean> {
+  const res = await ghlRequest<{ succeeded?: boolean; succeded?: boolean; message?: string }>(
+    conn,
+    {
+      method: 'POST',
+      url: `/contacts/${encodeURIComponent(contactId)}/workflow/${encodeURIComponent(workflowId)}`,
+      data: { eventStartTime },
+    },
+    { idempotencyKey, version: 'v3' },
+  );
+
+  // GHL has returned both spellings in the wild; an empty 2xx body also means accepted.
+  if (res && typeof res.succeeded === 'boolean') return res.succeeded;
+  if (res && typeof res.succeded === 'boolean') return res.succeded;
+  return true;
+}
+

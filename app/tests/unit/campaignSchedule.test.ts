@@ -68,14 +68,10 @@ describe('allocateBatch', () => {
 });
 
 describe('senderReadiness', () => {
-  const base = { enabled: true, inWindow: true, now: 1_000_000, capToday: 100, sentToday: 40, sentThisHour: 0 };
+  const base = { enabled: true, inWindow: true, now: 1_000_000, capToday: 100, sentToday: 40 };
 
   it('is ready with the daily headroom', () => {
     expect(senderReadiness(base)).toEqual({ ready: true, allowance: 60 });
-  });
-
-  it('is bounded by the hourly cap', () => {
-    expect(senderReadiness({ ...base, hourlyCap: 20, sentThisHour: 5 })).toEqual({ ready: true, allowance: 15 });
   });
 
   it('refuses a paused mailbox', () => {
@@ -93,9 +89,8 @@ describe('senderReadiness', () => {
     expect(senderReadiness({ ...base, inWindow: false }).reason).toBe('outside send window');
   });
 
-  it('reports which cap ran out', () => {
+  it('reports the daily cap when it runs out', () => {
     expect(senderReadiness({ ...base, sentToday: 100 }).reason).toBe('daily cap reached');
-    expect(senderReadiness({ ...base, hourlyCap: 10, sentThisHour: 10 }).reason).toBe('hourly cap reached');
   });
 });
 
@@ -156,11 +151,7 @@ describe('senderReadiness with ignoreWindow', () => {
     expect(senderReadiness({ ...outside, ignoreWindow: true })).toEqual({ ready: true, allowance: 60 });
   });
 
-  it('still enforces caps, cooldowns and pause when the window is ignored', () => {
-    expect(senderReadiness({ ...outside, ignoreWindow: true, hourlyCap: 20, sentThisHour: 5 })).toEqual({
-      ready: true,
-      allowance: 15,
-    });
+  it('still enforces the daily cap, cooldowns and pause when the window is ignored', () => {
     expect(senderReadiness({ ...outside, ignoreWindow: true, sentToday: 100 })).toEqual({
       ready: false,
       allowance: 0,

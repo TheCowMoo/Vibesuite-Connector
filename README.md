@@ -173,12 +173,16 @@ Key counters: `webhook_received_total`, `webhook_rejected_total`, `jobs_enqueued
 | POST | `/api/connections` | create connection (`pending_google`) |
 | GET | `/api/connections/:id` | get one connection |
 | POST | `/api/connections/:id/bootstrap` | full sync + create watch channel |
+| PATCH | `/api/connections/:id` | update delivery, attendance, workflow and roster settings |
 | DELETE | `/api/connections/:id` | delete connection |
 | GET | `/oauth/google/start?connectionId=` | redirect to Google OAuth |
 | GET | `/oauth/google/callback` | complete Google OAuth |
 | GET | `/oauth/ghl/start?connectionId=` | redirect to GHL OAuth |
 | GET | `/oauth/ghl/callback` | complete GHL OAuth |
 | GET | `/api/stats/overview?days=30` | cross-campaign statistics (1–365 days) |
+| POST | `/api/sessions/:id/workflows/preview` | rule + optional AI workflow proposals (no GHL writes) |
+| POST | `/api/sessions/:id/workflows/apply` | apply selected workflow proposals |
+| POST | `/api/sessions/:id/workflows/assign` | manually add one contact to one workflow |
 
 ## Notes & caveats
 

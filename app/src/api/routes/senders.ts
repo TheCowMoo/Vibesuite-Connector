@@ -94,8 +94,8 @@ export async function senderRoutes(app: FastifyInstance): Promise<void> {
   });
 
   /**
-   * Operator override: run a batch for this mailbox right now. Daily/hourly caps,
-   * the send window and cooldowns still apply — only the inter-batch pacing is skipped.
+   * Operator override: run a batch for this mailbox right now. The daily cap, the send window and
+   * cooldowns still apply — only the inter-batch pacing is skipped.
    */
   app.post('/api/senders/:connectionId/send-now', guard, async (req, reply) => {
     const connectionId = (req.params as { connectionId: string }).connectionId;
@@ -104,12 +104,8 @@ export async function senderRoutes(app: FastifyInstance): Promise<void> {
       return;
     }
 
-    const body = (req.body || {}) as { maxPerSender?: number };
-    const requested = Number(body.maxPerSender ?? 200);
-    const maxPerSender = Math.min(1000, Math.max(1, Number.isFinite(requested) ? Math.floor(requested) : 200));
-
     try {
-      return { ok: true, ...(await runSenderNow(connectionId, maxPerSender)) };
+      return { ok: true, ...(await runSenderNow(connectionId)) };
     } catch (err) {
       reply.code(400).send({ error: (err as Error).message });
       return;

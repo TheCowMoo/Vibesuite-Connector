@@ -162,7 +162,7 @@ export async function clearRecipients(id: string): Promise<void> {
 
 /* ---------------- copy variants + test events ---------------- */
 
-/** email -> A/B/C/D, written once when the audience is frozen. */
+/** email -> copy variant id, written once when the audience is frozen. */
 export async function setCampaignVariantMap(id: string, map: Record<string, string>): Promise<void> {
   const entries = Object.entries(map);
   if (!entries.length) return;

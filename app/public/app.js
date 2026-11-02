@@ -43,6 +43,7 @@
     if (name === 'team' && authState.enabled && !isAdmin()) name = 'connections';
     if (name === 'senders' && authState.enabled && !isAdmin()) name = 'connections';
     if (name === 'advisor' && authState.enabled && !isAdmin()) name = 'connections';
+    if (name === 'deliverability' && authState.enabled && !isAdmin()) name = 'connections';
     $$('.rail__link').forEach(function (b) { b.classList.toggle('is-active', b.dataset.view === name); });
     $('#view-connections').hidden = name !== 'connections';
     $('#view-lists').hidden = name !== 'lists';
@@ -50,6 +51,7 @@
     $('#view-invites').hidden = name !== 'invites';
     $('#view-stats').hidden = name !== 'stats';
     $('#view-attendance').hidden = name !== 'attendance';
+    $('#view-deliverability').hidden = name !== 'deliverability';
     $('#view-advisor').hidden = name !== 'advisor';
     $('#view-campaigns').hidden = name !== 'campaigns';
     $('#view-senders').hidden = name !== 'senders';
@@ -61,6 +63,7 @@
     if (name === 'invites') loadInvitesView();
     if (name === 'stats') loadStatsOverview();
     if (name === 'attendance') loadAttendance();
+    if (name === 'deliverability') loadDeliverability();
     if (name === 'advisor') loadAdvisor();
     if (name === 'campaigns') loadCampaigns();
     if (name === 'senders') loadSenders();
@@ -352,6 +355,11 @@
   var CATALOG = [];
   var currentScope = 'calendar';
   var currentRulesEl = null;
+  var editingWorkflows = [];
+  var editingWorkflowRules = [];
+  var editingAiWorkflow = { enabled: false, mode: 'preview', confidenceThreshold: 0.7, maxAttendees: 25 };
+  var pendingWorkflowSeed = null;
+  var sessionWorkflowPreview = null;
 
   function loadCatalog() {
     return api('/api/integrations').then(function (d) {
@@ -491,7 +499,8 @@
     return box;
   }
 
-  function conditionEl(rule, cond, idx) {
+  function conditionEl(rule, cond, idx, onChange) {
+    var rerender = onChange || renderRules;
     var row = document.createElement('div');
     row.className = 'cond';
 
@@ -513,7 +522,7 @@
       cond.field = fieldSel.value;
       cond.operator = fieldOperators(cond.field)[0];
       cond.value = '';
-      renderRules();
+      rerender();
     });
 
     var opSel = document.createElement('select');
@@ -556,12 +565,309 @@
     del.title = 'Remove condition';
     del.addEventListener('click', function () {
       rule.conditions.splice(idx, 1);
-      renderRules();
+      rerender();
     });
 
     row.appendChild(fieldSel);
     row.appendChild(opSel);
     row.appendChild(valueControl);
+    row.appendChild(del);
+    return row;
+  }
+
+  function newWorkflow() {
+    return {
+      id: 'w' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+      workflowId: '',
+      name: '',
+      criteria: ''
+    };
+  }
+
+  function newWorkflowRule(seed) {
+    var pollCondition = seed && seed.pollQuestion
+      ? [{ question: seed.pollQuestion, operator: 'equals', answer: seed.pollAnswer || '' }]
+      : [];
+    return {
+      id: 'wr' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+      name: seed && seed.pollQuestion ? 'Poll: ' + seed.pollQuestion : '',
+      enabled: true,
+      conditions: seed && seed.pollQuestion ? [] : [{ field: 'attendanceStatus', operator: 'equals', value: 'attended' }],
+      pollConditions: pollCondition,
+      workflowId: editingWorkflows.length ? editingWorkflows[0].workflowId : '',
+      eventStartTime: 'now'
+    };
+  }
+
+  function renderWorkflows() {
+    var el = document.getElementById('attendanceWorkflowsList');
+    if (!el) return;
+    el.innerHTML = '';
+    if (!editingWorkflows.length) {
+      el.innerHTML = '<p class="muted">No workflows yet — add one below.</p>';
+      return;
+    }
+    editingWorkflows.forEach(function (w) { el.appendChild(workflowRowEl(w)); });
+  }
+
+  function workflowRowEl(w) {
+    var box = document.createElement('div');
+    box.className = 'rule';
+
+    var head = document.createElement('div');
+    head.className = 'rule__head';
+    var title = document.createElement('span');
+    title.className = 'rule__title';
+    title.textContent = 'Workflow';
+    var del = document.createElement('button');
+    del.type = 'button';
+    del.className = 'icon-btn';
+    del.textContent = '×';
+    del.title = 'Remove workflow';
+    del.addEventListener('click', function () {
+      editingWorkflows = editingWorkflows.filter(function (x) { return x.id !== w.id; });
+      renderWorkflows();
+      renderWorkflowRules();
+    });
+    head.appendChild(title);
+    head.appendChild(del);
+    box.appendChild(head);
+
+    var nameLabel = document.createElement('label');
+    nameLabel.className = 'field';
+    nameLabel.innerHTML = '<span class="field__label">Workflow name</span>';
+    var nameInput = document.createElement('input');
+    nameInput.value = w.name || '';
+    nameInput.placeholder = 'e.g. Webinar — Pro plan';
+    nameInput.addEventListener('input', function () {
+      w.name = nameInput.value;
+      renderWorkflowRules();
+    });
+    nameLabel.appendChild(nameInput);
+    box.appendChild(nameLabel);
+
+    var idLabel = document.createElement('label');
+    idLabel.className = 'field';
+    idLabel.innerHTML = '<span class="field__label">GHL workflow ID</span>';
+    var idInput = document.createElement('input');
+    idInput.value = w.workflowId || '';
+    idInput.placeholder = 'Paste the id from the workflow URL';
+    idInput.addEventListener('input', function () {
+      var previous = w.workflowId;
+      w.workflowId = idInput.value.trim();
+      editingWorkflowRules.forEach(function (r) {
+        if (r.workflowId === previous) r.workflowId = w.workflowId;
+      });
+      renderWorkflowRules();
+    });
+    idLabel.appendChild(idInput);
+    box.appendChild(idLabel);
+
+    var criteriaLabel = document.createElement('label');
+    criteriaLabel.className = 'field';
+    criteriaLabel.innerHTML = '<span class="field__label">What is this workflow for? (shown to the AI)</span>';
+    var criteria = document.createElement('textarea');
+    criteria.rows = 3;
+    criteria.value = w.criteria || '';
+    criteria.placeholder = 'e.g. Pick this when the attendee answered “Pro” on the pricing poll or asked about SSO.';
+    criteria.addEventListener('input', function () { w.criteria = criteria.value; });
+    criteriaLabel.appendChild(criteria);
+    box.appendChild(criteriaLabel);
+
+    return box;
+  }
+
+  function renderWorkflowRules() {
+    var el = document.getElementById('attendanceWorkflowRulesList');
+    if (!el) return;
+    el.innerHTML = '';
+    if (!editingWorkflowRules.length) {
+      el.innerHTML = '<p class="muted">No workflow rules yet — add one below.</p>';
+      return;
+    }
+    editingWorkflowRules.forEach(function (rule) { el.appendChild(workflowRuleEl(rule)); });
+  }
+
+  function workflowRuleEl(rule) {
+    var box = document.createElement('div');
+    box.className = 'rule';
+
+    var head = document.createElement('div');
+    head.className = 'rule__head';
+    var title = document.createElement('span');
+    title.className = 'rule__title';
+    title.textContent = 'Workflow rule';
+    var en = document.createElement('input');
+    en.type = 'checkbox';
+    en.checked = !!rule.enabled;
+    en.title = 'Enabled';
+    en.addEventListener('change', function () { rule.enabled = en.checked; });
+    var del = document.createElement('button');
+    del.type = 'button';
+    del.className = 'icon-btn';
+    del.textContent = '×';
+    del.title = 'Delete workflow rule';
+    del.addEventListener('click', function () {
+      editingWorkflowRules = editingWorkflowRules.filter(function (r) { return r.id !== rule.id; });
+      renderWorkflowRules();
+    });
+    head.appendChild(title);
+    head.appendChild(en);
+    head.appendChild(del);
+    box.appendChild(head);
+
+    var nameLabel = document.createElement('label');
+    nameLabel.className = 'field';
+    nameLabel.innerHTML = '<span class="field__label">Rule name</span>';
+    var nameInput = document.createElement('input');
+    nameInput.value = rule.name || '';
+    nameInput.placeholder = 'e.g. Pro-plan buyers → onboarding';
+    nameInput.addEventListener('input', function () { rule.name = nameInput.value; });
+    nameLabel.appendChild(nameInput);
+    box.appendChild(nameLabel);
+
+    var workflowLabel = document.createElement('label');
+    workflowLabel.className = 'field';
+    workflowLabel.innerHTML = '<span class="field__label">Add the contact to</span>';
+    var workflowSel = document.createElement('select');
+    workflowSel.innerHTML = '<option value="">— pick a workflow —</option>' + editingWorkflows.map(function (w) {
+      var label = w.name || w.workflowId || 'Untitled workflow';
+      return '<option value="' + esc(w.workflowId) + '">' + esc(label) + '</option>';
+    }).join('');
+    workflowSel.value = rule.workflowId || '';
+    workflowSel.addEventListener('change', function () { rule.workflowId = workflowSel.value; });
+    workflowLabel.appendChild(workflowSel);
+    if (!editingWorkflows.length) {
+      var noWf = document.createElement('span');
+      noWf.className = 'field__hint';
+      noWf.textContent = 'Add a workflow above first.';
+      workflowLabel.appendChild(noWf);
+    }
+    box.appendChild(workflowLabel);
+
+    var eventLabel = document.createElement('label');
+    eventLabel.className = 'field';
+    eventLabel.innerHTML = '<span class="field__label">Workflow event start time</span>';
+    var eventSel = document.createElement('select');
+    eventSel.innerHTML = '<option value="now">Now</option><option value="session_start">The call’s start time</option>';
+    eventSel.value = rule.eventStartTime === 'session_start' ? 'session_start' : 'now';
+    eventSel.addEventListener('change', function () { rule.eventStartTime = eventSel.value; });
+    eventLabel.appendChild(eventSel);
+    box.appendChild(eventLabel);
+
+    var condTitle = document.createElement('p');
+    condTitle.className = 'rule__cond-title';
+    condTitle.textContent = 'When ALL of these match:';
+    box.appendChild(condTitle);
+
+    var condList = document.createElement('div');
+    condList.className = 'cond-list';
+    (rule.conditions || []).forEach(function (cond, idx) {
+      condList.appendChild(conditionEl(rule, cond, idx, renderWorkflowRules));
+    });
+    box.appendChild(condList);
+
+    var addCond = document.createElement('button');
+    addCond.type = 'button';
+    addCond.className = 'btn btn--ghost btn--sm';
+    addCond.textContent = '+ Add condition';
+    addCond.addEventListener('click', function () {
+      rule.conditions = rule.conditions || [];
+      rule.conditions.push({ field: 'attendanceStatus', operator: 'equals', value: '' });
+      renderWorkflowRules();
+    });
+    box.appendChild(addCond);
+
+    var pollTitle = document.createElement('p');
+    pollTitle.className = 'rule__cond-title';
+    pollTitle.textContent = 'Zoom poll answers (all must match):';
+    box.appendChild(pollTitle);
+
+    var pollList = document.createElement('div');
+    pollList.className = 'cond-list';
+    (rule.pollConditions || []).forEach(function (cond, idx) {
+      pollList.appendChild(pollConditionEl(rule, cond, idx));
+    });
+    box.appendChild(pollList);
+
+    var addPoll = document.createElement('button');
+    addPoll.type = 'button';
+    addPoll.className = 'btn btn--ghost btn--sm';
+    addPoll.textContent = '+ Add poll condition';
+    addPoll.addEventListener('click', function () {
+      rule.pollConditions = rule.pollConditions || [];
+      rule.pollConditions.push({ question: '', operator: 'equals', answer: '' });
+      renderWorkflowRules();
+    });
+    box.appendChild(addPoll);
+
+    if (!(rule.conditions || []).length && !(rule.pollConditions || []).length) {
+      var catchAll = document.createElement('p');
+      catchAll.className = 'muted';
+      catchAll.style.fontSize = '0.8rem';
+      catchAll.textContent = 'No conditions: this is a catch-all. It will match everyone this rule sees.';
+      box.appendChild(catchAll);
+    }
+
+    return box;
+  }
+
+  function pollConditionEl(rule, cond, idx) {
+    var row = document.createElement('div');
+    row.className = 'cond cond--poll';
+
+    var question = document.createElement('input');
+    question.className = 'poll-q';
+    question.value = cond.question || '';
+    question.placeholder = 'Exact Zoom poll question';
+    question.addEventListener('input', function () { cond.question = question.value; });
+
+    var op = document.createElement('select');
+    op.className = 'poll-op';
+    [
+      ['equals', 'answer is'],
+      ['contains', 'answer contains'],
+      ['not_equals', 'answer is not'],
+      ['not_contains', 'answer does not contain'],
+      ['answered', 'answered'],
+      ['not_answered', 'did not answer']
+    ].forEach(function (pair) {
+      var o = document.createElement('option');
+      o.value = pair[0];
+      o.textContent = pair[1];
+      op.appendChild(o);
+    });
+    op.value = cond.operator || 'equals';
+
+    var answer = document.createElement('input');
+    answer.className = 'poll-a';
+    answer.value = cond.answer || '';
+    answer.placeholder = 'Answer';
+    var needsAnswer = function (operator) {
+      return operator !== 'answered' && operator !== 'not_answered';
+    };
+    answer.disabled = !needsAnswer(op.value);
+    answer.addEventListener('input', function () { cond.answer = answer.value; });
+
+    op.addEventListener('change', function () {
+      cond.operator = op.value;
+      answer.disabled = !needsAnswer(op.value);
+      renderWorkflowRules();
+    });
+
+    var del = document.createElement('button');
+    del.type = 'button';
+    del.className = 'icon-btn';
+    del.textContent = '×';
+    del.title = 'Remove poll condition';
+    del.addEventListener('click', function () {
+      rule.pollConditions.splice(idx, 1);
+      renderWorkflowRules();
+    });
+
+    row.appendChild(question);
+    row.appendChild(op);
+    row.appendChild(answer);
     row.appendChild(del);
     return row;
   }
@@ -1473,6 +1779,7 @@
 
   function openSession(id) {
     currentSessionId = id;
+    sessionWorkflowPreview = null;
     api('/api/sessions/' + id).then(function (d) {
       renderSessionDetail(d.session, d.attendance);
       // Re-rendering an already-open detail must not stack a second copy on the modal stack.
@@ -1586,6 +1893,11 @@
         : '<p class="muted">No attendance synced yet — click "Sync now".</p>';
     } else {
       var partialCount = (attendance.attended || []).filter(function (p) { return p.status === 'partial'; }).length;
+      var pollCount = attendance.pollQuestionCount !== undefined ? attendance.pollQuestionCount : (attendance.polls || []).length;
+      var pollLabel = attendance.pollQuestionCount !== undefined ? 'poll questions' : 'poll responses';
+      var pollRespondentsHtml = attendance.pollRespondentCount !== undefined
+        ? '<div class="summary__item"><span class="summary__value">' + attendance.pollRespondentCount + '</span><span class="summary__label">poll respondents</span></div>'
+        : '';
       body += '<div class="summary" style="margin:0.5rem 0 1rem">' +
         '<div class="summary__item"><span class="summary__value">' + attendance.invitedCount + '</span><span class="summary__label">invited</span></div>' +
         '<div class="summary__item"><span class="summary__value">' + Math.max(0, attendance.attendedCount - partialCount) + '</span><span class="summary__label">attended</span></div>' +
@@ -1594,7 +1906,8 @@
         '<div class="summary__item"><span class="summary__value">' + ((attendance.attendedNotInvited || []).length) + '</span><span class="summary__label">not on list</span></div>' +
         '<div class="summary__item"><span class="summary__value">' + Math.round((attendance.attendanceRate || 0) * 100) + '%</span><span class="summary__label">attendance</span></div>' +
         '<div class="summary__item"><span class="summary__value">' + (attendance.registrantCount || 0) + '</span><span class="summary__label">registrants</span></div>' +
-        '<div class="summary__item"><span class="summary__value">' + ((attendance.polls || []).length) + '</span><span class="summary__label">polls</span></div>' +
+        '<div class="summary__item"><span class="summary__value">' + pollCount + '</span><span class="summary__label">' + pollLabel + '</span></div>' +
+        pollRespondentsHtml +
         '<div class="summary__item"><span class="summary__value">' + ((attendance.qa || []).length) + '</span><span class="summary__label">Q&amp;A</span></div>' +
         '</div>';
 
@@ -1612,6 +1925,8 @@
       } else if (session.rosterSentAt) {
         body += '<p class="muted stats-note">Roster last sent ' + esc(prettyDate(session.rosterSentAt)) + '.</p>';
       }
+
+      body += workflowSectionHTML(session, attendance);
 
       var stats = attendance.sessionStats || {};
       var statKeys = Object.keys(stats);
@@ -1639,6 +1954,9 @@
         body += '<h3 class="detail__sub">Absentees (' + attendance.absentees.length + ')</h3><table class="map"><tbody>' +
           attendance.absentees.map(function (e) { return '<tr><td>' + esc(e) + '</td></tr>'; }).join('') + '</tbody></table>';
       }
+
+      body += pollSummaryHTML(attendance) + qaTableHTML(attendance) + registrationTableHTML(attendance);
+      body += behaviorDetailHTML((attendance.attended || []).concat(unlisted));
     }
     // A pending call should never be a mystery: show exactly what Zoom said to each attempt.
     if (session.status !== 'synced' && session.syncDiagnostics) {
@@ -1668,15 +1986,170 @@
       rows + '</tbody></table></div>' + sweep;
   }
 
+  function sessionConnection(session) {
+    if (!session.connectionId) return null;
+    return (state.connections || []).filter(function (c) { return c.id === session.connectionId; })[0] || null;
+  }
+
+  function workflowStatusChip(status) {
+    if (status === 'applied') return '<span class="chip chip--success">applied</span>';
+    if (status === 'failed') return '<span class="chip chip--danger">failed</span>';
+    return '<span class="chip chip--neutral">skipped</span>';
+  }
+
+  function workflowAssignmentsTable(assignments) {
+    if (!assignments.length) return '<p class="muted">No workflow assignments yet.</p>';
+    var rows = assignments.slice(0, 200).map(function (a) {
+      var detail = [a.reason, a.error].filter(Boolean).join(' · ');
+      var confidence = a.confidence !== undefined ? ' · ' + Math.round(a.confidence * 100) + '%' : '';
+      return '<tr><td>' + esc(a.email || a.name || '—') + '</td><td>' + esc(a.workflowName || a.workflowId) + '</td>' +
+        '<td>' + esc(a.source) + confidence + '</td><td>' + workflowStatusChip(a.status) + '</td>' +
+        '<td>' + esc(detail) + '</td><td>' + esc(prettyDate(a.at)) + '</td></tr>';
+    }).join('');
+    return '<div class="table-scroll"><table class="map"><thead><tr><th>Person</th><th>Workflow</th><th>Source</th><th>Status</th><th>Detail</th><th>When</th></tr></thead><tbody>' +
+      rows + '</tbody></table></div>' +
+      (assignments.length > 200 ? '<p class="muted">Showing the newest 200 of ' + assignments.length + ' attempts.</p>' : '');
+  }
+
+  function workflowSectionHTML(session, attendance) {
+    var conn = sessionConnection(session);
+    var workflows = conn && conn.attendanceWorkflows ? conn.attendanceWorkflows : [];
+    var h = '<h3 class="detail__sub">GHL workflows</h3>';
+
+    if (!conn) {
+      return h + '<p class="muted">Link this call to an account with GHL workflows to route attendees.</p>';
+    }
+    if (!workflows.length) {
+      return h + '<p class="muted">No workflows are configured for this account.</p>' +
+        '<button class="btn btn--outline btn--sm" data-workflow-action="openAutomations">Open attendance automations</button>';
+    }
+
+    h += '<p class="muted">Rules run first; AI proposals only fill in people no rule matched. One workflow per person per call.</p>';
+    h += '<div class="conn__actions">' +
+      '<button class="btn btn--primary btn--sm" data-workflow-action="preview">Preview routes</button>' +
+      '<button class="btn btn--ghost btn--sm" data-workflow-action="openAutomations">Edit workflows</button>' +
+      '</div>';
+
+    h += '<div class="sender__grid" style="margin-top:0.6rem">' +
+      '<label class="field"><span class="field__label">Add one person manually</span><input id="sessionWorkflowEmail" placeholder="email@example.com" /></label>' +
+      '<label class="field"><span class="field__label">Workflow</span><select id="sessionWorkflowManualSelect">' +
+        workflows.map(function (w) {
+          return '<option value="' + esc(w.workflowId) + '">' + esc(w.name || w.workflowId) + '</option>';
+        }).join('') +
+      '</select></label>' +
+      '<label class="field"><span class="field__label">&nbsp;</span><button class="btn btn--outline btn--sm" data-workflow-action="manual">Add to workflow</button></label>' +
+      '</div>';
+
+    h += workflowAssignmentsTable(session.workflowAssignments || []);
+    h += '<div id="sessionWorkflowPreview"></div>';
+    return h;
+  }
+
+  function pollSummaryHTML(attendance) {
+    var polls = attendance.pollSummary || [];
+    if (!polls.length) return '';
+    var h = '<h3 class="detail__sub">Poll answers</h3>';
+    polls.forEach(function (poll) {
+      var answers = poll.answers || [];
+      h += '<div class="rule" style="margin-bottom:0.6rem"><div class="rule__head"><span class="rule__title">' +
+        esc(poll.question) + '</span><span class="muted">' + poll.respondents + ' responded</span></div>';
+      if (!answers.length) {
+        h += '<p class="muted">No answers recorded.</p>';
+      } else {
+        h += '<div class="table-scroll"><table class="map"><thead><tr><th>Answer</th><th>Count</th><th></th></tr></thead><tbody>' +
+          answers.map(function (a) {
+            return '<tr><td>' + esc(a.answer) + '</td><td>' + a.count + '</td><td>' +
+              '<button class="btn btn--ghost btn--sm" data-poll-question="' + esc(poll.question) + '" data-poll-answer="' + esc(a.answer) + '">Create rule from this answer</button>' +
+              '</td></tr>';
+          }).join('') + '</tbody></table></div>';
+      }
+      h += '</div>';
+    });
+    return h;
+  }
+
+  function qaTableHTML(attendance) {
+    var qa = attendance.qa || [];
+    if (!qa.length) return '';
+    return '<h3 class="detail__sub">Q&amp;A (' + qa.length + ')</h3>' +
+      '<div class="table-scroll"><table class="map"><thead><tr><th>Person</th><th>Question</th><th>Answer</th></tr></thead><tbody>' +
+      qa.map(function (q) {
+        return '<tr><td>' + esc(q.name || q.email || '—') + '</td><td>' + esc(q.question || '—') + '</td><td>' + esc(q.answer || '—') + '</td></tr>';
+      }).join('') + '</tbody></table></div>';
+  }
+
+  function registrationTableHTML(attendance) {
+    var rows = attendance.registrantDetails || [];
+    if (!rows.length) return '';
+    return '<h3 class="detail__sub">Registration answers (' + rows.length + ')</h3>' +
+      '<div class="table-scroll"><table class="map"><thead><tr><th>Name</th><th>Email</th><th>Answers</th></tr></thead><tbody>' +
+      rows.map(function (row) {
+        var name = row.name || [row.first_name, row.last_name].filter(Boolean).join(' ');
+        var questions = row.custom_questions || row.customQuestions || row.questions || [];
+        var answers = Array.isArray(questions) ? questions.map(function (q) {
+          var title = q.title || q.name || q.question || '';
+          var value = q.value !== undefined ? q.value : q.answer;
+          return title + ': ' + (Array.isArray(value) ? value.join(', ') : (value || ''));
+        }).join(' | ') : '';
+        return '<tr><td>' + esc(name || '—') + '</td><td>' + esc(row.email || '—') + '</td><td>' + esc(answers || '—') + '</td></tr>';
+      }).join('') + '</tbody></table></div>';
+  }
+
+  function behaviorDetailHTML(people) {
+    var rows = (people || []).filter(function (p) {
+      var b = p.behavior;
+      return b && (
+        (b.pollAnswers || []).length ||
+        (b.qa || []).length ||
+        (b.registrationAnswers || []).length ||
+        b.joinedLateMinutes !== undefined ||
+        b.leftEarlyMinutes !== undefined
+      );
+    }).map(function (p) {
+      var b = p.behavior;
+      var polls = (b.pollAnswers || []).map(function (a) {
+        return esc(a.question) + ': ' + esc(a.answer);
+      }).join('<br>') || '—';
+      var qa = (b.qa || []).map(function (q) {
+        return esc(q.question) + (q.answer ? ' → ' + esc(q.answer) : '');
+      }).join('<br>') || '—';
+      var reg = (b.registrationAnswers || []).map(function (a) {
+        return esc(a.question) + ': ' + esc(a.answer);
+      }).join('<br>') || '—';
+      var timing = (b.joinedLateMinutes !== undefined || b.leftEarlyMinutes !== undefined)
+        ? String(b.joinedLateMinutes || 0) + ' / ' + String(b.leftEarlyMinutes || 0) + ' min'
+        : '—';
+      return '<tr><td>' + esc(p.email || p.name || '—') + '</td><td>' + polls + '</td><td>' + qa + '</td><td>' + reg + '</td><td>' + timing + '</td></tr>';
+    });
+
+    if (!rows.length) return '';
+    return '<h3 class="detail__sub">Poll, Q&amp;A and registration detail</h3>' +
+      '<div class="table-scroll"><table class="map"><thead><tr><th>Person</th><th>Poll answers</th><th>Q&amp;A</th><th>Registration</th><th>Late / early</th></tr></thead><tbody>' +
+      rows.join('') + '</tbody></table></div>';
+  }
+
   function attendanceTable(people) {
     if (!people.length) return '<p class="muted">None</p>';
-    return '<table class="map"><thead><tr><th>Email</th><th>Name</th><th>Status</th><th>Duration</th><th>Focus</th><th>Guest</th></tr></thead><tbody>' +
+    return '<div class="table-scroll"><table class="map"><thead><tr><th>Email</th><th>Name</th><th>Status</th><th>Duration</th><th>Focus</th><th>Guest</th><th>Polls</th><th>Q&amp;A</th><th>Reg.</th><th>Late / early</th></tr></thead><tbody>' +
       people.map(function (p) {
         var min = p.durationSec !== undefined ? Math.round(p.durationSec / 60) + ' min' : '—';
         var att = p.attentivenessScore !== undefined ? String(p.attentivenessScore) : '—';
         var guest = p.isGuest === undefined ? '—' : (p.isGuest ? 'yes' : 'no');
-        return '<tr><td>' + esc(p.email || '—') + '</td><td>' + esc(p.name || '—') + '</td><td>' + esc(p.status) + '</td><td>' + min + '</td><td>' + att + '</td><td>' + guest + '</td></tr>';
-      }).join('') + '</tbody></table>';
+        var b = p.behavior || {};
+        var polls = b.pollQuestionCount
+          ? String(b.pollAnsweredCount || 0) + '/' + b.pollQuestionCount
+          : '—';
+        var qa = b.qaAskedCount !== undefined ? String(b.qaAskedCount) : '—';
+        var reg = b.registrationAnswerCount !== undefined ? String(b.registrationAnswerCount) : '—';
+        var timing = (b.joinedLateMinutes !== undefined || b.leftEarlyMinutes !== undefined)
+          ? String(b.joinedLateMinutes || 0) + ' / ' + String(b.leftEarlyMinutes || 0)
+          : '—';
+        return '<tr><td>' + esc(p.email || '—') + '</td><td>' + esc(p.name || '—') + '</td><td>' + esc(p.status) + '</td><td>' + min + '</td><td>' + att + '</td><td>' + guest + '</td>' +
+          '<td title="' + esc(b.pollAnswerText || 'No poll answers') + '">' + polls + '</td>' +
+          '<td title="' + esc(b.qaQuestionText || 'No Q&A') + '">' + qa + '</td>' +
+          '<td title="' + esc(b.registrationAnswerText || 'No registration answers') + '">' + reg + '</td>' +
+          '<td title="joined late / left early (minutes)">' + timing + '</td></tr>';
+      }).join('') + '</tbody></table></div>';
   }
 
   function dispatchSession() {
@@ -1689,9 +2162,12 @@
       .then(function (r) {
         var parts = [r.dispatched + ' contact' + (r.dispatched === 1 ? '' : 's')];
         if (r.failed) parts.push(r.failed + ' failed');
+        if (r.workflows && r.workflows.applied) parts.push(r.workflows.applied + ' workflow' + (r.workflows.applied === 1 ? '' : 's'));
+        if (r.workflows && r.workflows.failed) parts.push(r.workflows.failed + ' workflow failed');
+        if (r.workflowError) parts.push('workflow error');
         if (r.roster && r.roster.error) parts.push('roster failed');
         else if (r.roster && !r.roster.skipped) parts.push('roster sent');
-        toast('Sent (' + parts.join(', ') + ')', r.failed || (r.roster && r.roster.error) ? 'error' : 'success');
+        toast('Sent (' + parts.join(', ') + ')', r.failed || (r.workflows && r.workflows.failed) || r.workflowError || (r.roster && r.roster.error) ? 'error' : 'success');
         openSession(currentSessionId);
       })
       .catch(function (e) { toast(e.message, 'error'); });
@@ -1715,6 +2191,168 @@
       })
       .catch(function (e) { toast(e.message, 'error'); });
   }
+
+  function renderSessionWorkflowPreview(preview) {
+    var el = document.getElementById('sessionWorkflowPreview');
+    if (!el) return;
+    var p = preview || {};
+    var h = '<div class="rule" style="margin-top:0.6rem">' +
+      '<div class="rule__head"><span class="rule__title">Proposed routes</span><span class="muted">' +
+      (p.assignments ? p.assignments.length : 0) + ' proposal' + ((p.assignments ? p.assignments.length : 0) === 1 ? '' : 's') + '</span></div>';
+
+    if (p.error) h += '<p class="muted" style="color:var(--danger)">' + esc(p.error) + '</p>';
+    if ((p.rejected || []).length) {
+      h += '<p class="muted">Ignored: ' + esc(p.rejected.join('; ')) + '</p>';
+    }
+
+    if (!p.assignments || !p.assignments.length) {
+      h += '<p class="muted">No proposals. Add a workflow rule or enable AI routing in Attendance automations.</p>';
+    } else {
+      h += '<p class="muted">Rule matches are checked. AI proposals below the confidence threshold are shown but cannot be applied here. Already-applied workflows are skipped.</p>' +
+        '<div class="table-scroll"><table class="map"><thead><tr><th></th><th>Person</th><th>Workflow</th><th>Source</th><th>Confidence</th><th>Why</th></tr></thead><tbody>' +
+        p.assignments.map(function (a) {
+          var selectable = !!a.workflowId && (a.source === 'rule' || a.eligible);
+          var checkbox = selectable
+            ? '<input type="checkbox" aria-label="Apply this workflow to ' + esc(a.email || 'this person') + '" data-wf-email="' + esc(a.email || '') + '" data-wf-id="' + esc(a.workflowId) + '" checked />'
+            : '—';
+          var confidence = a.confidence !== undefined ? Math.round(a.confidence * 100) + '%' : '—';
+          var why = a.reason || (a.workflowId ? '' : 'No clear fit');
+          return '<tr><td>' + checkbox + '</td><td>' + esc(a.email || a.name || '—') + '</td>' +
+            '<td>' + esc(a.workflowName || a.workflowId || '—') + '</td><td>' + esc(a.source) + '</td>' +
+            '<td>' + confidence + '</td><td>' + esc(why) + '</td></tr>';
+        }).join('') + '</tbody></table></div>' +
+        '<div class="conn__actions"><button class="btn btn--primary btn--sm" data-workflow-action="apply">Apply selected</button>' +
+        '<button class="btn btn--ghost btn--sm" data-workflow-action="cancelPreview">Cancel</button></div>';
+    }
+    h += '</div>';
+    el.innerHTML = h;
+  }
+
+  function previewSessionWorkflows(btn) {
+    if (!currentSessionId) return;
+    withBusy(btn, api('/api/sessions/' + currentSessionId + '/workflows/preview', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({})
+    }))
+      .then(function (r) { renderSessionWorkflowPreview(r.preview); })
+      .catch(function (e) { toast(e.message, 'error'); });
+  }
+
+  function applySessionWorkflowSelection(btn) {
+    if (!currentSessionId) return;
+    var selected = $$('#sessionWorkflowPreview input[data-wf-email]:checked').map(function (cb) {
+      return { email: cb.getAttribute('data-wf-email'), workflowId: cb.getAttribute('data-wf-id') };
+    });
+    if (!selected.length) {
+      toast('Select at least one proposal', 'error');
+      return;
+    }
+
+    withBusy(btn, api('/api/sessions/' + currentSessionId + '/workflows/apply', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ selected: selected })
+    }))
+      .then(function (r) {
+        var parts = [r.applied + ' applied'];
+        if (r.skipped) parts.push(r.skipped + ' skipped');
+        if (r.failed) parts.push(r.failed + ' failed');
+        toast(parts.join(', '), r.failed ? 'error' : (r.applied ? 'success' : 'info'));
+        openSession(currentSessionId);
+      })
+      .catch(function (e) { toast(e.message, 'error'); });
+  }
+
+  function manualAssignSessionWorkflow(btn) {
+    if (!currentSessionId) return;
+    var email = document.getElementById('sessionWorkflowEmail').value.trim();
+    var workflowId = document.getElementById('sessionWorkflowManualSelect').value;
+    if (!email || !workflowId) {
+      toast('Enter an email and pick a workflow', 'error');
+      return;
+    }
+
+    function send(force) {
+      return withBusy(btn, api('/api/sessions/' + currentSessionId + '/workflows/assign', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email, workflowId: workflowId, force: force })
+      })).then(function (r) {
+        var a = r.assignment || {};
+        if (a.status === 'applied') {
+          toast('Added to ' + (a.workflowName || a.workflowId), 'success');
+          openSession(currentSessionId);
+          return;
+        }
+        if (a.status === 'skipped' && /different workflow/i.test(a.error || '')) {
+          confirmDialog('Add a second workflow?', 'This person already has a workflow for this call. GHL may run both. Continue?', 'Add anyway').then(function (ok) {
+            if (ok) send(true).catch(function (e) { toast(e.message, 'error'); });
+          });
+          return;
+        }
+        toast(a.error || ('Workflow ' + a.status), a.status === 'failed' ? 'error' : 'info');
+      });
+    }
+
+    send(false).catch(function (e) { toast(e.message, 'error'); });
+  }
+
+  function openSessionWorkflowAutomations(seed) {
+    var session = attendanceSessions.filter(function (s) { return s.id === currentSessionId; })[0];
+    var open = function (s) {
+      if (!s || !s.connectionId) {
+        toast('Link this call to an account before creating a workflow rule', 'error');
+        return;
+      }
+      var conn = (state.connections || []).filter(function (c) { return c.id === s.connectionId; })[0];
+      if (conn) {
+        openAttendanceAutomations(s.connectionId, seed);
+        return;
+      }
+      api('/api/connections/' + s.connectionId).then(function (d) {
+        if (!d.connection) {
+          toast('Connection not found', 'error');
+          return;
+        }
+        state.connections = state.connections || [];
+        state.connections.push(d.connection);
+        openAttendanceAutomations(s.connectionId, seed);
+      }).catch(function (e) { toast(e.message, 'error'); });
+    };
+    if (session) {
+      open(session);
+      return;
+    }
+    if (!currentSessionId) return;
+    api('/api/sessions/' + currentSessionId).then(function (d) {
+      open(d.session);
+    }).catch(function (e) { toast(e.message, 'error'); });
+  }
+
+  function createRuleFromPoll(question, answer) {
+    openSessionWorkflowAutomations({ pollQuestion: question, pollAnswer: answer });
+  }
+
+  document.getElementById('sessionDetailBody').addEventListener('click', function (e) {
+    var pollBtn = e.target.closest('[data-poll-question]');
+    if (pollBtn) {
+      createRuleFromPoll(pollBtn.getAttribute('data-poll-question'), pollBtn.getAttribute('data-poll-answer'));
+      return;
+    }
+
+    var btn = e.target.closest('[data-workflow-action]');
+    if (!btn) return;
+    var action = btn.getAttribute('data-workflow-action');
+    if (action === 'preview') previewSessionWorkflows(btn);
+    else if (action === 'apply') applySessionWorkflowSelection(btn);
+    else if (action === 'manual') manualAssignSessionWorkflow(btn);
+    else if (action === 'openAutomations') openSessionWorkflowAutomations();
+    else if (action === 'cancelPreview') {
+      var preview = document.getElementById('sessionWorkflowPreview');
+      if (preview) preview.innerHTML = '';
+    }
+  });
 
   function openNewSession() {
     document.getElementById('newSessionForm').reset();
@@ -1818,11 +2456,18 @@
     }
   });
 
-  function openAttendanceAutomations(id) {
+  function openAttendanceAutomations(id, seed) {
     var c = state.connections.filter(function (x) { return x.id === id; })[0];
     if (!c) return;
     automationsId = id;
+    pendingWorkflowSeed = seed || null;
     editingRules = (c.attendanceRules || []).map(function (r) { return JSON.parse(JSON.stringify(r)); });
+    editingWorkflows = (c.attendanceWorkflows || []).map(function (w) { return JSON.parse(JSON.stringify(w)); });
+    editingWorkflowRules = (c.attendanceWorkflowRules || []).map(function (r) { return JSON.parse(JSON.stringify(r)); });
+    editingAiWorkflow = Object.assign(
+      { enabled: false, mode: 'preview', confidenceThreshold: 0.7, maxAttendees: 25 },
+      c.attendanceAiWorkflow || {}
+    );
     currentScope = 'attendance';
     currentRulesEl = document.getElementById('attendanceRulesList');
 
@@ -1836,6 +2481,11 @@
     document.getElementById('attTagNotInvited').value = tags.notInvited || '';
     document.getElementById('attCustomField').value = c.attendanceCustomFieldId || '';
 
+    document.getElementById('attAiEnabled').checked = !!editingAiWorkflow.enabled;
+    document.getElementById('attAiMode').value = editingAiWorkflow.mode === 'auto' ? 'auto' : 'preview';
+    document.getElementById('attAiThreshold').value = String(editingAiWorkflow.confidenceThreshold ?? 0.7);
+    document.getElementById('attAiMax').value = String(editingAiWorkflow.maxAttendees ?? 0);
+
     var roster = c.attendanceRoster || {};
     document.getElementById('attRosterUrl').value = roster.url || '';
     document.getElementById('attRosterShape').value = roster.shape === 'session' ? 'session' : 'segments';
@@ -1847,11 +2497,21 @@
 
     (CATALOG.length ? Promise.resolve() : loadCatalog()).then(function () {
       renderRules();
+      renderWorkflows();
+      var seeded = !!(pendingWorkflowSeed && pendingWorkflowSeed.pollQuestion);
+      if (seeded) {
+        editingWorkflowRules.push(newWorkflowRule(pendingWorkflowSeed));
+      }
+      renderWorkflowRules();
+      pendingWorkflowSeed = null;
       document.getElementById('attendanceSnapshot').textContent = JSON.stringify({
         event: 'attendance.result', sessionId: 'sess_…', provider: 'zoom', title: c.name,
         segment: 'no_show', invited: false, invitedSource: 'campaign',
         email: 'person@example.com', status: 'no_show',
         segmentCounts: { invited: 142, attended: 65, partial: 33, noShow: 44, notInvited: 17, attendanceRate: 69 },
+        pollAnswers: [{ question: 'Which plan?', answer: 'Pro' }],
+        qa: [{ question: 'Does it support SSO?', answer: 'Yes' }],
+        registrationAnswers: [{ question: 'Company size', answer: '50–200' }],
         timestamp: new Date().toISOString()
       }, null, 2);
       document.getElementById('attendanceRosterSnapshot').textContent = JSON.stringify({
@@ -1862,8 +2522,25 @@
         people: [{ email: 'person@example.com', name: 'Ada', status: 'no_show', minutes: null }]
       }, null, 2);
       openModal('attendanceAutomations');
+      if (seeded) {
+        setTimeout(function () {
+          var list = document.getElementById('attendanceWorkflowRulesList');
+          if (list) list.scrollIntoView({ block: 'center' });
+        }, 60);
+      }
     });
   }
+
+  document.getElementById('attendanceAddWorkflowBtn').addEventListener('click', function () {
+    editingWorkflows.push(newWorkflow());
+    renderWorkflows();
+    renderWorkflowRules();
+  });
+
+  document.getElementById('attendanceAddWorkflowRuleBtn').addEventListener('click', function () {
+    editingWorkflowRules.push(newWorkflowRule());
+    renderWorkflowRules();
+  });
 
   document.getElementById('attendanceAddRuleBtn').addEventListener('click', function () {
     editingRules.push(newRule());
@@ -1873,9 +2550,91 @@
   document.getElementById('attendanceAutomationsSave').addEventListener('click', function () {
     var checked = document.querySelector('#attendanceAutomationsBody input[name="attendanceDeliveryMode"]:checked');
     var mode = (checked && checked.value) || 'both';
+
+    var workflows = editingWorkflows.map(function (w) {
+      var workflowId = (w.workflowId || '').trim();
+      return {
+        id: w.id,
+        workflowId: workflowId,
+        name: (w.name || '').trim() || workflowId,
+        criteria: (w.criteria || '').trim() || undefined
+      };
+    }).filter(function (w) { return w.workflowId || w.name; });
+
+    var missingWorkflow = workflows.filter(function (w) { return !w.workflowId || !w.name; })[0];
+    if (missingWorkflow) {
+      toast('Each workflow needs a name and a GHL workflow ID', 'error');
+      return;
+    }
+
+    var workflowIds = Object.create(null);
+    workflows.forEach(function (w) { workflowIds[w.workflowId] = true; });
+
+    var rules = editingWorkflowRules.map(function (r) {
+      return {
+        id: r.id,
+        name: (r.name || '').trim(),
+        enabled: r.enabled !== false,
+        conditions: (r.conditions || []).map(function (c) {
+          return { field: c.field, operator: c.operator, value: c.value || '' };
+        }),
+        pollConditions: (r.pollConditions || []).map(function (c) {
+          return { question: (c.question || '').trim(), operator: c.operator, answer: (c.answer || '').trim() || undefined };
+        }),
+        workflowId: (r.workflowId || '').trim(),
+        eventStartTime: r.eventStartTime === 'session_start' ? 'session_start' : 'now'
+      };
+    }).filter(function (r) {
+      return r.name || r.workflowId || r.conditions.length || r.pollConditions.length;
+    });
+
+    var badRule = rules.filter(function (r) { return !r.name || !r.workflowId; })[0];
+    if (badRule) {
+      toast('Each workflow rule needs a name and a workflow', 'error');
+      return;
+    }
+    var badPoll = rules.filter(function (r) {
+      return r.pollConditions.some(function (c) {
+        return !c.question || (c.operator !== 'answered' && c.operator !== 'not_answered' && !c.answer);
+      });
+    })[0];
+    if (badPoll) {
+      toast('Each poll condition needs a question and, unless it is answered / did not answer, an answer', 'error');
+      return;
+    }
+    var orphan = rules.filter(function (r) { return !workflowIds[r.workflowId]; })[0];
+    if (orphan) {
+      toast('Rule “' + orphan.name + '” points at a workflow that is not in the list', 'error');
+      return;
+    }
+
+    var threshold = parseFloat(document.getElementById('attAiThreshold').value);
+    if (!isFinite(threshold) || threshold < 0 || threshold > 1) {
+      toast('AI confidence threshold must be between 0 and 1', 'error');
+      return;
+    }
+    var maxAttendees = parseInt(document.getElementById('attAiMax').value, 10);
+    if (!isFinite(maxAttendees) || maxAttendees < 0) {
+      toast('AI max attendees must be 0 or more', 'error');
+      return;
+    }
+    var aiEnabled = document.getElementById('attAiEnabled').checked;
+    if (aiEnabled && !workflows.length) {
+      toast('Add at least one workflow before enabling AI routing', 'error');
+      return;
+    }
+
     var body = {
       attendanceDeliveryMode: mode,
       attendanceRules: editingRules,
+      attendanceWorkflows: workflows,
+      attendanceWorkflowRules: rules,
+      attendanceAiWorkflow: {
+        enabled: aiEnabled,
+        mode: document.getElementById('attAiMode').value === 'auto' ? 'auto' : 'preview',
+        confidenceThreshold: threshold,
+        maxAttendees: maxAttendees
+      },
       attendanceTags: {
         attended: document.getElementById('attTagAttended').value.trim(),
         partial: document.getElementById('attTagPartial').value.trim(),
@@ -3024,9 +3783,13 @@
 
   function loadSenders() {
     document.getElementById('sendersList').innerHTML = skeletonCards(2);
-    return api('/api/senders')
-      .then(function (d) {
-        senderData = d.senders || [];
+    return Promise.all([
+      api('/api/senders'),
+      api('/api/deliverability').catch(function () { return null; })
+    ])
+      .then(function (results) {
+        senderData = results[0].senders || [];
+        if (results[1]) deliverabilityData = results[1];
         renderSenders(senderData);
       })
       .catch(function (e) {
@@ -3052,25 +3815,34 @@
       if (p.mode === 'ramp' && t.rampDayIndex) chips += '<span class="chip chip--neutral">warm-up day ' + t.rampDayIndex + '</span>';
 
       var pct = t.capToday > 0 ? Math.min(100, Math.round((t.sentToday / t.capToday) * 100)) : 0;
-      var hourly = p.hourlyCap ? ' / ' + p.hourlyCap : '';
+
+      var domainInfo = senderDomainInfo(s.connectionId);
+      var domainMeta = domainInfo
+        ? (DELIVERY_STATUS[domainInfo.status] || { label: domainInfo.status, tone: 'neutral' })
+        : null;
+      var domainChip = domainInfo
+        ? '<button type="button" class="chip chip--' + domainMeta.tone + ' domain-link" data-action="openDeliverability" data-domain="' +
+            esc(domainInfo.domain) + '">' + esc(domainInfo.domain) + ' · ' + esc(domainMeta.label) + '</button>'
+        : '<button type="button" class="chip chip--neutral domain-link" data-action="openDeliverability">Domain health</button>';
 
       var box = document.createElement('div');
       box.className = 'conn sender';
       box.innerHTML =
         '<div class="conn__main">' +
           '<div class="conn__head"><span class="conn__name">' + esc(s.name) + '</span>' + chips + '</div>' +
-          '<div class="conn__meta"><span class="conn__cal">' + icon('send') + esc(s.calendarId) + '</span></div>' +
+          '<div class="conn__meta"><span class="conn__cal">' + icon('send') + esc(s.calendarId) + '</span>' + domainChip + '</div>' +
           '<div class="gauge"><div class="gauge__bar"><span style="width:' + pct + '%"></span></div>' +
             '<div class="gauge__label">Sent today <strong>' + t.sentToday + '</strong> of ' + t.capToday +
-              ' · ' + t.headroom + ' still available · ' + t.sentThisHour + ' this hour' + hourly +
+              ' · ' + t.headroom + ' still available · ' + t.sentThisHour + ' this hour' +
               (t.failedToday ? ' · ' + t.failedToday + " didn't go through" : '') + '</div></div>' +
           '<div class="sender__grid">' +
             '<label class="field"><span class="field__label">How it sends</span><select data-f="mode">' +
               '<option value="flat"' + (p.mode === 'flat' ? ' selected' : '') + '>Steady</option>' +
               '<option value="ramp"' + (p.mode === 'ramp' ? ' selected' : '') + '>Warm up slowly</option></select></label>' +
-            '<label class="field"><span class="field__label">Max per day</span><input type="number" min="1" max="5000" data-f="dailyCap" value="' + p.dailyCap + '" /></label>' +
-            '<label class="field"><span class="field__label">Max per hour</span><input type="number" min="1" max="1000" data-f="hourlyCap" value="' + (p.hourlyCap || '') + '" /></label>' +
+            '<label class="field"><span class="field__label">Max per day</span><input type="number" min="1" max="5000" data-f="dailyCap" value="' + p.dailyCap + '" /><span class="field__hint">One blast per account, up to this many recipients.</span></label>' +
             '<label class="field"><span class="field__label">Pause between batches (ms)</span><input type="number" min="0" max="600000" data-f="minDelayMs" value="' + (p.minDelayMs === undefined ? '' : p.minDelayMs) + '" /></label>' +
+            '<label class="field"><span class="field__label">Sending domain</span><input data-f="sendingDomain" placeholder="Auto-detect" value="' + esc(p.sendingDomain || '') + '" /><span class="field__hint">Blank means auto-detect.</span></label>' +
+            '<label class="field"><span class="field__label">DKIM selector</span><input data-f="dkimSelector" placeholder="google" value="' + esc(p.dkimSelector || '') + '" /><span class="field__hint">Blank probes common Google selectors.</span></label>' +
           '</div>' +
           '<div class="sender__ramp"' + (p.mode === 'ramp' ? '' : ' hidden') + '>' +
             '<div class="sender__grid">' +
@@ -3120,6 +3892,8 @@
       mode: mode,
       dailyCap: num('[data-f="dailyCap"]', 800),
       minDelayMs: num('[data-f="minDelayMs"]', undefined),
+      sendingDomain: str('[data-f="sendingDomain"]', ''),
+      dkimSelector: str('[data-f="dkimSelector"]', ''),
       window: {
         startHour: num('[data-f="winStart"]', 9),
         endHour: num('[data-f="winEnd"]', 17),
@@ -3127,9 +3901,6 @@
         timeZone: str('[data-f="winTz"]', 'UTC')
       }
     };
-
-    var hourly = num('[data-f="hourlyCap"]', undefined);
-    if (hourly !== undefined) body.hourlyCap = hourly;
 
     if (mode === 'ramp') {
       body.ramp = {
@@ -3161,7 +3932,7 @@
         .then(function () { toast('Saved', 'success'); loadSenders(); })
         .catch(function (err) { toast(err.message, 'error'); });
     } else if (btn.dataset.action === 'sendNowSender') {
-      withBusy(btn, api('/api/senders/' + id + '/send-now', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ maxPerSender: 200 }) }))
+      withBusy(btn, api('/api/senders/' + id + '/send-now', { method: 'POST' }))
         .then(function (r) {
           if (r.sent) {
             toast('Sent ' + r.sent + (r.failed ? '. ' + r.failed + " didn't go through" : '') +
@@ -3172,12 +3943,216 @@
           loadSenders();
         })
         .catch(function (err) { toast(err.message, 'error'); });
+    } else if (btn.dataset.action === 'openDeliverability') {
+      showView('deliverability');
     } else if (btn.dataset.action === 'toggleSender') {
       var action = btn.dataset.enabled === '1' ? 'pause' : 'resume';
       withBusy(btn, api('/api/senders/' + id + '/' + action, { method: 'POST' }))
         .then(function () { toast(action === 'pause' ? 'That account is paused' : 'That account is sending again', 'success'); loadSenders(); })
         .catch(function (err) { toast(err.message, 'error'); });
     }
+  });
+
+  /* ---- Deliverability (domain reputation) ---- */
+  var deliverabilityData = null;
+  var DELIVERY_STATUS = {
+    healthy: { label: 'Healthy', tone: 'success' },
+    warning: { label: 'Needs attention', tone: 'warning' },
+    critical: { label: 'Critical', tone: 'danger' },
+    provider_managed: { label: 'Managed by Google', tone: 'neutral' },
+    unchecked: { label: 'Not checked', tone: 'neutral' }
+  };
+  var CHECK_TONES = { pass: 'success', warn: 'warning', fail: 'danger', unavailable: 'neutral', info: 'neutral' };
+
+  function deliveryChip(status) {
+    var meta = DELIVERY_STATUS[status] || { label: status, tone: 'neutral' };
+    return '<span class="chip chip--' + meta.tone + '">' + esc(meta.label) + '</span>';
+  }
+
+  function deliveryStat(label, value, tone) {
+    return '<div class="stat stat--' + tone + '"><div class="stat__value">' + value +
+      '</div><div class="stat__label">' + esc(label) + '</div></div>';
+  }
+
+  function loadDeliverability(force) {
+    var list = document.getElementById('deliverabilityList');
+    var summary = document.getElementById('deliverabilitySummary');
+    if (list && !deliverabilityData) list.innerHTML = skeletonCards(2);
+    if (summary && !deliverabilityData) {
+      summary.innerHTML = '<div class="skeleton skel-stat"></div><div class="skeleton skel-stat"></div><div class="skeleton skel-stat"></div><div class="skeleton skel-stat"></div>';
+    }
+
+    var request = force
+      ? api('/api/deliverability/refresh', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) })
+      : api('/api/deliverability');
+
+    return request.then(function (data) {
+      deliverabilityData = data;
+      renderDeliverability(data);
+      refreshCampDomainWarn();
+      return data;
+    }).catch(function (err) {
+      if (list) list.innerHTML = '<div class="card"><p class="muted">' + esc(err.message) + '</p></div>';
+      if (summary) summary.innerHTML = '';
+    });
+  }
+
+  function renderDeliverability(data) {
+    var domains = data.domains || [];
+    var summary = data.summary || {};
+
+    document.getElementById('deliverabilitySummary').innerHTML =
+      deliveryStat('Domains', summary.total || 0, 'navy') +
+      deliveryStat('Healthy', summary.healthy || 0, 'success') +
+      deliveryStat('Needs attention', summary.warning || 0, 'warning') +
+      deliveryStat('Critical', summary.critical || 0, 'danger') +
+      deliveryStat('Not checked', summary.unchecked || 0, 'neutral') +
+      (summary.providerManaged ? deliveryStat('Managed by Google', summary.providerManaged, 'neutral') : '');
+
+    var list = document.getElementById('deliverabilityList');
+    list.innerHTML = domains.length
+      ? domains.map(domainCardHtml).join('')
+      : '<div class="empty"><div class="empty__icon">' + icon('send') + '</div>' +
+        '<h2 class="empty__title">No sending domains yet</h2>' +
+        '<p class="empty__text">Link a Google account and its domain will appear here, ready to check.</p>' +
+        '<button class="btn btn--accent" id="deliverabilityEmptyCta">+ Link a Google account</button></div>';
+
+    renderDeliverabilityUnresolved(data.unresolved || []);
+  }
+
+  /** The domain behind a sending account, for the chip on its Sending accounts card. */
+  function senderDomainInfo(connectionId) {
+    if (!deliverabilityData) return null;
+    var found = null;
+    (deliverabilityData.domains || []).forEach(function (d) {
+      (d.accounts || []).forEach(function (a) {
+        if (a.connectionId === connectionId) found = { domain: d.domain, status: d.status };
+      });
+    });
+    return found;
+  }
+
+  function domainCardHtml(d) {
+    var checked = d.checkedAt ? 'Last checked ' + relativeTime(d.checkedAt) : 'Not checked yet';
+    var accounts = (d.accounts || []).map(function (a) { return esc(a.name); }).join(', ');
+    var badges = (d.checks || []).map(function (c) {
+      return '<span class="chip chip--' + (CHECK_TONES[c.status] || 'neutral') + '" title="' + esc(c.summary) + '">' + esc(c.label) + '</span>';
+    }).join('');
+    var findings = (d.findings || []).map(function (f) {
+      return '<li class="finding finding--' + esc(f.severity) + '"><span>' + esc(f.text) + '</span>' +
+        (f.fix ? '<span class="finding__fix">' + esc(f.fix) + '</span>' : '') + '</li>';
+    }).join('');
+    var raw = d.raw
+      ? '<details class="domain-raw"><summary>Raw DNS records</summary><pre>' + esc(JSON.stringify(d.raw, null, 2)) + '</pre></details>'
+      : '';
+
+    return '<div class="conn domain-card" data-domain="' + esc(d.domain) + '">' +
+      '<div class="conn__main">' +
+        '<div class="conn__head"><span class="conn__name">' + esc(d.domain) + '</span>' + deliveryChip(d.status) +
+          '<span class="chip chip--neutral">' + (d.accounts || []).length + ' account' + ((d.accounts || []).length === 1 ? '' : 's') + '</span>' +
+        '</div>' +
+        '<div class="conn__meta"><span>' + esc(checked) + '</span>' + (accounts ? '<span class="conn__cal">' + accounts + '</span>' : '') + '</div>' +
+        (d.providerManaged
+          ? '<p class="muted domain-note">This is a consumer mailbox. Google manages its DNS, so these checks are shown for information only.</p>'
+          : '') +
+        (badges ? '<div class="domain-checks">' + badges + '</div>' : '') +
+        (findings ? '<ul class="domain-findings">' + findings + '</ul>' : '') +
+        raw +
+      '</div>' +
+      '<div class="conn__actions">' +
+        '<button class="btn btn--outline btn--sm" data-action="checkDomain" data-domain="' + esc(d.domain) + '">Check now</button>' +
+      '</div>' +
+    '</div>';
+  }
+
+  function renderDeliverabilityUnresolved(unresolved) {
+    var el = document.getElementById('deliverabilityUnresolved');
+    if (!unresolved.length) { el.innerHTML = ''; return; }
+    el.innerHTML = '<h2 class="section-title">Accounts without a sending domain</h2>' +
+      '<div class="card">' +
+      unresolved.map(function (u) {
+        return '<div class="domain-unresolved"><div><strong>' + esc(u.name) + '</strong>' +
+          '<p class="muted">' + esc(u.reason) + '</p></div>' +
+          '<button class="btn btn--ghost btn--sm" data-action="setSendingDomain" data-id="' + esc(u.connectionId) + '">' +
+          'Set sending domain in Sending accounts</button></div>';
+      }).join('') + '</div>';
+  }
+
+  function checkDeliveryDomain(domain, btn) {
+    withBusy(btn, api('/api/deliverability/refresh', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ domain: domain })
+    }))
+      .then(function (data) {
+        deliverabilityData = data;
+        renderDeliverability(data);
+        refreshCampDomainWarn();
+        toast(domain + ' checked', 'success');
+      })
+      .catch(function (err) { toast(err.message, 'error'); });
+  }
+
+  /**
+   * A non-blocking line in the campaign wizard: the plan still renders and sending is never
+   * stopped by a DNS finding. It only points the operator at the page that explains the fix.
+   */
+  function refreshCampDomainWarn() {
+    var el = document.getElementById('campDomainWarn');
+    if (!el) return;
+    var ids = selectedCampSenderIds();
+    if (!deliverabilityData || !ids.length) { el.hidden = true; el.innerHTML = ''; return; }
+
+    var byConnection = {};
+    (deliverabilityData.domains || []).forEach(function (d) {
+      (d.accounts || []).forEach(function (a) {
+        byConnection[a.connectionId] = { domain: d.domain, status: d.status, findings: d.findings || [] };
+      });
+    });
+
+    var seen = {};
+    var issues = [];
+    ids.forEach(function (id) {
+      var info = byConnection[id];
+      if (!info || (info.status !== 'critical' && info.status !== 'warning') || seen[info.domain]) return;
+      seen[info.domain] = true;
+      issues.push(info);
+    });
+
+    if (!issues.length) { el.hidden = true; el.innerHTML = ''; return; }
+    el.hidden = false;
+    el.innerHTML = issues.map(function (info) {
+      var texts = (info.findings || [])
+        .filter(function (f) { return f.severity !== 'info'; })
+        .slice(0, 2)
+        .map(function (f) { return f.text.replace(/\.$/, ''); });
+      return '<div><strong>' + esc(info.domain) + '</strong> needs attention' +
+        (texts.length ? ': ' + esc(texts.join(', ')) : '') + '. ' +
+        '<button type="button" class="linkbtn" data-action="reviewDeliverability">Review Deliverability</button></div>';
+    }).join('');
+  }
+
+  document.getElementById('deliverabilityList').addEventListener('click', function (e) {
+    if (e.target.closest('#deliverabilityEmptyCta')) { openWizard(); return; }
+    var btn = e.target.closest('[data-action="checkDomain"]');
+    if (!btn) return;
+    checkDeliveryDomain(btn.dataset.domain, btn);
+  });
+
+  document.getElementById('deliverabilityUnresolved').addEventListener('click', function (e) {
+    if (e.target.closest('[data-action="setSendingDomain"]')) showView('senders');
+  });
+
+  document.getElementById('deliverabilityCheckAll').addEventListener('click', function () {
+    withBusy(this, loadDeliverability(true))
+      .then(function (data) { if (data) toast('Checked ' + ((data.domains || []).length) + ' domain(s)', 'success'); })
+      .catch(function (err) { toast(err.message, 'error'); });
+  });
+
+  document.getElementById('campDomainWarn').addEventListener('click', function (e) {
+    if (!e.target.closest('[data-action="reviewDeliverability"]')) return;
+    closeModal('newCampaign');
+    showView('deliverability');
   });
 
   /* ---- Campaigns ---- */
@@ -3192,7 +4167,41 @@
   var campCopyVariants = [];
   var editCopyVariants = [];
   var testCopyVariantId = null;
-  var CAMP_ALT_IDS = ['B', 'C', 'D'];
+
+  /** Excel-style label: 1=A, 26=Z, 27=AA, 28=AB, … */
+  function variantLabel(n) {
+    var out = '';
+    var value = Math.max(1, Math.floor(n));
+    while (value > 0) {
+      var rem = (value - 1) % 26;
+      out = String.fromCharCode(65 + rem) + out;
+      value = Math.floor((value - 1) / 26);
+    }
+    return out;
+  }
+
+  /** A=1, Z=26, AA=27… so A/B/C/D and AA/AB sort the way an operator expects. */
+  function variantRank(id) {
+    var rank = 0;
+    var text = String(id || '').toUpperCase();
+    for (var i = 0; i < text.length; i += 1) {
+      var code = text.charCodeAt(i);
+      if (code < 65 || code > 90) continue;
+      rank = rank * 26 + (code - 64);
+    }
+    return rank;
+  }
+
+  /** Next unused alternate id. Variant A is the main subject/description fields, so start at B. */
+  function nextVariantId(used) {
+    var taken = {};
+    (used || []).forEach(function (v) { if (v && v.id) taken[String(v.id).toUpperCase()] = true; });
+    for (var n = 2; n < 20000; n += 1) {
+      var id = variantLabel(n);
+      if (!taken[id]) return id;
+    }
+    return null;
+  }
 
   function campStatusChip(status) {
     var tone = { draft: 'neutral', active: 'success', paused: 'warning', completed: 'neutral', scheduled: 'neutral', ended: 'neutral' };
@@ -3224,7 +4233,6 @@
     'cooling down': 'this account is resting',
     'outside send window': 'outside sending hours',
     'daily cap reached': 'already at the daily limit',
-    'hourly cap reached': 'already at the limit for this hour',
     'inter-batch delay': 'waiting for the pause between batches',
     'nothing queued': 'nothing waiting to send',
     'connection missing': 'that Google account is no longer linked'
@@ -3490,6 +4498,7 @@
     var conns = campConnections.length ? campConnections : (state.connections || []);
     if (!conns.length) {
       el.innerHTML = '<p class="muted">No Google accounts linked yet — link one first.</p>';
+      refreshCampDomainWarn();
       return;
     }
     el.innerHTML = conns.map(function (c) {
@@ -3499,6 +4508,7 @@
         '<input type="number" min="0" step="1" data-quota placeholder="max" title="Optional maximum from this account" aria-label="Maximum from this account" />' +
       '</div>';
     }).join('');
+    refreshCampDomainWarn();
   }
 
   function loadCampaignSegments() {
@@ -3560,6 +4570,7 @@
    */
   var campPlanSeq = 0;
   function refreshCampPlan() {
+    refreshCampDomainWarn();
     var el = document.getElementById('campPlan');
     if (!el) return;
 
@@ -3620,8 +4631,8 @@
       var perRound = Math.max(1, batchInfo.size * Math.max(1, batchInfo.accounts));
       var rounds = Math.max(1, Math.ceil(p.total / perRound));
       var lastStart = new Date(p.finishDate + 'T12:00:00').getTime() + (rounds - 1) * batchInfo.hours * 3600000;
-      html += '<br><span class="muted">Batched: one event per account per round, up to <strong>' + batchInfo.size +
-        '</strong> each, waiting ' + batchInfo.hours + ' h between rounds. About <strong>' + rounds + '</strong> round' +
+      html += '<br><span class="muted">Batched: one round per account, up to <strong>' + batchInfo.size +
+        '</strong> recipients each (one event per active variant), waiting ' + batchInfo.hours + ' h between rounds. About <strong>' + rounds + '</strong> round' +
         (rounds === 1 ? '' : 's') + '; the last one starts around ' + esc(prettyDate(lastStart)) +
         ' (subject to each account’s caps).</span>';
     }
@@ -3691,20 +4702,17 @@
   }
 
   function nextCampVariantId() {
-    for (var i = 0; i < CAMP_ALT_IDS.length; i++) {
-      var id = CAMP_ALT_IDS[i];
-      if (!campCopyVariants.some(function (v) { return v.id === id; })) return id;
-    }
-    return null;
+    return nextVariantId(campCopyVariants);
   }
 
   function renderCampVariants() {
     var box = document.getElementById('campVariantsList');
     var add = document.getElementById('campAddVariant');
+    var hint = document.getElementById('campVariantsHint');
     var on = document.getElementById('campVariantsOn').checked;
     box.hidden = !on;
     box.innerHTML = on ? campCopyVariants.slice().sort(function (a, b) {
-      return CAMP_ALT_IDS.indexOf(a.id) - CAMP_ALT_IDS.indexOf(b.id);
+      return variantRank(a.id) - variantRank(b.id);
     }).map(function (v) {
       return '<div class="camp-variant" data-variant-box="' + esc(v.id) + '">' +
         '<div class="field__label-row"><span class="field__label">Variant ' + esc(v.id) + ' subject</span>' +
@@ -3714,8 +4722,15 @@
         '</div>';
     }).join('') : '';
     var next = nextCampVariantId();
-    add.hidden = !on || !next;
-    add.textContent = next ? 'Add variant ' + next : 'All variants added';
+    add.hidden = !on;
+    add.textContent = next ? 'Add variant ' + next : 'Add another variant';
+    if (hint) {
+      var total = campCopyVariants.length + 1;
+      hint.hidden = !on || total < 8;
+      hint.textContent = on && total >= 8
+        ? total + ' copy variants — each active variant creates one calendar event per sending account.'
+        : '';
+    }
   }
 
   function syncCampVariantsFromInputs() {
@@ -3782,6 +4797,8 @@
 
     renderCampSenderRows();
     loadCampaignSegments();
+    if (!deliverabilityData) loadDeliverability();
+    else refreshCampDomainWarn();
 
     var tzHint = document.getElementById('campTzHint');
     if (tzHint) {
@@ -3877,7 +4894,7 @@
       var batchSize = Number(document.getElementById('campBatchSize').value);
       var batchHours = Number(document.getElementById('campBatchDelay').value);
       if (!Number.isFinite(batchSize) || batchSize < 1 || batchSize > 1000) {
-        toast('Recipients per event must be between 1 and 1000', 'error');
+        toast('Round size must be between 1 and 1000', 'error');
         return;
       }
       if (!Number.isFinite(batchHours) || batchHours < 0) {
@@ -3891,7 +4908,7 @@
     if (document.getElementById('campVariantsOn').checked) {
       syncCampVariantsFromInputs();
       if (!campCopyVariants.length) {
-        toast('Add at least one alternate variant, or turn A/B/C/D off', 'error');
+        toast('Add at least one alternate variant, or turn copy variants off', 'error');
         return;
       }
       for (var vi = 0; vi < campCopyVariants.length; vi++) {
@@ -4265,17 +5282,13 @@
   }
 
   function nextEditVariantId() {
-    for (var i = 0; i < CAMP_ALT_IDS.length; i++) {
-      var id = CAMP_ALT_IDS[i];
-      if (!editCopyVariants.some(function (v) { return v.id === id; })) return id;
-    }
-    return null;
+    return nextVariantId(editCopyVariants);
   }
 
   function renderEditCopyVariants() {
     var list = document.getElementById('editCopyVariantsList');
     list.innerHTML = editCopyVariants.slice().sort(function (a, b) {
-      return CAMP_ALT_IDS.indexOf(a.id) - CAMP_ALT_IDS.indexOf(b.id);
+      return variantRank(a.id) - variantRank(b.id);
     }).map(function (v) {
       return '<div class="camp-variant" data-edit-box="' + esc(v.id) + '">' +
         '<div class="field__label-row"><span class="field__label">Variant ' + esc(v.id) + ' subject</span>' +
@@ -4286,8 +5299,8 @@
     }).join('');
     var next = nextEditVariantId();
     var add = document.getElementById('editCopyAdd');
-    add.hidden = !next;
-    add.textContent = next ? 'Add variant ' + next : 'All variants added';
+    add.hidden = false;
+    add.textContent = next ? 'Add variant ' + next : 'Add another variant';
   }
 
   function syncEditCopyVariants() {
@@ -4421,7 +5434,7 @@
   $('#campSendNow').addEventListener('click', function () {
     if (!currentCampaignId) return;
     var id = currentCampaignId;
-    withBusy(this, api('/api/campaigns/' + id + '/send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ maxPerSender: 200 }) }))
+    withBusy(this, api('/api/campaigns/' + id + '/send', { method: 'POST' }))
       .then(function (r) {
         toast('Sent ' + r.sent + (r.failed ? '. ' + r.failed + " didn't go through" : ''), r.failed ? 'error' : 'success');
         openCampaignDetail(id);
@@ -4536,10 +5549,6 @@
     if (!route) return;
 
     var opts = { method: 'POST' };
-    if (action === 'campSend') {
-      opts.headers = { 'Content-Type': 'application/json' };
-      opts.body = JSON.stringify({ maxPerSender: 200 });
-    }
 
     withBusy(btn, api('/api/campaigns/' + id + '/' + route.path, opts))
       .then(function (r) {

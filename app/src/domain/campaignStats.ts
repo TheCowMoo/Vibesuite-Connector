@@ -1,4 +1,5 @@
 import { normalizeEmail } from './attendance';
+import { variantRank } from './campaignVariants';
 import type { RecipientRecord } from './campaign';
 
 export const RSVP_STATUSES = ['accepted', 'declined', 'tentative', 'needsAction'] as const;
@@ -193,16 +194,11 @@ export function buildCampaignStats(input: StatsInput): CampaignStats {
 
   finalizeFunnel(funnel);
 
-  const variantOrder = ['A', 'B', 'C', 'D'];
   const variants: VariantAttribution[] = Array.from(variantFunnels.entries()).map(([variantId, values]) => {
     finalizeFunnel(values);
     return { variant: variantId, ...values };
   });
-  variants.sort((a, b) => {
-    const ai = variantOrder.indexOf(a.variant);
-    const bi = variantOrder.indexOf(b.variant);
-    return (ai < 0 ? 99 : ai) - (bi < 0 ? 99 : bi) || a.variant.localeCompare(b.variant);
-  });
+  variants.sort((a, b) => variantRank(a.variant) - variantRank(b.variant) || a.variant.localeCompare(b.variant));
 
   return {
     funnel,

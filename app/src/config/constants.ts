@@ -46,6 +46,10 @@ export const REDIS_KEYS = {
   session: (id: string) => `session:${id}`,
   attendance: (sessionId: string) => `session:${sessionId}:attendance`,
   attendanceDispatched: (sessionId: string, fingerprint: string) => `session:${sessionId}:dispatch:seen:${fingerprint}`,
+  /** The workflow already applied to one person in one session (30-day marker). */
+  attendanceWorkflowChosen: (sessionId: string, identity: string) => `session:${sessionId}:workflow:${identity}`,
+  /** Short lock around one person's workflow application. */
+  attendanceWorkflowLock: (sessionId: string, identity: string) => `session:${sessionId}:workflow:lock:${identity}`,
   authUser: (id: string) => `auth:user:${id}`,
   authUsers: () => 'auth:users',
   authEmail: (emailLower: string) => `auth:email:${emailLower}`,
@@ -71,6 +75,12 @@ export const REDIS_KEYS = {
   campaignQueue: (id: string, connectionId: string) => `campaign:${id}:queue:${connectionId}`,
   campaignSender: (id: string, connectionId: string) => `campaign:${id}:sender:${connectionId}`,
   campaignDispatched: (id: string, email: string) => `campaign:${id}:dispatch:${email.toLowerCase()}`,
+  /** Cache of DNS-based domain reputation, one key per sending domain. */
+  domainHealth: (domain: string) => `domain:health:${domain}`,
+  domainHealthIndex: () => 'domain:health:index',
+  domainHealthLock: (domain: string) => `domain:health:lock:${domain}`,
+  /** The real address behind a `primary` or resource calendar (24-hour TTL). */
+  calendarEmail: (connectionId: string) => `conn:${connectionId}:calendarEmail`,
   advisorAnalysis: () => 'advisor:analysis',
   advisorApplyLog: () => 'advisor:applyLog',
 } as const;

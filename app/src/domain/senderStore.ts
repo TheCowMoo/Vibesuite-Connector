@@ -18,7 +18,6 @@ export function defaultSenderProfile(connectionId: string): SenderProfile {
     enabled: true,
     mode: 'flat',
     dailyCap: env.CAMPAIGN_DEFAULT_DAILY_CAP,
-    hourlyCap: env.CAMPAIGN_DEFAULT_HOURLY_CAP,
     minDelayMs: env.CAMPAIGN_DEFAULT_MIN_DELAY_MS,
     window: { ...DEFAULT_WINDOW },
   };

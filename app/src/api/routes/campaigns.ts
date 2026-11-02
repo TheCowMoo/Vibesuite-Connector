@@ -349,15 +349,12 @@ export async function campaignRoutes(app: FastifyInstance): Promise<void> {
     }
   });
 
-  /** Send one batch right now, respecting every mailbox cap/window/cooldown. */
+  /** Send one batch right now, respecting every mailbox daily cap/window/cooldown. */
   app.post('/api/campaigns/:id/send', guard, async (req, reply) => {
     const id = (req.params as { id: string }).id;
-    const body = (req.body || {}) as { maxPerSender?: number };
-    const requested = Number(body.maxPerSender ?? 200);
-    const maxPerSender = Math.min(1000, Math.max(1, Number.isFinite(requested) ? Math.floor(requested) : 200));
 
     try {
-      const res = await sendCampaignBatch(id, maxPerSender);
+      const res = await sendCampaignBatch(id);
       return { ok: true, ...res, campaign: await refreshed(id) };
     } catch (err) {
       reply.code(400).send({ error: (err as Error).message });

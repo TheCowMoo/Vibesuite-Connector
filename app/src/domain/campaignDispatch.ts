@@ -4,7 +4,9 @@ import { inc } from '../lib/metrics';
 import { createInviteEvent } from '../google/events';
 import { getConnection } from './connectionStore';
 import { getList } from './listStore';
-import { chunk, eventStartEpoch } from './invite';
+import { eventStartEpoch } from './invite';
+import { planEventGroups } from './inviteEventPlan';
+import { sleep, withRetry } from '../lib/backoff';
 import { buildAudience, describeEmptyAudience } from './audience';
 import { getInvitedEmails, markInvited } from './inviteStore';
 import { getSession } from './sessionStore';
@@ -100,7 +102,7 @@ export async function startCampaign(
   await clearRecipients(id);
   await clearCampaignVariantMap(id);
 
-  // Freeze the A/B/C/D split with the audience. The queue still carries plain emails; this map is
+  // Freeze the copy-variant split with the audience. The queue still carries plain emails; this map is
   // what lets a mailbox group its claimed slice by variant without an extra read per recipient.
   const variants = campaignVariants(camp);
   const variantByEmail = assignVariants(emails, variants);
@@ -164,8 +166,8 @@ export interface SendOptions {
 }
 
 /**
- * Send at most `maxCount` invites from one mailbox for one campaign, honouring that
- * mailbox's cap, ramp, hourly limit, send window and cooldown.
+ * Send at most the mailbox's daily blast for one campaign, honouring that
+ * mailbox's daily cap, ramp, send window and cooldown.
  */
 export async function sendFromSender(
   camp: Campaign,
@@ -190,8 +192,6 @@ export async function sendFromSender(
     now: Date.now(),
     capToday: gauge.capToday,
     sentToday: gauge.sentToday,
-    hourlyCap: profile.hourlyCap,
-    sentThisHour: gauge.sentThisHour,
   });
   if (!readiness.ready) {
     return { connectionId: ps.connectionId, sent: 0, failed: 0, remaining: queued, skipped: true, reason: readiness.reason };
@@ -241,24 +241,26 @@ export async function sendFromSender(
       const group = grouped.get(variant.id) ?? [];
       if (!group.length) continue;
 
-      const parts = camp.eventBatchSize && camp.eventBatchSize > 0
-        ? [group]
-        : chunk(group, env.INVITE_BATCH_SIZE);
+      const parts = planEventGroups(group, { maxAttendees: env.MAX_EVENT_ATTENDEES });
 
       for (let i = 0; i < parts.length; i += 1) {
         const part = parts[i];
         if (!part.length) continue;
         const summary = parts.length > 1 ? `${variant.summary} (${i + 1}/${parts.length})` : variant.summary;
         try {
-          const res = await createInviteEvent(conn, {
-            summary,
-            description: variant.description ?? camp.event.description,
-            location: joinUrl || camp.event.location,
-            start: camp.event.start,
-            end: camp.event.end,
-            timeZone: camp.event.timeZone,
-            emails: part,
-          });
+          const res = await withRetry(
+            () =>
+              createInviteEvent(conn, {
+                summary,
+                description: variant.description ?? camp.event.description,
+                location: joinUrl || camp.event.location,
+                start: camp.event.start,
+                end: camp.event.end,
+                timeZone: camp.event.timeZone,
+                emails: part,
+              }),
+            { retries: 3 },
+          );
 
           sent += part.length;
           for (const email of part) {
@@ -299,7 +301,10 @@ export async function sendFromSender(
           inc('campaign_invites_failed_total');
           logger.error({ campaignId, connectionId: ps.connectionId, variant: variant.id, err: msg }, 'campaign invite batch failed');
         }
+        if (i < parts.length - 1) await sleep(env.INVITE_DELAY_MS);
       }
+      // Unlimited variants can mean many events in one pass; a small gap keeps Google happy.
+      if (variants.indexOf(variant) < variants.length - 1) await sleep(env.INVITE_DELAY_MS);
     }
 
     // Sender health: cooldown on repeated failures, clear on success.
@@ -433,7 +438,7 @@ export async function redistributeStranded(camp: Campaign): Promise<number> {
  * action. The scheduler calls `sendFromSender` directly so it can arbitrate between
  * campaigns that share a mailbox.
  */
-export async function sendCampaignBatch(campaignId: string, maxPerSender = 200): Promise<BatchResult> {
+export async function sendCampaignBatch(campaignId: string): Promise<BatchResult> {
   const camp = await getCampaign(campaignId);
   if (!camp) throw new Error('campaign not found');
   if (camp.status !== 'active') throw new Error('campaign is not active');
@@ -456,7 +461,9 @@ export async function sendCampaignBatch(campaignId: string, maxPerSender = 200):
   const perSender: SenderBatchResult[] = [];
   let sent = 0;
   let failed = 0;
-  const limit = camp.eventBatchSize ? Math.max(maxPerSender, camp.eventBatchSize) : maxPerSender;
+  // `sendFromSender` caps this at the account's daily headroom; a batched campaign also caps it at
+  // `eventBatchSize`. Passing a huge number here means "use the allowance", not "send everything".
+  const limit = Number.MAX_SAFE_INTEGER;
 
   for (const ps of camp.senders) {
     if (!ps.enabled) continue;

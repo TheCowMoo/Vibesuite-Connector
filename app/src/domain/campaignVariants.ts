@@ -1,9 +1,21 @@
-import { COPY_VARIANT_IDS, type Campaign, type CopyVariant, type CopyVariantId } from './campaign';
+import type { Campaign, CopyVariant, CopyVariantId } from './campaign';
 
-const VARIANT_ORDER = new Map<string, number>(COPY_VARIANT_IDS.map((id, index) => [id, index]));
+/**
+ * Excel-style rank for a variant id: A=1, Z=26, AA=27, AB=28, … Unknown ids sort first.
+ * Shared by the dispatcher, the stats table and `campaignVariants()` so order is identical.
+ */
+export function variantRank(id: string): number {
+  let rank = 0;
+  for (const ch of String(id).toUpperCase()) {
+    const code = ch.charCodeAt(0);
+    if (code < 65 || code > 90) continue;
+    rank = rank * 26 + (code - 64);
+  }
+  return rank;
+}
 
 function byVariantOrder(a: CopyVariant, b: CopyVariant): number {
-  return (VARIANT_ORDER.get(a.id) ?? 99) - (VARIANT_ORDER.get(b.id) ?? 99);
+  return variantRank(a.id) - variantRank(b.id);
 }
 
 /**
@@ -17,7 +29,7 @@ export function campaignVariants(camp: Pick<Campaign, 'copyVariants' | 'event'>)
   return [{ id: 'A', summary: camp.event.summary, description: camp.event.description }];
 }
 
-/** A/B/C/D in calendar order, regardless of the order the operator added them. */
+/** Variants in calendar order (A, B, …, Z, AA, …), regardless of the order the operator added them. */
 export function primaryVariant(camp: Pick<Campaign, 'copyVariants' | 'event'>): CopyVariant {
   return campaignVariants(camp)[0];
 }

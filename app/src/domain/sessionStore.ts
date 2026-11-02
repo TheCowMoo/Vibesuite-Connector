@@ -5,6 +5,45 @@ import type { SessionType, SyncDiagnostics, VideoProvider } from '../video/types
 
 export type SessionStatus = 'pending' | 'synced' | 'failed';
 
+export type WorkflowAssignmentSource = 'rule' | 'ai' | 'manual';
+export type WorkflowAssignmentStatus = 'applied' | 'skipped' | 'failed';
+
+/** One real attempt to put a contact into a GHL workflow. */
+export interface WorkflowAssignmentRecord {
+  email?: string;
+  name?: string;
+  workflowId: string;
+  workflowName?: string;
+  source: WorkflowAssignmentSource;
+  ruleId?: string;
+  confidence?: number;
+  reason?: string;
+  status: WorkflowAssignmentStatus;
+  error?: string;
+  at: number;
+}
+
+/** A proposal shown before the operator applies it. */
+export interface WorkflowPreviewAssignment {
+  email?: string;
+  name?: string;
+  workflowId: string | null;
+  workflowName?: string;
+  source: 'rule' | 'ai';
+  ruleId?: string;
+  confidence?: number;
+  reason?: string;
+  eligible: boolean;
+}
+
+export interface WorkflowPreview {
+  generatedAt: number;
+  behaviorHash: string;
+  assignments: WorkflowPreviewAssignment[];
+  rejected?: string[];
+  error?: string;
+}
+
 export interface SessionRecord {
   id: string;
   provider: VideoProvider;
@@ -31,6 +70,13 @@ export interface SessionRecord {
   rosterSentAt?: number;
   /** Why the last roster delivery failed — surfaced so it is not a silent loss. */
   rosterError?: string;
+  /** Every workflow assignment attempt, newest first, for the session detail. */
+  workflowAssignments?: WorkflowAssignmentRecord[];
+  /** Last AI/deterministic proposal set, kept so the operator can review it. */
+  workflowPreview?: WorkflowPreview;
+  workflowAssignedAt?: number;
+  /** Content hash of the last automatic AI routing run; an unchanged report is not re-sent. */
+  workflowAiHash?: string;
   samplePayload?: unknown;
   createdAt: number;
 }

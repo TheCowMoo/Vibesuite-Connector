@@ -1,5 +1,6 @@
 import type { AttendancePerson, AttendanceReport } from './attendance';
 import type { AttendanceTags } from './connection';
+import type { ZoomBehavior } from './zoomBehavior';
 
 export const ATTENDANCE_SEGMENTS = ['attended', 'partial', 'no_show', 'not_invited'] as const;
 export type AttendanceSegment = (typeof ATTENDANCE_SEGMENTS)[number];
@@ -18,6 +19,8 @@ export interface SegmentPerson {
   userId?: string;
   participantId?: string;
   customerKey?: string;
+  /** Poll/Q&A/registration answers and participation stats from the video provider. */
+  behavior?: ZoomBehavior;
 }
 
 export interface AttendanceSegmentCounts {
@@ -54,6 +57,7 @@ function toSegmentPerson(p: AttendancePerson): SegmentPerson {
     userId: p.userId,
     participantId: p.participantId,
     customerKey: p.customerKey,
+    behavior: p.behavior,
   };
 }
 

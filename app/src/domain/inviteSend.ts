@@ -1,5 +1,5 @@
 import { createInviteEvent } from '../google/events';
-import { chunk } from './invite';
+import { planEventGroups } from './inviteEventPlan';
 import { markInvited, type InviteBatch, type InviteSenderSummary } from './inviteStore';
 import { bumpSenderDay, bumpSenderHour, isoHour } from './senderStore';
 import { isoDate } from './senderLoad';
@@ -25,8 +25,9 @@ export interface InviteRoundInput {
   allocation: Record<string, string[]>;
   accounts: AccountCapacity[];
   /**
-   * When greater than zero, each account gets exactly one event with at most this many recipients.
-   * Zero/undefined keeps the legacy behaviour: chunk by `INVITE_BATCH_SIZE` with numbered suffixes.
+   * The explicit scheduled-round size. The route already caps each account's allowance at this,
+   * so the slice is normally already small enough; `planEventGroups()` still applies the provider
+   * ceiling as a safety valve.
    */
   batchSize?: number;
   now: Date;
@@ -52,9 +53,9 @@ function describeError(err: unknown): string {
 /**
  * Send one round of invitations and mark the successful recipients as invited.
  *
- * Legacy mode (no `batchSize`) is the original per-account chunking, including the `(1/3)` suffix
- * when one account's slice needs splitting. Batched mode creates one event per account, capped at
- * `batchSize`, so a round means "one event per account" — the whole point of the scheduled batches.
+ * Each account gets one event with every recipient it can send this pass. `batchSize` is the
+ * explicit scheduled-round size; without it, the account's whole slice goes on one event. The only
+ * split is Google's guest-list ceiling, which `planEventGroups` applies as a safety valve.
  */
 export async function sendInviteRound(input: InviteRoundInput): Promise<InviteRoundResult> {
   const { allocation, accounts, event: ev, batchSize } = input;
@@ -85,9 +86,12 @@ export async function sendInviteRound(input: InviteRoundInput): Promise<InviteRo
       continue;
     }
 
-    // Batched: exactly one event per account. Legacy: chunk per mailbox so the normal case
-    // (one chunk per account) never shows a numbered suffix to a guest.
-    const groups = batchSize && batchSize > 0 ? [slice.slice(0, batchSize)] : chunk(slice, env.INVITE_BATCH_SIZE);
+    // One event per account. `planEventGroups` only splits at Google's hard guest-list ceiling;
+    // `batchSize` is the explicit scheduled round and caps the slice, it is not a default split.
+    const groups = planEventGroups(slice, {
+      batchSize,
+      maxAttendees: env.MAX_EVENT_ATTENDEES,
+    });
 
     for (let i = 0; i < groups.length; i++) {
       const part = groups[i];
@@ -112,7 +116,7 @@ export async function sendInviteRound(input: InviteRoundInput): Promise<InviteRo
         failedEmails.push(...part);
         row.failed += part.length;
         await bumpSenderDay(conn.id, isoDate(input.now), 'failed', part.length);
-        logger.error({ connectionId: conn.id, listId: input.listId, chunk: i + 1, err: msg }, 'invite chunk failed');
+        logger.error({ connectionId: conn.id, listId: input.listId, chunk: i + 1, err: msg }, 'invite event failed');
       }
       if (i < groups.length - 1) await sleep(env.INVITE_DELAY_MS);
     }
