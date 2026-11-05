@@ -4598,8 +4598,49 @@
     return '<span class="chip chip--' + (tone[status] || 'neutral') + '">' + esc(words[status] || status) + '</span>';
   }
 
-  function spreadLabel(mode) {
-    return mode === 'weighted' ? 'using your shares' : 'split evenly';
+  /**
+   * The campaign split as whole percentages that add up to 100.
+   *
+   * `share` is a relative weight, so old campaigns stored as 1 / 2 / 1 still describe
+   * 25 / 50 / 25. Kept in step with `sharePercents()` on the server.
+   */
+  function campSharePercents(senders) {
+    var active = (senders || []).filter(function (s) { return s && s.enabled; });
+    var out = {};
+    if (!active.length) return out;
+    var weights = active.map(function (s) {
+      var n = Number(s.share);
+      return Number.isFinite(n) ? Math.max(0, n) : 1;
+    });
+    if (!weights.some(function (w) { return w > 0; })) {
+      weights = active.map(function () { return 1; });
+    }
+    var sum = weights.reduce(function (a, w) { return a + w; }, 0);
+    var raw = weights.map(function (w) { return (w / sum) * 100; });
+    var whole = raw.map(function (v) { return Math.floor(v); });
+    var left = 100 - whole.reduce(function (a, n) { return a + n; }, 0);
+    var order = raw.map(function (v, i) { return { i: i, frac: v - Math.floor(v) }; })
+      .filter(function (item) { return weights[item.i] > 0; })
+      .sort(function (a, b) { return b.frac - a.frac || a.i - b.i; });
+    for (var k = 0; left > 0 && order.length; k++) {
+      whole[order[k % order.length].i] += 1;
+      left -= 1;
+    }
+    active.forEach(function (s, i) { out[s.connectionId] = whole[i]; });
+    return out;
+  }
+
+  function splitLabel(senders) {
+    var active = (senders || []).filter(function (s) { return s && s.enabled; });
+    if (!active.length) return 'no sending accounts';
+    if (active.length === 1) return 'one account';
+    var percents = campSharePercents(senders);
+    var values = active.map(function (s) { return percents[s.connectionId] || 0; });
+    // A three-way equal split rounds to 34 / 33 / 33; one point of spread is still even.
+    if (Math.min.apply(null, values) > 0 && Math.max.apply(null, values) - Math.min.apply(null, values) <= 1) {
+      return 'split evenly';
+    }
+    return values.length <= 3 ? 'custom split ' + values.join(' / ') : 'custom split';
   }
 
   var MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -4747,7 +4788,7 @@
       box.innerHTML =
         '<div class="conn__main">' +
           '<div class="conn__head"><span class="conn__name">' + esc(c.name) + '</span>' + campStatusChip(c.status) +
-            '<span class="chip chip--neutral">' + esc(spreadLabel(c.distribution.mode)) + '</span>' +
+            '<span class="chip chip--neutral">' + esc(splitLabel(c.senders)) + '</span>' +
             (c.zoomUserId ? '<span class="chip chip--neutral">Zoom: ' + esc(zoomAccountLabel(c.zoomUserId)) + '</span>' : '') +
             (c.sendByAt ? '<span class="chip chip--neutral">Stop by ' + esc(prettyDate(c.sendByAt)) + '</span>' : '') +
             (c.nextBatchAt ? '<span class="chip chip--neutral">Next round ' + esc(prettyDate(c.nextBatchAt)) + '</span>' : '') +
@@ -4882,22 +4923,219 @@
   });
 
 
+  function campSenderRows() {
+    var box = document.getElementById('campSenders');
+    return box ? $$('.camp-sender', box) : [];
+  }
+
+  function checkedCampSenderRows() {
+    return campSenderRows().filter(function (row) {
+      var pick = row.querySelector('[data-pick]');
+      return !!(pick && pick.checked);
+    });
+  }
+
+  function campSenderPercent(row) {
+    var input = row.querySelector('[data-percent]');
+    var n = input ? Number(input.value) : 0;
+    if (!Number.isFinite(n)) return 0;
+    return Math.max(0, Math.min(100, Math.round(n)));
+  }
+
+  function setCampSenderPercent(row, n) {
+    var input = row.querySelector('[data-percent]');
+    if (input) input.value = String(Math.max(0, Math.min(100, Math.round(n))));
+  }
+
+  /** Split `total` whole units across weights, deterministic by largest remainder. */
+  function campApportion(total, weights) {
+    var positive = weights.map(function (w) { return Math.max(0, Number(w) || 0); });
+    if (!positive.some(function (w) { return w > 0; })) {
+      positive = positive.map(function () { return 1; });
+    }
+    var sum = positive.reduce(function (a, w) { return a + w; }, 0);
+    if (!sum || total <= 0) return positive.map(function () { return 0; });
+    var raw = positive.map(function (w) { return (w / sum) * total; });
+    var out = raw.map(function (v) { return Math.floor(v); });
+    var used = out.reduce(function (a, n) { return a + n; }, 0);
+    var order = raw.map(function (v, i) { return { i: i, frac: v - Math.floor(v) }; })
+      .filter(function (item) { return positive[item.i] > 0; })
+      .sort(function (a, b) { return b.frac - a.frac || a.i - b.i; });
+    for (var k = 0; used < total && order.length; k++) {
+      out[order[k % order.length].i] += 1;
+      used += 1;
+    }
+    return out;
+  }
+
   function renderCampSenderRows() {
     var el = document.getElementById('campSenders');
     var conns = campConnections.length ? campConnections : (state.connections || []);
     if (!conns.length) {
       el.innerHTML = '<p class="muted">No Google accounts linked yet — link one first.</p>';
+      syncCampSplitEvenButton();
       refreshCampDomainWarn();
       return;
     }
     el.innerHTML = conns.map(function (c) {
       return '<div class="camp-sender" data-conn="' + esc(c.id) + '">' +
-        '<label class="daychk"><input type="checkbox" data-pick checked /><span>' + esc(c.name) + '</span></label>' +
-        '<input type="number" min="0" step="1" value="1" data-share placeholder="share" title="Share weight (used when spread is weighted)" aria-label="Share weight" />' +
-        '<input type="number" min="0" step="1" data-quota placeholder="max" title="Optional maximum from this account" aria-label="Maximum from this account" />' +
+        '<label class="daychk"><input type="checkbox" data-pick checked />' +
+          '<span title="' + esc(c.googleCalendarId || '') + '">' + esc(c.name) + '</span></label>' +
+        '<span class="camp-sender__pct">' +
+          '<input type="number" min="0" max="100" step="1" value="0" data-percent ' +
+            'aria-label="Share of the audience for ' + esc(c.name) + '" /><span>%</span></span>' +
+        '<span class="camp-sender__people" data-people>— people</span>' +
+        '<span class="camp-sender__max">' +
+          '<input type="number" min="0" step="1" data-quota placeholder="Max" ' +
+            'title="Maximum people from this account (optional)" ' +
+            'aria-label="Maximum people from ' + esc(c.name) + '" /></span>' +
       '</div>';
     }).join('');
+    campSenderRows().forEach(syncCampSenderRow);
+    applyCampShareEvenly(checkedCampSenderRows());
+    syncCampSplitEvenButton();
+    applyCampSenderAllocation(null);
     refreshCampDomainWarn();
+  }
+
+  /** Give every checked row at least 1% and keep their existing ratios. */
+  function applyCampShareLayout(rows) {
+    if (!rows.length) return;
+    if (rows.length === 1) {
+      setCampSenderPercent(rows[0], 100);
+      return;
+    }
+    var base = 1;
+    var extraTotal = Math.max(0, 100 - base * rows.length);
+    var weights = rows.map(function (row) {
+      var value = campSenderPercent(row);
+      return value > 0 ? value : 1;
+    });
+    var extras = campApportion(extraTotal, weights);
+    rows.forEach(function (row, i) {
+      setCampSenderPercent(row, base + extras[i]);
+    });
+  }
+
+  /** Reset to an equal split, ignoring the current percentages. */
+  function applyCampShareEvenly(rows) {
+    if (!rows.length) return;
+    if (rows.length === 1) {
+      setCampSenderPercent(rows[0], 100);
+      return;
+    }
+    var base = 1;
+    var extraTotal = Math.max(0, 100 - base * rows.length);
+    var extras = campApportion(extraTotal, rows.map(function () { return 1; }));
+    rows.forEach(function (row, i) {
+      setCampSenderPercent(row, base + extras[i]);
+    });
+  }
+
+  function syncCampSenderRow(row) {
+    var pick = row.querySelector('[data-pick]');
+    var percent = row.querySelector('[data-percent]');
+    var quota = row.querySelector('[data-quota]');
+    var people = row.querySelector('[data-people]');
+    var on = !!(pick && pick.checked);
+    row.classList.toggle('is-off', !on);
+    if (percent) percent.disabled = !on;
+    if (quota) quota.disabled = !on;
+    if (people && !on) {
+      people.textContent = 'not sending';
+      people.title = '';
+    }
+  }
+
+  function syncCampSplitEvenButton() {
+    var btn = document.getElementById('campSplitEven');
+    if (btn) btn.disabled = checkedCampSenderRows().length < 2;
+  }
+
+  /** Show the same per-account allocation the backend will freeze. */
+  function applyCampSenderAllocation(plan) {
+    var allocation = (plan && plan.allocation) || {};
+    var hasPlan = !!(plan && plan.total);
+    campSenderRows().forEach(function (row) {
+      var people = row.querySelector('[data-people]');
+      if (!people) return;
+      var pick = row.querySelector('[data-pick]');
+      if (!pick || !pick.checked) {
+        people.textContent = 'not sending';
+        people.title = '';
+        return;
+      }
+      if (!hasPlan) {
+        people.textContent = '— people';
+        people.title = '';
+        return;
+      }
+      var n = allocation[row.dataset.conn];
+      if (n === undefined || n === null) {
+        people.textContent = '— people';
+        people.title = '';
+        return;
+      }
+      var pct = campSenderPercent(row);
+      var expected = Math.round((plan.total * pct) / 100);
+      var quota = Number(row.querySelector('[data-quota]').value);
+      var capped = Number.isFinite(quota) && quota > 0 && expected > n;
+      people.textContent = n + (n === 1 ? ' person' : ' people') + (capped ? ' (max)' : '');
+      people.title = capped
+        ? 'Capped at ' + n + '; the rest goes to the other checked accounts.'
+        : 'People assigned to this account.';
+    });
+  }
+
+  function onCampSenderToggle(row) {
+    var pick = row.querySelector('[data-pick]');
+    syncCampSenderRow(row);
+    if (pick && pick.checked) {
+      var people = row.querySelector('[data-people]');
+      if (people) people.textContent = '— people';
+      if (campSenderPercent(row) <= 0) {
+        var others = checkedCampSenderRows().filter(function (r) { return r !== row; });
+        var average = others.length
+          ? Math.round(others.reduce(function (a, r) { return a + campSenderPercent(r); }, 0) / others.length)
+          : 100;
+        setCampSenderPercent(row, Math.max(1, average));
+      }
+    }
+    applyCampShareLayout(checkedCampSenderRows());
+    syncCampSplitEvenButton();
+    applyCampSenderAllocation(null);
+  }
+
+  function onCampSenderPercentChange(input) {
+    var row = input.closest('.camp-sender');
+    if (!row) return;
+    var raw = Number(input.value);
+    if (!Number.isFinite(raw) || raw <= 0) {
+      var pick = row.querySelector('[data-pick]');
+      if (pick) pick.checked = false;
+      input.value = '0';
+      syncCampSenderRow(row);
+      applyCampShareLayout(checkedCampSenderRows());
+      syncCampSplitEvenButton();
+      applyCampSenderAllocation(null);
+      return;
+    }
+    var rows = checkedCampSenderRows();
+    var others = rows.filter(function (r) { return r !== row; });
+    if (!others.length) {
+      input.value = '100';
+      applyCampSenderAllocation(null);
+      return;
+    }
+    var maxValue = 100 - others.length;
+    var value = Math.max(1, Math.min(maxValue, Math.round(raw)));
+    input.value = String(value);
+    var rest = 100 - value;
+    var extras = campApportion(rest - others.length, others.map(campSenderPercent));
+    others.forEach(function (other, i) {
+      setCampSenderPercent(other, 1 + extras[i]);
+    });
+    applyCampSenderAllocation(null);
   }
 
   function loadCampaignSegments() {
@@ -4964,9 +5202,11 @@
     if (!el) return;
 
     var listId = document.getElementById('campList').value;
-    var connectionIds = selectedCampSenderIds();
+    var senderRows = checkedCampSenderRows();
+    var connectionIds = senderRows.map(function (row) { return row.dataset.conn; });
     if (!listId || !connectionIds.length) {
       el.innerHTML = '<span class="muted">Pick a contact list and at least one sending account to see the pace.</span>';
+      applyCampSenderAllocation(null);
       return;
     }
 
@@ -4974,10 +5214,18 @@
     var startMode = document.getElementById('campStartMode').value;
     var stopRaw = document.getElementById('campStopBy').value;
 
+    var senders = senderRows.map(function (row) {
+      var entry = { connectionId: row.dataset.conn, enabled: true, share: campSenderPercent(row) };
+      var quota = Number(row.querySelector('[data-quota]').value);
+      if (Number.isFinite(quota) && quota > 0) entry.quota = Math.floor(quota);
+      return entry;
+    });
+
     var body = {
       listId: listId,
       segments: selectedCampaignSegments(),
       connectionIds: connectionIds,
+      senders: senders,
       startDate: campDay(startMode === 'later' && startRaw ? new Date(startRaw) : new Date()),
       includeAlreadyInvited: document.getElementById('campIncludeInvited').checked
     };
@@ -4995,10 +5243,12 @@
     api('/api/campaigns/plan-preview', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
       .then(function (p) {
         if (seq !== campPlanSeq || !el) return;
+        applyCampSenderAllocation(p);
         el.innerHTML = campPlanHtml(p, batchInfo);
       })
       .catch(function (e) {
         if (seq !== campPlanSeq || !el) return;
+        applyCampSenderAllocation(null);
         el.innerHTML = '<span class="muted">Could not estimate the pace: ' + esc(e.message) + '</span>';
       });
   }
@@ -5009,12 +5259,19 @@
     }
 
     var html = pill('people', p.total, 'ok');
+    var unassignedNote = '';
+    if (Number(p.unassigned) > 0) {
+      unassignedNote = '<br><span style="color:var(--warning)">Your Max limits leave <strong>' + p.unassigned +
+        '</strong> ' + (p.unassigned === 1 ? 'person' : 'people') +
+        ' unassigned. Raise a Max or add another account.</span>';
+    }
     if (!p.totalDays) {
-      return html + ' <span class="muted">Nothing can send at the moment — check the <strong>Sending accounts</strong> tab.</span>';
+      return html + ' <span class="muted">Nothing can send at the moment — check the <strong>Sending accounts</strong> tab.</span>' + unassignedNote;
     }
 
     html += ' <span class="muted">About <strong>' + p.totalDays + '</strong> ' + (p.totalDays === 1 ? 'day' : 'days') +
       ' at roughly ' + p.dailyCapacity + ' a day — done by ' + esc(prettyDate(p.finishDate)) + '.</span>';
+    html += unassignedNote;
 
     if (batchInfo) {
       var perRound = Math.max(1, batchInfo.size * Math.max(1, batchInfo.accounts));
@@ -5185,7 +5442,6 @@
     document.getElementById('campName').value = '';
     document.getElementById('campSummary').value = '';
     document.getElementById('campDesc').value = '';
-    document.getElementById('campMode').value = 'even';
     document.getElementById('campTz').value = (Intl.DateTimeFormat().resolvedOptions().timeZone) || 'UTC';
 
     var start = new Date(Date.now() + 86400000);
@@ -5233,17 +5489,30 @@
     if (!start || !end) { toast('Add a start and end time', 'error'); return; }
 
     var senders = [];
-    $$('.camp-sender', document.getElementById('campSenders')).forEach(function (row) {
-      var pick = row.querySelector('[data-pick]');
-      if (!pick || !pick.checked) return;
-      var s = { connectionId: row.dataset.conn, enabled: true, priority: 5 };
-      var share = Number(row.querySelector('[data-share]').value);
+    var shareTotal = 0;
+    var shareValues = [];
+    var badSender = false;
+    checkedCampSenderRows().forEach(function (row) {
+      var share = campSenderPercent(row);
+      if (share < 1) { badSender = true; return; }
+      var s = { connectionId: row.dataset.conn, enabled: true, priority: 5, share: share };
       var quota = Number(row.querySelector('[data-quota]').value);
-      if (Number.isFinite(share) && share > 0) s.share = share;
       if (Number.isFinite(quota) && quota > 0) s.quota = Math.floor(quota);
       senders.push(s);
+      shareTotal += share;
+      shareValues.push(share);
     });
+    if (badSender) {
+      toast('Give each checked account at least 1%, or uncheck it', 'error');
+      return;
+    }
     if (!senders.length) { toast('Pick at least one sending account', 'error'); return; }
+    if (shareTotal !== 100) {
+      toast('The account split must add up to 100% — use Split evenly to reset it', 'error');
+      return;
+    }
+    var evenSplit = Math.min.apply(null, shareValues) > 0 &&
+      Math.max.apply(null, shareValues) - Math.min.apply(null, shareValues) <= 1;
 
     var segments = $$('[data-seg]', document.getElementById('campSegments'))
       .filter(function (c) { return c.checked; })
@@ -5292,7 +5561,7 @@
         timeZone: document.getElementById('campTz').value.trim() || 'UTC'
       },
       senders: senders,
-      distribution: { mode: document.getElementById('campMode').value },
+      distribution: { mode: evenSplit ? 'even' : 'weighted' },
       includeAlreadyInvited: document.getElementById('campIncludeInvited').checked,
       sendByAt: sendByAt
     };
@@ -5605,14 +5874,16 @@
 
     var planText = campaignPlanText(c, plan);
 
+    var percents = campSharePercents(c.senders);
     var rows = (c.perSender || []).map(function (p) {
-      return '<tr><td>' + esc(connName(p.connectionId)) + '</td><td>' + p.sent + '</td><td>' + p.queued +
+      var share = p.enabled && percents[p.connectionId] !== undefined ? percents[p.connectionId] + '%' : '—';
+      return '<tr><td>' + esc(connName(p.connectionId)) + '</td><td>' + share + '</td><td>' + p.sent + '</td><td>' + p.queued +
         '</td><td>' + p.failed + '</td><td>' + (p.enabled ? 'yes' : 'no') + '</td></tr>';
     }).join('');
 
     document.getElementById('campaignDetailBody').innerHTML =
       '<div class="conn__head">' + campStatusChip(c.status) +
-        '<span class="chip chip--neutral">' + esc(spreadLabel(c.distribution.mode)) + '</span>' +
+        '<span class="chip chip--neutral">' + esc(splitLabel(c.senders)) + '</span>' +
         '<span class="chip chip--neutral">' + esc(campListName(c.listId)) + '</span>' +
         (c.includeAlreadyInvited ? '<span class="chip chip--warning">includes repeat invitations</span>' : '') +
         (c.status === 'scheduled' && c.scheduledStartAt ? '<span class="chip chip--neutral">Starts ' + esc(prettyDate(c.scheduledStartAt)) + '</span>' : '') +
@@ -5628,8 +5899,8 @@
       campaignVariantsHtml(c) +
       (c.lastError ? '<p class="muted" style="color:var(--danger)">' + esc(c.lastError) + '</p>' : '') +
       '<h3 class="detail__sub">Progress by account</h3>' +
-      '<table class="map"><thead><tr><th>Account</th><th>Sent</th><th>Waiting</th><th>Couldn\'t send</th><th>On</th></tr></thead><tbody>' +
-        (rows || '<tr><td colspan="5" class="muted">Nothing sent yet.</td></tr>') + '</tbody></table>' +
+      '<table class="map"><thead><tr><th>Account</th><th>Share</th><th>Sent</th><th>Waiting</th><th>Couldn\'t send</th><th>On</th></tr></thead><tbody>' +
+        (rows || '<tr><td colspan="6" class="muted">Nothing sent yet.</td></tr>') + '</tbody></table>' +
       campaignStatsHtml(stats);
   }
 
@@ -5879,7 +6150,23 @@
     if (field) field.addEventListener('change', refreshCampPlan);
   });
   var campSenderBox = document.getElementById('campSenders');
-  if (campSenderBox) campSenderBox.addEventListener('change', refreshCampPlan);
+  if (campSenderBox) {
+    campSenderBox.addEventListener('change', function (e) {
+      var row = e.target.closest ? e.target.closest('.camp-sender') : null;
+      if (row && e.target.matches('[data-pick]')) onCampSenderToggle(row);
+      else if (row && e.target.matches('[data-percent]')) onCampSenderPercentChange(e.target);
+      refreshCampPlan();
+    });
+  }
+  var campSplitEven = document.getElementById('campSplitEven');
+  if (campSplitEven) {
+    campSplitEven.addEventListener('click', function () {
+      applyCampShareEvenly(checkedCampSenderRows());
+      syncCampSplitEvenButton();
+      applyCampSenderAllocation(null);
+      refreshCampPlan();
+    });
+  }
 
   $('#campSendNow').addEventListener('click', function () {
     if (!currentCampaignId) return;

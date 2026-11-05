@@ -3,8 +3,10 @@ import {
   addDays,
   allocateEmails,
   computeAllocation,
+  distributionMode,
   invitedByDeadline,
   planSchedule,
+  sharePercents,
   type CampaignSender,
   type PlannerDay,
 } from '../../src/domain/campaign';
@@ -38,6 +40,28 @@ describe('computeAllocation', () => {
     expect(computeAllocation(4, [sender('a', { share: 3 }), sender('b', { share: 1 })])).toEqual({ a: 3, b: 1 });
   });
 
+  it('treats percentages as the same relative weights', () => {
+    expect(computeAllocation(10, [sender('a', { share: 60 }), sender('b', { share: 40 })])).toEqual({ a: 6, b: 4 });
+    expect(computeAllocation(100, [sender('a', { share: 33 }), sender('b', { share: 33 }), sender('c', { share: 34 })])).toEqual({
+      a: 33,
+      b: 33,
+      c: 34,
+    });
+  });
+
+  it('gives a zero-share account nothing, including overflow', () => {
+    expect(computeAllocation(10, [sender('a', { share: 100 }), sender('b', { share: 0 })])).toEqual({ a: 10, b: 0 });
+    // b is capped, so the leftover cannot go to the 0% account.
+    expect(computeAllocation(10, [sender('a', { share: 100, quota: 2 }), sender('b', { share: 0 })])).toEqual({
+      a: 2,
+      b: 0,
+    });
+  });
+
+  it('falls back to an even split when every stored share is zero', () => {
+    expect(computeAllocation(10, [sender('a', { share: 0 }), sender('b', { share: 0 })])).toEqual({ a: 5, b: 5 });
+  });
+
   it('returns nothing when there is nothing to send', () => {
     expect(computeAllocation(0, [sender('a')])).toEqual({});
     expect(computeAllocation(10, [sender('a', { enabled: false })])).toEqual({});
@@ -46,6 +70,39 @@ describe('computeAllocation', () => {
   it('never allocates more than the total when every quota is tiny', () => {
     const alloc = computeAllocation(100, [sender('a', { quota: 1 }), sender('b', { quota: 1 })]);
     expect(alloc.a + alloc.b).toBe(2);
+  });
+});
+
+describe('sharePercents', () => {
+  it('normalises legacy weights and percentages to 100', () => {
+    expect(sharePercents([sender('a', { share: 3 }), sender('b', { share: 1 })])).toEqual({ a: 75, b: 25 });
+    expect(sharePercents([sender('a', { share: 60 }), sender('b', { share: 40 })])).toEqual({ a: 60, b: 40 });
+  });
+
+  it('makes equal thirds add up to exactly 100', () => {
+    const out = sharePercents([sender('a'), sender('b'), sender('c')]);
+    expect(out).toEqual({ a: 34, b: 33, c: 33 });
+    expect(out.a + out.b + out.c).toBe(100);
+  });
+
+  it('keeps zeros and excludes disabled accounts', () => {
+    expect(sharePercents([sender('a', { share: 0 }), sender('b', { share: 1 })])).toEqual({ a: 0, b: 100 });
+    expect(sharePercents([sender('a'), sender('b', { enabled: false })])).toEqual({ a: 100 });
+    expect(sharePercents([sender('a', { share: 0 }), sender('b', { share: 0 })])).toEqual({ a: 50, b: 50 });
+  });
+});
+
+describe('distributionMode', () => {
+  it('labels equal positive shares as even and everything else as weighted', () => {
+    expect(distributionMode([sender('a'), sender('b')])).toBe('even');
+    expect(distributionMode([sender('a', { share: 2 }), sender('b', { share: 2 })])).toBe('even');
+    expect(distributionMode([sender('a', { share: 60 }), sender('b', { share: 40 })])).toBe('weighted');
+    expect(distributionMode([sender('a', { share: 0 }), sender('b')])).toBe('weighted');
+    expect(distributionMode([sender('a', { share: 0 }), sender('b', { share: 0 })])).toBe('even');
+    expect(distributionMode([sender('a')])).toBe('even');
+    // An equal three-way split rounds to 34 / 33 / 33 and must still read as even.
+    expect(distributionMode([sender('a', { share: 34 }), sender('b', { share: 33 }), sender('c', { share: 33 })])).toBe('even');
+    expect(distributionMode([sender('a', { share: 51 }), sender('b', { share: 49 })])).toBe('weighted');
   });
 });
 
@@ -133,6 +190,38 @@ describe('planSchedule', () => {
     const plan = planSchedule({ total: 10000, senders: [{ connectionId: 's1', profile: profile() }], startDate: '2026-10-01', maxDays: 2 });
     expect(plan.totalDays).toBe(2);
     expect(plan.days[1].cumulative).toBe(80);
+  });
+
+  it('honours each account’s assigned share instead of pooling their caps', () => {
+    const plan = planSchedule({
+      total: 100,
+      senders: [
+        { connectionId: 's1', profile: profile({ dailyCap: 10 }) },
+        { connectionId: 's2', profile: profile({ connectionId: 's2', dailyCap: 100 }) },
+      ],
+      startDate: '2026-10-01',
+      allocation: { s1: 90, s2: 10 },
+    });
+    // s2 can only take the 10 people assigned to it; the other 90 wait for s1's low cap.
+    expect(plan.days[0].perSender).toEqual({ s1: 10, s2: 10 });
+    expect(plan.totalDays).toBe(9);
+    expect(plan.assigned).toBe(100);
+    expect(plan.unassigned).toBe(0);
+    expect(plan.scheduled).toBe(100);
+    expect(plan.remaining).toBe(0);
+  });
+
+  it('reports people left over when the allocation cannot place everyone', () => {
+    const plan = planSchedule({
+      total: 100,
+      senders: [{ connectionId: 's1', profile: profile({ dailyCap: 100 }) }],
+      startDate: '2026-10-01',
+      allocation: { s1: 2 },
+    });
+    expect(plan.assigned).toBe(2);
+    expect(plan.unassigned).toBe(98);
+    expect(plan.scheduled).toBe(2);
+    expect(plan.days[0].total).toBe(2);
   });
 });
 

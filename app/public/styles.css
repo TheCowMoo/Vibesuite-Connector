@@ -708,7 +708,7 @@ fieldset.field legend { margin-bottom: 0.4rem; }
 .invite-actions__note { font-size: 0.8rem; color: var(--ink-muted); flex: 1 1 auto; min-width: 0; }
 /* Shown while the send button is disabled, naming exactly what is still missing. */
 .invite-actions__note--blocking { color: var(--warning); font-weight: 600; }
-.field__label-row { display: flex; align-items: center; justify-content: space-between; }
+.field__label-row { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; }
 .field__label-row .field__label { margin: 0; }
 .pill {
   display: inline-flex; align-items: center; gap: 0.35rem;
@@ -809,10 +809,41 @@ fieldset.field legend { margin-bottom: 0.4rem; }
 .daychk input { flex: none; margin: 0; }
 
 /* ---- Campaigns ---- */
-.camp-sender { display: flex; align-items: center; gap: 0.5rem; padding: 0.35rem 0; border-bottom: 1px solid var(--line); }
+.camp-sender {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 5.5rem 7rem 6.5rem;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.45rem 0;
+  border-bottom: 1px solid var(--line);
+}
 .camp-sender:last-child { border-bottom: 0; }
-.camp-sender .daychk { flex: 1; }
-.camp-sender input[type="number"] { width: 5.5rem; margin: 0; }
+.camp-sender.is-off { opacity: 0.55; }
+.camp-sender .daychk { min-width: 0; }
+.camp-sender .daychk span { overflow-wrap: anywhere; }
+.camp-sender__pct { display: inline-flex; align-items: center; gap: 0.25rem; min-width: 0; }
+.camp-sender__pct input { width: 3.7rem; margin: 0; padding: 0.4rem 0.45rem; text-align: right; }
+.camp-sender__pct span { color: var(--ink-muted); font-size: 0.82rem; }
+.camp-sender__people {
+  min-width: 0;
+  color: var(--ink-muted);
+  font-size: 0.78rem;
+  text-align: right;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.camp-sender__max { min-width: 0; }
+.camp-sender__max input { width: 100%; margin: 0; padding: 0.4rem 0.5rem; }
+#campSplitEven { flex: none; white-space: nowrap; }
+@media (max-width: 560px) {
+  .camp-sender { grid-template-columns: minmax(0, 1fr) auto; gap: 0.35rem 0.5rem; padding: 0.6rem 0; }
+  .camp-sender .daychk { grid-column: 1; }
+  .camp-sender__pct { grid-column: 2; justify-self: end; }
+  .camp-sender__people { grid-column: 1; text-align: left; white-space: normal; }
+  .camp-sender__max { grid-column: 2; justify-self: end; }
+  .camp-sender__max input { width: 8rem; }
+}
 .camp-variant {
   border: 1px solid var(--line);
   border-radius: 10px;

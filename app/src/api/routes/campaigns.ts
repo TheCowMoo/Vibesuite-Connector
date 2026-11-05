@@ -1,9 +1,13 @@
 import type { FastifyInstance } from 'fastify';
 import {
   CampaignSchema,
+  computeAllocation,
+  distributionMode,
   invitedByDeadline,
   planSchedule,
+  sharePercents,
   type Campaign,
+  type CampaignSender,
 } from '../../domain/campaign';
 import { resolveSendPlan, stopTimeError } from '../../domain/campaignLifecycle';
 import { applyCampaignZoomHost } from '../../domain/campaignZoom';
@@ -116,18 +120,33 @@ export async function campaignRoutes(app: FastifyInstance): Promise<void> {
     const q = req.query as { total?: string; startDate?: string };
     const counts = await countRecipients(id);
 
-    // A draft has nothing frozen yet, so count the live audience. Without this the planner walks
-    // zero days, and the UI cannot say how long a send will take before it has started — which is
-    // the only moment the estimate is actually useful.
-    let total = counts.total;
-    if (total === 0) {
-      const list = await getList(camp.listId);
-      if (list && list.result) {
-        const invited = camp.includeAlreadyInvited ? new Set<string>() : await getInvitedEmails(camp.listId);
-        total = buildAudience(list.result, camp.segments, invited).emails.length;
+    // Once sending has started, the queues are the truth: recipients may have moved between
+    // accounts, and the original percentages no longer describe who is left. Before that, use
+    // the live audience and the configured split.
+    const queues = await Promise.all(camp.senders.map((s) => queueLength(id, s.connectionId)));
+    let total: number;
+    let allocation: Record<string, number>;
+    if (camp.startedAt) {
+      allocation = {};
+      camp.senders.forEach((s, i) => {
+        allocation[s.connectionId] = queues[i];
+      });
+      total = Object.values(allocation).reduce((a, n) => a + n, 0);
+    } else {
+      // A draft has nothing frozen yet, so count the live audience. Without this the planner walks
+      // zero days, and the UI cannot say how long a send will take before it has started — which is
+      // the only moment the estimate is actually useful.
+      total = counts.total;
+      if (total === 0) {
+        const list = await getList(camp.listId);
+        if (list && list.result) {
+          const invited = camp.includeAlreadyInvited ? new Set<string>() : await getInvitedEmails(camp.listId);
+          total = buildAudience(list.result, camp.segments, invited).emails.length;
+        }
       }
+      if (total === 0) total = Math.max(0, Number(q.total ?? 0) || 0);
+      allocation = computeAllocation(total, camp.senders);
     }
-    if (total === 0) total = Math.max(0, Number(q.total ?? 0) || 0);
     const startDate = q.startDate && /^\d{4}-\d{2}-\d{2}$/.test(q.startDate) ? q.startDate : todayISO();
 
     const senders = await Promise.all(
@@ -136,7 +155,7 @@ export async function campaignRoutes(app: FastifyInstance): Promise<void> {
         .map(async (s) => ({ connectionId: s.connectionId, profile: await getSenderProfile(s.connectionId) })),
     );
 
-    const plan = planSchedule({ total, senders, startDate });
+    const plan = planSchedule({ total, senders, startDate, allocation });
     const byDeadline = camp.sendByAt !== undefined ? invitedByDeadline(plan, camp.sendByAt) : null;
     return {
       total,
@@ -146,7 +165,9 @@ export async function campaignRoutes(app: FastifyInstance): Promise<void> {
       // Computed here, against timestamps, so the UI does not have to guess at UTC vs local dates.
       byDeadline,
       shortfall: byDeadline === null ? 0 : Math.max(0, total - byDeadline),
-      spread: camp.distribution.mode,
+      allocation,
+      percents: sharePercents(camp.senders),
+      spread: distributionMode(camp.senders),
     };
   });
 
@@ -157,10 +178,12 @@ export async function campaignRoutes(app: FastifyInstance): Promise<void> {
    * an operator is shown while filling in the wizard is the pace the send will actually follow.
    */
   app.post('/api/campaigns/plan-preview', async (req, reply) => {
+    type RawSender = { connectionId?: string; share?: number; quota?: number; enabled?: boolean };
     const b = (req.body || {}) as {
       listId?: string;
       segments?: string[];
       connectionIds?: string[];
+      senders?: RawSender[];
       startDate?: string;
       stopBy?: number;
       includeAlreadyInvited?: boolean;
@@ -180,14 +203,38 @@ export async function campaignRoutes(app: FastifyInstance): Promise<void> {
     const audience = buildAudience(list.result, b.segments ?? [], invited);
     const total = audience.emails.length;
 
+    // The wizard sends percentage-bearing sender rows. Older callers only send connectionIds;
+    // those default to equal shares, which keeps the preview identical to the actual send.
+    const supplied: RawSender[] =
+      Array.isArray(b.senders) && b.senders.length
+        ? b.senders
+        : (b.connectionIds ?? []).map((connectionId) => ({ connectionId }));
+    const requested: CampaignSender[] = [];
+    const seen = new Set<string>();
+    for (const raw of supplied) {
+      const connectionId = typeof raw.connectionId === 'string' ? raw.connectionId.trim() : '';
+      if (!connectionId || seen.has(connectionId)) continue;
+      seen.add(connectionId);
+      const share = Number(raw.share);
+      const quota = Number(raw.quota);
+      requested.push({
+        connectionId,
+        enabled: raw.enabled !== false,
+        ...(Number.isFinite(share) ? { share: Math.max(0, share) } : {}),
+        ...(Number.isFinite(quota) && quota > 0 ? { quota: Math.floor(quota) } : {}),
+        priority: 5,
+      });
+    }
+
+    const allocation = computeAllocation(total, requested);
     const senders = await Promise.all(
-      (b.connectionIds ?? [])
-        .filter(Boolean)
-        .map(async (connectionId) => ({ connectionId, profile: await getSenderProfile(connectionId) })),
+      requested
+        .filter((s) => s.enabled)
+        .map(async (s) => ({ connectionId: s.connectionId, profile: await getSenderProfile(s.connectionId) })),
     );
 
     const startDate = b.startDate && /^\d{4}-\d{2}-\d{2}$/.test(b.startDate) ? b.startDate : todayISO();
-    const plan = planSchedule({ total, senders, startDate });
+    const plan = planSchedule({ total, senders, startDate, allocation });
 
     const stopBy = Number(b.stopBy);
     const byDeadline = Number.isFinite(stopBy) ? invitedByDeadline(plan, stopBy) : null;
@@ -199,6 +246,9 @@ export async function campaignRoutes(app: FastifyInstance): Promise<void> {
       ...plan,
       byDeadline,
       shortfall: byDeadline === null ? 0 : Math.max(0, total - byDeadline),
+      allocation,
+      percents: sharePercents(requested),
+      spread: distributionMode(requested),
       alreadyInvited: audience.alreadyInvited.length,
     };
   });
@@ -226,6 +276,8 @@ export async function campaignRoutes(app: FastifyInstance): Promise<void> {
     // Variant A is the base copy; keep the legacy event fields in step with it so cards, attendance
     // labels and older clients all read the same subject.
     const data = mirrorPrimaryVariant(parsed.data);
+    // The stored mode is a summary of the split; the percentages are the source of truth.
+    data.distribution = { mode: distributionMode(data.senders) };
     const stopProblem = sendByError(data, Date.now());
     if (stopProblem) {
       reply.code(400).send({ error: stopProblem });
@@ -276,6 +328,7 @@ export async function campaignRoutes(app: FastifyInstance): Promise<void> {
     }
 
     const next = mirrorPrimaryVariant(parsed.data);
+    next.distribution = { mode: distributionMode(next.senders) };
     await saveCampaign(next);
     if ('zoomUserId' in body) {
       await applyCampaignZoomHost({

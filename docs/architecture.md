@@ -87,9 +87,16 @@ A **Campaign** freezes an audience (`listId` + optional segment names), an event
 (title/description/start/end/timezone and an optional Zoom join link resolved from the linked
 session) and a list of sending mailboxes. `startCampaign()` extracts and de-duplicates recipients,
 drops anyone already invited for that list, then partitions them with `computeAllocation()` —
-a weighted-share split honouring per-sender `quota`, with the rounding remainder handed out
+a percentage/weight split honouring per-sender `quota`, with the rounding remainder handed out
 round-robin and the result assigned with `allocateEmails()` so each mailbox's queue is interleaved
 from the source order rather than a contiguous block.
+
+`share` is stored as a relative weight, not necessarily a whole percentage: campaigns created before
+the percentage UI carry values such as 1 / 2 / 1. `sharePercents()` normalises both forms to whole
+percentages that add up to 100, and `distributionMode()` derives the card's “split evenly / custom”
+label from those percentages. The stored `distribution.mode` is therefore a summary, not the source
+of truth. A zero share excludes an account from the initial split and from quota overflow; if every
+active share is zero (a legacy record), the split falls back to even rather than sending nothing.
 
 `sendCampaignBatch()` then sends one blast per mailbox, bounded by
 `min(daily headroom, queueLength)`. The blast is one Calendar event per account (one per active copy
@@ -100,7 +107,12 @@ the sender `errorStreak`, and are re-queued at the front so another mailbox (or 
 pick them up. Once `errorStreak` reaches `CAMPAIGN_COOLDOWN_ON_ERRORS` the mailbox enters a
 `CAMPAIGN_COOLDOWN_HOURS` cooldown and is skipped until it expires or an operator hits Resume.
 The campaign flips to `completed` when no mailbox has work left. `planSchedule()` powers the
-capacity planner by walking day by day and summing each mailbox's cap for that date.
+capacity planner by walking day by day and summing each mailbox's cap for that date. When the
+campaign wizard supplies the percentage split, it also passes an `allocation` map: each mailbox can
+only send the people assigned to it, so a low-cap 90% mailbox is not mistakenly bailed out by a
+high-cap 10% mailbox. The planner reports `assigned`, `unassigned` (left over after quotas),
+`scheduled` and `remaining`, and `POST /api/campaigns/plan-preview` returns the per-account
+`allocation` that the wizard shows beside each percentage.
 
 ### Distribution engine
 
@@ -723,8 +735,8 @@ accounts and an optional video call together — and the only one that owns per-
 It **references** rather than owns everything around it, which matters when reading the code:
 
 - A **connection** is shared. Its `sender:profile` caps are global, so every campaign drawing on
-  that mailbox shares one counter; a campaign's `quota`/`share` only split *within that campaign*
-  (`allocateBatch()` then arbitrates one mailbox's allowance across campaigns).
+  that mailbox shares one counter; a campaign's `quota`/percentage split only divides *within that
+  campaign* (`allocateBatch()` then arbitrates one mailbox's allowance across campaigns).
 - A **contact list** records everyone it has ever invited in `list:{id}:invited`, shared with the
   one-off Invitations path. A person is therefore invited **once per contact list** across all
   campaigns — not once per campaign.

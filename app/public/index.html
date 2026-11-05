@@ -866,7 +866,6 @@
       <label class="field"><span class="field__label">Which contact list?</span><select id="campList"></select></label>
       <label class="field"><span class="field__label">Which video call? (join link)</span><select id="campSession"><option value="">None</option></select></label>
       <label class="field"><span class="field__label">Zoom host for this campaign</span><select id="campZoomHost"><option value="">Not set</option></select></label>
-      <label class="field"><span class="field__label">How to split it</span><select id="campMode"><option value="even">Split evenly</option><option value="weighted">Use my shares</option></select></label>
       <label class="field"><span class="field__label">Timezone for the calendar invite</span><input id="campTz" list="tzList" value="UTC" /></label>
     </div>
     <div class="field"><span class="field__label">Which groups to include (leave empty for all)</span><div class="daychks" id="campSegments"></div></div>
@@ -913,7 +912,14 @@
       <p class="field__hint" id="campVariantsHint" hidden></p>
       <button type="button" class="btn btn--ghost btn--sm" id="campAddVariant" hidden>Add another variant</button>
     </div>
-    <div class="field"><span class="field__label">Which Google accounts send this</span><div id="campSenders"></div></div>
+    <div class="field">
+      <div class="field__label-row">
+        <span class="field__label">Which accounts send, and how much</span>
+        <button type="button" class="btn btn--ghost btn--sm" id="campSplitEven">Split evenly</button>
+      </div>
+      <span class="field__hint">Each checked account gets a percentage of the audience. The checked rows always add up to 100%. Set an account to 0% to leave it out, or use Max to cap how many people it receives.</span>
+      <div id="campSenders"></div>
+    </div>
     <div class="modal__foot">
       <span class="spacer"></span>
       <button class="btn btn--ghost" data-close="newCampaign">Cancel</button>

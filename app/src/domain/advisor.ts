@@ -3,6 +3,7 @@ import { logger } from '../lib/logger';
 import { generateJson, generateText } from '../lib/ai';
 import { getAiSettings } from './aiSettings';
 import { listConnections } from './connectionStore';
+import { distributionMode } from './campaign';
 import { getCampaign, listCampaigns, saveCampaign } from './campaignStore';
 import { getSenderGauge, getSenderHistory, getSenderProfile, saveSenderProfile } from './senderStore';
 import { collectCampaignStats } from './campaignStatsCollect';
@@ -75,7 +76,7 @@ export async function collectAdvisorSnapshot(): Promise<{ snapshot: AdvisorSnaps
     campaigns.push({
       label,
       status: camp.status,
-      spread: camp.distribution.mode,
+      spread: distributionMode(camp.senders),
       mailboxes: camp.senders.filter((s) => s.enabled).length,
       invited: funnel.invited,
       queued: funnel.queued,

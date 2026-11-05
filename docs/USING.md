@@ -269,7 +269,6 @@ open the tabs and read the numbers. (With auth disabled everyone is effectively 
 | Which contact list? | The list whose segmentation supplies the audience |
 | Which video call? | Optional: makes the join link and attendance part of this campaign |
 | Zoom host for this campaign | Optional with zero or one host connected. With several hosts, pick one — sync cannot guess which account to read |
-| How to split it | **Split evenly**, or **Use my shares** to follow each mailbox's weight |
 | Timezone for the calendar invite | The timezone guests will see |
 | Which groups to include | Empty means the whole list |
 | Also invite people who were already invited | Off by default; see the rules below |
@@ -282,7 +281,19 @@ open the tabs and read the numbers. (With auth disabled everyone is effectively 
 | When it will finish | Live estimate from the selected mailboxes and their caps |
 | Email subject / Description | What the invitation says |
 | Event starts / Event ends | The actual event, not the send window |
-| Which Google accounts send this | One or more mailboxes; each shows its share |
+| Which accounts send, and how much | One or more mailboxes. Each checked account gets a percentage of the audience; the checked rows add up to 100%. |
+| Max (optional) | Caps that account for the whole campaign. People above the cap flow to the other checked accounts. |
+
+**How the split works.** Each checked account receives its percentage of the frozen audience. Percentages
+auto-balance: editing one row reshuffles the other checked rows, and **Split evenly** resets them. Set a row
+to 0% (or uncheck it) to leave that account out. For example, 1,240 people split 60/40 means roughly 744 and
+496; if the 60% account has **Max** 300, it receives 300 and the remaining 940 go to the other accounts. If
+every account hits its Max and people are still left, the wizard warns you before you create the campaign.
+
+The split freezes when you press **Begin sending**. If a mailbox fails later, its remaining people are moved
+evenly to the healthy accounts, so the original percentages describe the first assignment, not every later
+move. **When it will finish** uses the same per-account assignment, so a slow 90% mailbox is not hidden by a
+fast 10% mailbox.
 
 **Who this will reach** and **When it will finish** are computed with the same code the send uses, so the
 numbers you approve are the numbers that get frozen. If the estimate lands after your deadline, add a
@@ -332,7 +343,7 @@ yet either way, and every field can still be changed.
 **Begin sending** (on the card, or automatically at a scheduled time) does four things:
 
 1. Freezes the audience from the list's sorted result, minus anyone already invited for that list.
-2. Splits the people across the selected mailboxes by share/quota, interleaving them so each mailbox's
+2. Splits the people across the selected mailboxes by percentage/quota, interleaving them so each mailbox's
    queue is mixed rather than a contiguous block.
 3. Writes one recipient row per person (`pending`) and one queue per mailbox.
 4. Switches the campaign to **Sending**.
@@ -377,8 +388,8 @@ You set the ceiling; the scheduler decides the moment-to-moment order.
 
 - **Caps belong to the mailbox.** Every campaign and one-off invite using that mailbox shares the same daily
   counter. Two concurrent campaigns split one budget; they do not double it.
-- **A campaign's share only splits it internally** — the "split evenly / use my shares" setting decides who
-  in *this* campaign sends which slice, not what the mailbox sends overall.
+- **A campaign's percentages only split it internally** — they decide who in *this* campaign sends which
+  slice, not what the mailbox sends overall.
 - **Sending hours** (on the sending account) gate campaigns. Outside them, nothing is sent, and the work
   simply waits for the window.
 - **One blast per account.** The daily headroom goes on one Calendar event (one per active copy variant).
