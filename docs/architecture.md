@@ -339,13 +339,18 @@ The invited list is resolved by `resolveInvitedEmails()` in this order:
   carries `pollAnswers`, `qa`, `registrationAnswers`, `behavior`, `pollQuestionCount`,
   `pollRespondentCount` and `pollAnswerCount`; `pollCount` now means distinct poll questions, not the
   number of respondent rows (which was the old accidental meaning).
-- **Roster** — `buildRosterPayloads()` (`domain/attendanceRoster.ts`) emits one POST per non-empty segment
-  (`attendance.segment`) or one snapshot (`attendance.session`), with `counts`, `generatedAt` and a
-  `revision` that hashes the content without the timestamp. `deliverRoster()` skips an unchanged revision,
-  retries transient failures, stores `rosterRevision` / `rosterSentAt` / `rosterError` on the session, and
-  supports a bearer token plus `X-Vibesuite-Event` / `X-Vibesuite-Revision` headers. The token is stored with
-  the encrypted connection secrets and never returned by the API; `attendanceRosterTokenSet` tells the UI
-  whether one exists.
+- **Call report** — `buildRosterPayloads()` (`domain/attendanceRoster.ts`) supports three shapes. `flat`
+  (the default for new connections) emits one POST per call (`attendance.call`) with `count` and a
+  `people` array in stable order (attended → brief → no-show → walk-in), each entry carrying `result`;
+  `segments` emits one POST per non-empty segment (`attendance.segment`); `session` emits one grouped
+  snapshot (`attendance.session`). All shapes carry `counts`, `generatedAt` and a `revision` that hashes
+  the content without the timestamp; an empty report sends nothing and is reported as
+  `reason: 'empty'`. `deliverRoster()` skips an unchanged revision, retries transient failures, stores
+  `rosterRevision` / `rosterSentAt` / `rosterError` on the session, and supports a bearer token plus
+  `X-Vibesuite-Event` / `X-Vibesuite-Revision` headers. A stored shape is never changed behind the
+  operator's back: a PATCH that omits `shape` keeps the stored one (`normalizeRosterShape()`). The token
+  is stored with the encrypted connection secrets and never returned by the API;
+  `attendanceRosterTokenSet` tells the UI whether one exists.
 - **Dedupe** — matched outcomes keep the pre-segment dispatch key, so deploying this does not replay every
   past attendee; walk-ins get their own key. Per-person failures release their claim and are counted, not
   fatal.
@@ -356,7 +361,8 @@ The invited list is resolved by `resolveInvitedEmails()` in this order:
 ### Routing attendance into GHL workflows
 
 A second, independent channel can put the contact into a GoHighLevel workflow. It is configured per
-connection in **After-call actions**, alongside (not instead of) tags, webhooks and the full-list export.
+connection in **After-call actions**, alongside (not instead of) tags, per-person webhooks and the call
+report.
 
 **Normalisation.** `zoom.ts` already fetched the poll and Q&A report rows; `buildZoomBehavior()`
 (`domain/zoomBehavior.ts`, pure) joins them to the attendee list and produces one `ZoomBehavior` per

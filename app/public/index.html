@@ -604,7 +604,7 @@
       <div class="menu-wrap">
         <button class="btn btn--ghost" id="sessionMore" aria-haspopup="true" aria-expanded="false">More &#9662;</button>
         <div class="menu menu--up" id="sessionMoreMenu">
-          <button type="button" class="menu__item" id="sessionRoster">Send full list</button>
+          <button type="button" class="menu__item" id="sessionRoster">Send call report</button>
           <button type="button" class="menu__item" id="sessionManageActions">Manage actions</button>
         </div>
       </div>
@@ -700,7 +700,7 @@
       <button class="icon-btn" data-close="attendanceAutomations" aria-label="Close">&times;</button>
     </div>
     <div id="attendanceAutomationsBody">
-      <p class="hint" id="attendanceActionsSummary">Tags on · no workflows · no full-list export.</p>
+      <p class="hint" id="attendanceActionsSummary">Tags on · no workflows · no call report webhook.</p>
 
       <h3 class="detail__sub">1. Label results in GHL</h3>
       <p class="hint">One tag per result. Blank uses the server defaults; a blank Brief visit tag falls back to the Attended tag.</p>
@@ -745,9 +745,19 @@
         <p class="muted" id="attAiNote">Review first shows proposals in the call before anything is applied. Apply automatically adds eligible matches.</p>
       </div>
 
+      <h3 class="detail__sub">3. Send the call report to a webhook (optional)</h3>
+      <p class="hint">By default, one POST per call with everyone in the report — attended, brief visit, no-show and walk-in — in one flat list. This runs alongside the tags and workflows above, not instead of them.</p>
+      <label class="field"><span class="field__label">Webhook URL</span><input id="attRosterUrl" placeholder="https://hooks.example.com/attendance" /></label>
+      <div class="sender__grid">
+        <label class="field"><span class="field__label">Format</span><select id="attRosterShape"><option value="flat">One flat list of everyone (recommended)</option><option value="segments">One request per result group</option><option value="session">One request, grouped by result</option></select></label>
+        <label class="field"><span class="field__label">Bearer token (optional)</span><input id="attRosterToken" placeholder="Leave blank to keep the current token" /></label>
+      </div>
+      <p class="muted" id="attRosterTokenState"></p>
+      <label class="daychk"><input type="checkbox" id="attRosterClearToken" /><span>Remove the stored token</span></label>
+
       <button type="button" class="advanced-toggle" id="attAdvancedToggle" aria-expanded="false" aria-controls="attAdvancedBody">
         <span>Advanced</span>
-        <span class="muted" id="attAdvancedHint">Not configured</span>
+        <span class="muted" id="attAdvancedHint">Defaults</span>
         <span class="advanced-toggle__state" id="attAdvancedState">Show</span>
       </button>
       <div id="attAdvancedBody" class="advanced-body" hidden>
@@ -756,18 +766,8 @@
           <label class="radio"><input type="radio" name="attendanceDeliveryMode" value="both" /> API + webhooks (default)</label>
           <label class="radio"><input type="radio" name="attendanceDeliveryMode" value="api" /> API only</label>
           <label class="radio"><input type="radio" name="attendanceDeliveryMode" value="webhook" /> Webhooks only</label>
-          <p class="hint">Controls tags and per-person webhooks. Workflows, AI matching and full-list export are separate.</p>
+          <p class="hint">Controls tags and per-person webhooks. Workflows and AI matching are separate.</p>
         </fieldset>
-
-        <h4 class="detail__sub">Full call list export</h4>
-        <p class="hint">Send the whole call list to your own endpoint. Sometimes called a roster.</p>
-        <label class="field"><span class="field__label">Webhook URL (optional)</span><input id="attRosterUrl" placeholder="https://hooks.example.com/attendance" /></label>
-        <div class="sender__grid">
-          <label class="field"><span class="field__label">Send</span><select id="attRosterShape"><option value="segments">One request per result group</option><option value="session">One request per call</option></select></label>
-          <label class="field"><span class="field__label">Bearer token (optional)</span><input id="attRosterToken" placeholder="Leave blank to keep the current token" /></label>
-        </div>
-        <p class="muted" id="attRosterTokenState"></p>
-        <label class="daychk"><input type="checkbox" id="attRosterClearToken" /><span>Remove the stored token</span></label>
 
         <h4 class="detail__sub">Per-person webhooks</h4>
         <p class="hint">Send a webhook when someone matches every condition. These are separate from workflow rules.</p>
@@ -777,7 +777,7 @@
         <h4 class="detail__sub">Developer examples</h4>
         <p class="muted">Per-person payload</p>
         <pre class="snapshot" id="attendanceSnapshot">…</pre>
-        <p class="muted">Full-list payload</p>
+        <p class="muted">Call report payload (flat format)</p>
         <pre class="snapshot" id="attendanceRosterSnapshot">…</pre>
       </div>
     </div>

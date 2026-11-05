@@ -145,12 +145,21 @@ The dialog has three parts:
    tag, so existing workflows do not change.
 2. **Add people to workflows** — the workflows this account may use, and the rules that choose one.
    AI matching is optional and lives here too.
-3. **Advanced** — how tags are sent, the full call list export, per-person webhooks, and developer
-   examples. These are still fully editable; they are collapsed because most accounts do not use them.
+3. **Send the call report to a webhook** — one POST per call with everyone in the report in one flat
+   list. Each person carries `result` (`attended`, `partial`, `no_show` or `not_invited`). Leave the
+   URL blank to turn it off.
+
+**Advanced** holds how tags are sent (API, webhooks or both), per-person webhooks, and developer
+examples. These are still fully editable; they are collapsed because most accounts do not use them.
 
 **Send results** runs everything configured: tags, per-person webhooks, workflow rules, AI matching and
-the full-list export. It runs automatically after a successful sync too. **More → Send full list** forces
-only the full-list export, even when its content is unchanged.
+the call report. It runs automatically after a successful sync too. **More → Send call report** sends
+only the call report, even when its content is unchanged.
+
+The call report defaults to **One flat list of everyone**. Two older formats remain available for
+consumers that already expect them: **One request per result group** (`attendance.segment`) and **One
+request, grouped by result** (`attendance.session`). A connection keeps whichever format it already has
+until you change it.
 
 The invited list is cross-referenced automatically: a campaign-linked call uses the campaign's sent
 recipients, a one-off invitation uses the attendee list of the calendar event it created, and a standalone
@@ -539,7 +548,7 @@ Server-side failures (deploy, Redis, worker restarts) are covered in [`DEPLOYMEN
 |---|---|
 | Campaign schema, allocation, pace planner | `app/src/domain/campaign.ts` |
 | Zoom ID normalisation and call recovery | `app/src/video/zoomId.ts`, `app/src/video/zoom.ts` |
-| Attendance segments and roster payloads | `app/src/domain/attendanceSegments.ts`, `attendanceRoster.ts` |
+| Attendance segments and call-report payloads | `app/src/domain/attendanceSegments.ts`, `attendanceRoster.ts` |
 | Status machine, start/stop validation | `app/src/domain/campaignLifecycle.ts` |
 | Freeze, send, redistribution, end | `app/src/domain/campaignDispatch.ts` |
 | Who gets invited (dedupe) | `app/src/domain/audience.ts` |

@@ -19,6 +19,7 @@ import type {
   WorkflowTarget,
 } from '../../domain/connection';
 import { parseWorkflowSettings } from '../../domain/workflowSettings';
+import { normalizeRosterShape } from '../../domain/attendanceRoster';
 import { bootstrapConnection } from '../../domain/bootstrap';
 import { getSnapshot } from '../../domain/snapshotStore';
 
@@ -134,10 +135,12 @@ export async function connectionRoutes(app: FastifyInstance): Promise<void> {
     }
     if (body.attendanceRoster !== undefined) {
       const url = body.attendanceRoster.url?.trim();
+      // Keep the format this connection already uses when the PATCH only touches the URL or token;
+      // new configurations default to the flat call report.
       conn.attendanceRoster = url
         ? {
             url,
-            shape: body.attendanceRoster.shape === 'session' ? 'session' : 'segments',
+            shape: normalizeRosterShape(body.attendanceRoster.shape, conn.attendanceRoster?.shape ?? 'flat'),
           }
         : undefined;
       // A blank token keeps the stored one; "remove" is explicit so an accidental save cannot break

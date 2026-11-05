@@ -1935,7 +1935,7 @@
     if (ai && ai.enabled && (conn.attendanceWorkflows || []).length) {
       parts.push('AI: ' + (ai.mode === 'auto' ? 'automatic' : 'review first'));
     }
-    if (conn.attendanceRoster && conn.attendanceRoster.url) parts.push('Full-list export on');
+    if (conn.attendanceRoster && conn.attendanceRoster.url) parts.push('Call report webhook on');
     var hooks = (conn.attendanceRules || []).filter(function (r) { return r.enabled !== false; });
     if (mode !== 'api' && hooks.length) parts.push(hooks.length + ' per-person webhook' + (hooks.length === 1 ? '' : 's'));
     return parts.join(' · ');
@@ -1944,9 +1944,9 @@
   function sessionStatusHTML(session) {
     var meta = [];
     if (session.lastDispatchedAt) meta.push('Last run ' + prettyDate(session.lastDispatchedAt));
-    if (session.rosterSentAt) meta.push('Full list sent ' + prettyDate(session.rosterSentAt));
+    if (session.rosterSentAt) meta.push('Call report sent ' + prettyDate(session.rosterSentAt));
     var error = session.rosterError
-      ? '<div class="session-status__error">Full-list export failed: ' + esc(session.rosterError) + '</div>'
+      ? '<div class="session-status__error">Call report failed: ' + esc(session.rosterError) + '</div>'
       : '';
     var conn = sessionConnection(session);
     var manage = conn
@@ -2351,8 +2351,8 @@
         if (r.workflows && r.workflows.applied) parts.push(r.workflows.applied + ' workflow' + (r.workflows.applied === 1 ? '' : 's'));
         if (r.workflows && r.workflows.failed) parts.push(r.workflows.failed + ' workflow failed');
         if (r.workflowError) parts.push('workflow error');
-        if (r.roster && r.roster.error) parts.push('full-list export failed');
-        else if (r.roster && !r.roster.skipped) parts.push('full list sent');
+        if (r.roster && r.roster.error) parts.push('call report failed');
+        else if (r.roster && !r.roster.skipped) parts.push('call report sent');
         var bad = r.failed || (r.workflows && r.workflows.failed) || r.workflowError || (r.roster && r.roster.error);
         toast(parts.length ? 'Sent: ' + parts.join(' · ') : 'Nothing new to send', bad ? 'error' : 'success');
         openSession(currentSessionId);
@@ -2370,11 +2370,11 @@
     }))
       .then(function (r) {
         var roster = r.roster || {};
-        if (roster.error) toast('Full-list export failed: ' + roster.error, 'error');
+        if (roster.error) toast('Call report failed: ' + roster.error, 'error');
         else if (roster.reason === 'no_connection') toast('Link this call to a Google account first', 'error');
         else if (roster.reason === 'empty') toast('Nothing to send for this call yet', 'info');
-        else if (roster.skipped) toast('No full-list export is configured for this account', 'info');
-        else toast('Full list sent (' + roster.sent + ' request' + (roster.sent === 1 ? '' : 's') + ')', 'success');
+        else if (roster.skipped) toast('No call report webhook is configured for this account', 'info');
+        else toast('Call report sent (' + roster.sent + ' request' + (roster.sent === 1 ? '' : 's') + ')', 'success');
         openSession(currentSessionId);
       })
       .catch(function (e) { toast(e.message, 'error'); });
@@ -2750,17 +2750,18 @@
       parts.push('AI: ' + (document.getElementById('attAiMode').value === 'auto' ? 'automatic' : 'review first'));
     }
     var roster = document.getElementById('attRosterUrl');
-    if (roster && roster.value.trim()) parts.push('Full-list export on');
     var hooks = editingRules.filter(function (r) { return r.enabled !== false; });
+    if (roster && roster.value.trim()) parts.push('Call report webhook on');
     if (mode !== 'api' && hooks.length) parts.push(hooks.length + ' per-person webhook' + (hooks.length === 1 ? '' : 's'));
     summary.textContent = parts.join(' · ');
 
     var hint = document.getElementById('attAdvancedHint');
     if (hint) {
       var advanced = [];
-      if (roster && roster.value.trim()) advanced.push('full-list export on');
+      if (mode === 'api') advanced.push('tags via API only');
+      else if (mode === 'webhook') advanced.push('tags via webhooks only');
       if (hooks.length) advanced.push(hooks.length + ' webhook rule' + (hooks.length === 1 ? '' : 's'));
-      hint.textContent = advanced.length ? advanced.join(' · ') : 'Not configured';
+      hint.textContent = advanced.length ? advanced.join(' · ') : 'Defaults';
     }
   }
 
@@ -2799,7 +2800,7 @@
 
     var roster = c.attendanceRoster || {};
     document.getElementById('attRosterUrl').value = roster.url || '';
-    document.getElementById('attRosterShape').value = roster.shape === 'session' ? 'session' : 'segments';
+    document.getElementById('attRosterShape').value = roster.shape === 'session' || roster.shape === 'segments' ? roster.shape : 'flat';
     document.getElementById('attRosterToken').value = '';
     document.getElementById('attRosterClearToken').checked = false;
     document.getElementById('attRosterTokenState').textContent = c.attendanceRosterTokenSet
@@ -2827,11 +2828,16 @@
         timestamp: new Date().toISOString()
       }, null, 2);
       document.getElementById('attendanceRosterSnapshot').textContent = JSON.stringify({
-        event: 'attendance.segment', version: 1, sessionId: 'sess_…', sessionTitle: c.name,
-        segment: 'no_show', count: 44,
+        event: 'attendance.call', version: 1, sessionId: 'sess_…', sessionTitle: c.name,
+        provider: 'zoom', invitedSource: 'campaign',
         counts: { invited: 142, attended: 65, partial: 33, noShow: 44, notInvited: 17, attendanceRate: 69 },
-        revision: 'sha256:…',
-        people: [{ email: 'person@example.com', name: 'Ada', status: 'no_show', minutes: null }]
+        count: 159,
+        people: [
+          { email: 'ada@example.com', name: 'Ada', result: 'attended', status: 'attended', minutes: 45 },
+          { email: 'absent@example.com', name: null, result: 'no_show', status: 'no_show', minutes: null }
+        ],
+        generatedAt: new Date().toISOString(),
+        revision: 'sha256:…'
       }, null, 2);
       openModal('attendanceAutomations');
       if (seeded) {
@@ -6092,7 +6098,7 @@
     },
     {
       title: 'See who turned up',
-      body: 'Link a call and we match joiners against the people you invited. After the call, Send results labels them, adds them to workflows, or exports the full list.'
+      body: 'Link a call and we match joiners against the people you invited. After the call, Send results labels them, adds them to workflows, or sends the call report to your webhook.'
     },
     {
       title: 'Send a one-off invitation',

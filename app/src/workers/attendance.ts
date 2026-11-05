@@ -282,9 +282,9 @@ export async function syncSession(sessionId: string): Promise<AttendanceReport> 
 }
 
 export interface DispatchOptions {
-  /** Skip the per-person pass and only deliver the roster. */
+  /** Skip the per-person pass and only deliver the call report. */
   rosterOnly?: boolean;
-  /** Resend the roster even when its revision has not changed. */
+  /** Resend the call report even when its revision has not changed. */
   forceRoster?: boolean;
 }
 
@@ -446,13 +446,13 @@ function pickSampleSegment(segments: AttendanceSegments): { person: SegmentPerso
   };
 }
 
-/** POST one roster payload, with a short retry for transient failures. */
+/** POST one call-report payload, with a short retry for transient failures. */
 async function postRosterPayload(
   settings: AttendanceRosterSettings,
   token: string | undefined,
   payload: RosterPayload,
 ): Promise<void> {
-  if (!settings.url) throw new Error('roster webhook URL missing');
+  if (!settings.url) throw new Error('call report webhook URL missing');
 
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -473,11 +473,11 @@ async function postRosterPayload(
   }
 
   const status = lastError?.response?.status;
-  throw new Error(status ? `roster webhook returned ${status}` : lastError?.message || 'roster webhook failed');
+  throw new Error(status ? `call report webhook returned ${status}` : lastError?.message || 'call report webhook failed');
 }
 
 /**
- * Send the segmented roster to the configured URL, unless the same content was already delivered.
+ * Send the call report to the configured URL, unless the same content was already delivered.
  *
  * The revision covers the people and counts but not the generation time, so a re-sync with no new
  * data is a no-op; a corrected report produces a new revision the consumer can upsert.
@@ -502,13 +502,13 @@ async function deliverRoster(
       provider: session.provider,
       invitedSource: report.invitedSource,
     },
-    settings.shape ?? 'segments',
+    settings.shape ?? 'flat',
   );
   if (!payloads.length) return { sent: 0, skipped: true, reason: 'empty' };
 
   const revision = stableRevision(payloads.map((p) => p.revision));
   if (!force && session.rosterRevision === revision) {
-    logger.info({ sessionId: session.id }, 'attendance roster unchanged; skipping');
+    logger.info({ sessionId: session.id }, 'attendance call report unchanged; skipping');
     return { sent: 0, skipped: true, revision, reason: 'unchanged' };
   }
 
@@ -535,7 +535,7 @@ async function deliverRoster(
     latest.rosterError = message;
     await saveSession(latest);
     inc('attendance_roster_errors_total');
-    logger.error({ sessionId: session.id, err: message }, 'attendance roster delivery failed');
+    logger.error({ sessionId: session.id, err: message }, 'attendance call report delivery failed');
     return { sent, skipped: false, error: message, revision };
   }
 }

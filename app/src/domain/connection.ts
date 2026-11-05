@@ -19,10 +19,13 @@ export interface AttendanceTags {
 }
 
 export interface AttendanceRosterSettings {
-  /** Where the segmented roster is POSTed. Empty disables roster delivery. */
+  /** Where the call report is POSTed. Empty disables call-report delivery. */
   url?: string;
-  /** One request per segment, or one request containing every segment. */
-  shape?: 'segments' | 'session';
+  /**
+   * `flat` sends one request per call with everyone in one list (default for new connections);
+   * `segments` sends one request per result group; `session` sends one request grouped by result.
+   */
+  shape?: 'flat' | 'segments' | 'session';
 }
 
 export type ConditionField =
@@ -141,7 +144,7 @@ export interface Connection {
   attendanceWorkflowRules?: AttendanceWorkflowRule[];
   /** Optional AI routing on top of the deterministic rules. */
   attendanceAiWorkflow?: AttendanceAiWorkflowSettings;
-  /** External roster webhook for the full segmented result. */
+  /** External call-report webhook for the full result. */
   attendanceRoster?: AttendanceRosterSettings;
   /** True when a roster bearer token is stored (the token itself is encrypted, never returned). */
   attendanceRosterTokenSet?: boolean;

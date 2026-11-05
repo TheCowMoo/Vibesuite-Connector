@@ -1,7 +1,19 @@
 import { createHash } from 'node:crypto';
 import { ATTENDANCE_SEGMENTS, type AttendanceSegment, type AttendanceSegments, type SegmentPerson } from './attendanceSegments';
 
-export type RosterShape = 'segments' | 'session';
+export type RosterShape = 'flat' | 'segments' | 'session';
+
+const ROSTER_SHAPES: readonly string[] = ['flat', 'segments', 'session'];
+
+/**
+ * Accept only a shape we know; anything else (a missing field, a stale client) falls back.
+ *
+ * The fallback lets the PATCH route keep the format a connection already uses, while new
+ * connections default to the flat call report.
+ */
+export function normalizeRosterShape(value: unknown, fallback: RosterShape = 'flat'): RosterShape {
+  return typeof value === 'string' && ROSTER_SHAPES.includes(value) ? (value as RosterShape) : fallback;
+}
 
 export interface RosterMeta {
   sessionId: string;
@@ -37,7 +49,18 @@ export interface SessionRosterPayload extends RosterBase {
   segments: Record<AttendanceSegment, SegmentPerson[]>;
 }
 
-export type RosterPayload = SegmentRosterPayload | SessionRosterPayload;
+/** One person in the flat call report, tagged with the result bucket they landed in. */
+export interface FlatRosterPerson extends SegmentPerson {
+  result: AttendanceSegment;
+}
+
+export interface FlatRosterPayload extends RosterBase {
+  event: 'attendance.call';
+  count: number;
+  people: FlatRosterPerson[];
+}
+
+export type RosterPayload = SegmentRosterPayload | SessionRosterPayload | FlatRosterPayload;
 
 export function stableRevision(value: unknown): string {
   return createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -71,19 +94,45 @@ function rosterSegment(people: SegmentPerson[]): SegmentPerson[] {
   return people.map(rosterPerson);
 }
 
+/** Flatten the four buckets into one ordered list, keeping each person's result. */
+function flatPeople(segments: AttendanceSegments): FlatRosterPerson[] {
+  const people: FlatRosterPerson[] = [];
+  for (const segment of ATTENDANCE_SEGMENTS) {
+    for (const person of segments[segment]) {
+      people.push({ ...rosterPerson(person), result: segment });
+    }
+  }
+  return people;
+}
+
 /**
- * Build the external roster payload(s).
+ * Build the external call-report payload(s).
  *
- * `segments` produces one request per non-empty segment (the default); `session` produces a single
- * snapshot containing all four. The revision excludes `generatedAt`, so the same result yields the
- * same revision across syncs and does not get resent.
+ * `flat` (the default for new connections) produces one request per call with everyone in one list
+ * and a `result` on each person; `segments` produces one request per non-empty segment; `session`
+ * produces a single snapshot of the four buckets. The revision excludes `generatedAt`, so the same
+ * result yields the same revision across syncs and does not get resent.
  */
 export function buildRosterPayloads(
   segments: AttendanceSegments,
   meta: RosterMeta,
-  shape: RosterShape = 'segments',
+  shape: RosterShape = 'flat',
 ): RosterPayload[] {
   const generatedAt = meta.generatedAt ?? new Date().toISOString();
+
+  if (shape === 'flat') {
+    const people = flatPeople(segments);
+    // Nothing to report yet: the caller turns this into `reason: 'empty'` instead of a 0-person POST.
+    if (!people.length) return [];
+    const base = {
+      event: 'attendance.call' as const,
+      ...metaFields(meta),
+      counts: segments.counts,
+      count: people.length,
+      people,
+    };
+    return [{ ...base, generatedAt, revision: stableRevision(base) }];
+  }
 
   if (shape === 'session') {
     const base = {
