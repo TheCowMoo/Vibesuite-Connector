@@ -2133,10 +2133,10 @@
   }
 
   function rerenderSessionDetail(keepScroll) {
-    var modal = document.querySelector('#sessionDetail .modal');
-    var top = modal ? modal.scrollTop : 0;
+    var body = document.querySelector('#sessionDetail .modal__body');
+    var top = body ? body.scrollTop : 0;
     renderSessionDetail(currentSessionData, currentAttendanceData);
-    if (modal) modal.scrollTop = keepScroll ? top : 0;
+    if (body) body.scrollTop = keepScroll ? top : 0;
   }
 
   function renderSessionDetail(session, attendance) {
@@ -3557,9 +3557,48 @@
   // overwrote the outer dialog's origin, so the page underneath got focus back instead of the dialog.
   var focusStack = [];
 
+  /**
+   * Give every dialog the same three-part shell: fixed head, scrolling body, fixed foot.
+   *
+   * The markup predates this shell, so the wrapper is created once here instead of editing every
+   * modal by hand. Moving nodes keeps listeners, ids and generated placeholders intact.
+   */
+  function ensureModalBody(modal) {
+    if (!modal) return;
+    var hasBody = Array.prototype.some.call(modal.children, function (child) {
+      return child.classList.contains('modal__body');
+    });
+    if (hasBody) return;
+
+    var head = null;
+    var foot = null;
+    Array.prototype.forEach.call(modal.children, function (child) {
+      if (child.classList.contains('modal__head')) head = child;
+      if (child.classList.contains('modal__foot')) foot = child;
+    });
+
+    var body = document.createElement('div');
+    body.className = 'modal__body';
+    var collecting = !head;
+    Array.prototype.slice.call(modal.childNodes).forEach(function (node) {
+      if (node === head) { collecting = true; return; }
+      if (node === foot) { collecting = false; return; }
+      if (collecting) body.appendChild(node);
+    });
+
+    if (foot) modal.insertBefore(body, foot);
+    else modal.appendChild(body);
+  }
+
   function openModal(id) {
     var el = $('#' + id);
     if (!el) return;
+    var modal = el.querySelector('.modal');
+    ensureModalBody(modal);
+    if (modal) {
+      var body = modal.querySelector('.modal__body');
+      if (body) body.scrollTop = 0;
+    }
     var origin = document.activeElement;
     focusStack.push(origin && origin !== document.body ? origin : null);
     el.hidden = false;
@@ -3603,6 +3642,7 @@
   $$('[data-close]').forEach(function (b) {
     b.addEventListener('click', function () { closeModal(b.dataset.close); });
   });
+  $$('.modal').forEach(ensureModalBody);
   $$('.backdrop').forEach(function (m) {
     m.addEventListener('click', function (e) {
       if (e.target === m) closeModal(m.id);

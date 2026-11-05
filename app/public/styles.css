@@ -374,29 +374,52 @@ input[type="datetime-local"], input[type="date"] { font-variant-numeric: tabular
 .brand-swatch__logo { height: 40px; width: auto; }
 
 /* ---- Forms ---- */
-.field { display: flex; flex-direction: column; gap: 0.35rem; margin-bottom: 1rem; }
-.field__label { font-size: 0.82rem; font-weight: 600; color: var(--ink); }
+.field { display: flex; flex-direction: column; gap: 0.4rem; margin-bottom: 0.9rem; }
+.field__label { font-size: 0.82rem; font-weight: 600; color: var(--ink); line-height: 1.35; }
 .req { color: var(--danger); font-style: normal; }
-input[type="text"], input[type="password"], input[type="email"], input:not([type]) {
-  font: inherit;
-  padding: 0.55rem 0.75rem;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  background: #fff;
-  color: var(--ink);
-}
-input:focus { outline: none; border-color: var(--royal); box-shadow: 0 0 0 3px var(--yellow-300); }
+
+/*
+ * One control language. Every text-like input, select and textarea shares the same height,
+ * padding, border and focus ring — including number/date/datetime-local, which used to fall
+ * through to the browser defaults and made forms look broken next to styled fields.
+ */
+input:not([type="checkbox"]):not([type="radio"]):not([type="file"]):not([type="button"]):not([type="submit"]):not([type="reset"]):not([type="range"]):not([type="color"]),
+select,
 textarea {
   font: inherit;
+  width: 100%;
+  min-width: 0;
   padding: 0.55rem 0.75rem;
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  background: #fff;
+  background-color: #fff;
   color: var(--ink);
-  resize: vertical;
 }
-textarea:focus { outline: none; border-color: var(--royal); box-shadow: 0 0 0 3px var(--yellow-300); }
-fieldset.field { border: none; padding: 0; margin-bottom: 1rem; }
+textarea { resize: vertical; min-height: 2.6rem; }
+select {
+  padding-right: 2rem;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%235A6172' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.6rem center;
+  background-size: 12px;
+  appearance: none;
+  -webkit-appearance: none;
+}
+input::placeholder, textarea::placeholder { color: var(--ink-muted); opacity: 0.8; }
+input:focus, select:focus, textarea:focus {
+  outline: none;
+  border-color: var(--royal);
+  box-shadow: 0 0 0 3px var(--yellow-300);
+}
+input:disabled, select:disabled, textarea:disabled {
+  background-color: var(--surface);
+  color: var(--ink-muted);
+  cursor: not-allowed;
+}
+input[readonly], textarea[readonly] { background-color: var(--surface); }
+input[type="checkbox"], input[type="radio"] { accent-color: var(--royal); }
+.radio input, .daychk input { width: 16px; height: 16px; flex: none; margin: 0; }
+fieldset.field { border: none; padding: 0; margin-bottom: 0.9rem; }
 fieldset.field legend { margin-bottom: 0.4rem; }
 .radio { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.4rem; font-size: 0.9rem; cursor: pointer; }
 
@@ -408,6 +431,7 @@ fieldset.field legend { margin-bottom: 0.4rem; }
   margin: 0 0 1.25rem;
   padding: 0 0 1rem;
   border-bottom: 1px solid var(--line);
+  min-width: 0;
 }
 .step { display: flex; align-items: center; gap: 0.5rem; color: var(--ink-muted); font-size: 0.85rem; font-weight: 500; }
 .step__num {
@@ -421,33 +445,72 @@ fieldset.field legend { margin-bottom: 0.4rem; }
 
 /* ---- Modal ---- */
 .backdrop {
+  --backdrop-pad: clamp(0.5rem, 2vw, 1.25rem);
   position: fixed; inset: 0;
   background: rgba(13, 22, 61, 0.45);
   display: flex; align-items: center; justify-content: center;
-  padding: 1.25rem;
+  padding: var(--backdrop-pad);
   z-index: 50;
   opacity: 0;
   transition: opacity 0.15s ease;
 }
 .backdrop.is-open { opacity: 1; }
 .modal {
+  --modal-pad: 1.4rem;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
   background: #fff;
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-md);
   width: 100%;
   max-width: 520px;
-  max-height: 90vh;
-  overflow: auto;
-  padding: 1.4rem;
+  max-height: calc(100vh - (2 * var(--backdrop-pad)));
+  max-height: calc(100dvh - (2 * var(--backdrop-pad)));
+  overflow: hidden;
+  padding: 0;
   transform: translateY(6px);
   transition: transform 0.16s ease;
 }
 .backdrop.is-open .modal { transform: none; }
 .modal--wide { max-width: 720px; }
-.modal__head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1rem; }
-.modal__title { margin: 0; font-size: 1.25rem; }
-.modal__foot { display: flex; align-items: center; gap: 0.5rem; margin-top: 1.5rem; }
+.modal--sm { max-width: 400px; }
+.modal__head {
+  flex: none;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: var(--modal-pad) var(--modal-pad) 0.9rem;
+  border-bottom: 1px solid var(--line);
+  background: #fff;
+}
+.modal__title { margin: 0; font-size: 1.25rem; min-width: 0; overflow-wrap: anywhere; }
+.modal__head .icon-btn { flex: none; }
+.modal__body {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: auto;
+  overscroll-behavior: contain;
+  padding: 1.1rem var(--modal-pad);
+}
+.modal__body > :first-child { margin-top: 0; }
+.modal__body > :last-child { margin-bottom: 0; }
+.modal__foot {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  padding: 0.9rem var(--modal-pad);
+  border-top: 1px solid var(--line);
+  background: #fff;
+}
+.modal__foot .spacer { flex: 1 1 auto; }
 
 /* ---- Detail: key/value + mapping table ---- */
 .detail__head { display: flex; align-items: center; gap: 0.6rem; font-size: 1.15rem; font-weight: 700; color: var(--navy); margin-bottom: 1rem; }
@@ -612,7 +675,13 @@ fieldset.field legend { margin-bottom: 0.4rem; }
 
 /* ---- Invites ---- */
 .invite-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1.25rem; }
-.invite-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr)); gap: 0.75rem; }
+.invite-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 11rem), 1fr));
+  gap: 0.75rem;
+  margin-bottom: 0.9rem;
+}
+.invite-row .field { margin-bottom: 0; }
 .invite-step {
   font-size: 0.8rem; font-weight: 700; letter-spacing: 0.03em;
   text-transform: uppercase; color: var(--ink-muted);
@@ -711,26 +780,50 @@ fieldset.field legend { margin-bottom: 0.4rem; }
   border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface);
 }
 
-/* ---- Senders ---- */
-.sender__grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.6rem; margin-top: 0.6rem; }
+/* ---- Senders / form grids ---- */
+.sender__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 9.5rem), 1fr));
+  gap: 0.65rem;
+  margin: 0.6rem 0 0.9rem;
+}
+.sender__grid > * { min-width: 0; }
 .sender__grid .field { margin-bottom: 0; }
+/* Five-field groups read better as 3 + 2 than as 4 + 1. */
+.sender__grid:has(> :nth-child(5)) { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+@media (max-width: 700px) {
+  .sender__grid:has(> :nth-child(5)) { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 560px) {
+  /* The five-field :has() rule above is more specific, so name it here too; otherwise
+     campaign forms stay two-up on phones and the selects clip their own labels. */
+  .sender__grid,
+  .sender__grid:has(> :nth-child(5)) { grid-template-columns: 1fr; }
+}
 .gauge { margin-top: 0.5rem; }
 .gauge__bar { height: 6px; border-radius: 999px; background: var(--neutral-tint); overflow: hidden; }
 .gauge__bar > span { display: block; height: 100%; background: var(--royal); }
 .gauge__label { font-size: 0.78rem; color: var(--ink-muted); margin-top: 0.3rem; }
 .daychks { display: flex; gap: 0.35rem; flex-wrap: wrap; }
-.daychk { display: inline-flex; align-items: center; gap: 0.2rem; font-size: 0.8rem; }
-.daychk input { width: auto; margin: 0; }
-@media (max-width: 900px) { .sender__grid { grid-template-columns: repeat(2, 1fr); } }
+.daychk { display: inline-flex; align-items: center; gap: 0.35rem; font-size: 0.8rem; }
+.daychk input { flex: none; margin: 0; }
 
 /* ---- Campaigns ---- */
 .camp-sender { display: flex; align-items: center; gap: 0.5rem; padding: 0.35rem 0; border-bottom: 1px solid var(--line); }
 .camp-sender:last-child { border-bottom: 0; }
 .camp-sender .daychk { flex: 1; }
 .camp-sender input[type="number"] { width: 5.5rem; margin: 0; }
-.camp-variant { border: 1px solid var(--line); border-radius: 10px; padding: 0.6rem 0.75rem; margin: 0.5rem 0; }
+.camp-variant {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 0.75rem;
+  margin: 0.6rem 0;
+  display: grid;
+  gap: 0.55rem;
+}
 .camp-variant .field__label-row { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; }
-.camp-variant input, .camp-variant textarea { margin-top: 0.35rem; }
+.camp-variant .field { margin-bottom: 0; }
+.camp-variant input, .camp-variant textarea { margin-top: 0; }
 
 /* ---- Guided tour ---- */
 .tour { position: fixed; inset: 0; z-index: 60; }
@@ -796,6 +889,19 @@ fieldset.field legend { margin-bottom: 0.4rem; }
   .invite-row { grid-template-columns: 1fr; }
   .stats-range { width: 100%; }
   .chart { height: 110px; }
+  .modal { --modal-pad: 1rem; }
+  .modal__foot { justify-content: stretch; }
+  .modal__foot .spacer { display: none; }
+  .modal__foot .btn { flex: 1 1 auto; justify-content: center; }
+  .modal__head .icon-btn { min-width: 36px; min-height: 36px; }
+  .btn--sm { min-height: 32px; }
+  .radio, .daychk { min-height: 32px; }
+  .link-btn { display: inline-flex; align-items: center; min-height: 32px; }
+  .invite-actions { flex-direction: column; align-items: stretch; }
+  .invite-actions .spacer { display: none; }
+  .invite-actions .btn { width: 100%; }
+  .steps { flex-wrap: wrap; overflow: visible; }
+  .step { white-space: nowrap; }
 }
 
 /* ---- Icons (monoline) ---- */
@@ -830,23 +936,6 @@ fieldset.field legend { margin-bottom: 0.4rem; }
 @keyframes shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
 .skel-card { height: 70px; border-radius: var(--radius-lg); margin-bottom: 0.6rem; }
 .skel-stat { height: 74px; border-radius: var(--radius-lg); }
-
-/* ---- Selects (match inputs) ---- */
-select {
-  font: inherit;
-  padding: 0.5rem 2rem 0.5rem 0.7rem;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  background-color: #fff;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%235A6172' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right 0.6rem center;
-  background-size: 12px;
-  color: var(--ink);
-  appearance: none;
-  -webkit-appearance: none;
-}
-select:focus { outline: none; border-color: var(--royal); box-shadow: 0 0 0 3px var(--yellow-300); }
 
 /* ---- Dropzone (file input) ---- */
 .dropzone {
@@ -929,7 +1018,6 @@ select:focus { outline: none; border-color: var(--royal); box-shadow: 0 0 0 3px 
 }
 
 /* ---- Confirm dialog ---- */
-.modal--sm { max-width: 400px; }
 .confirm__msg { color: var(--ink-muted); font-size: 0.9rem; margin: 0.25rem 0 0; }
 
 /* ---- Summary strip ---- */
@@ -1003,8 +1091,16 @@ select:focus { outline: none; border-color: var(--royal); box-shadow: 0 0 0 3px 
 
 /* ---- Rail collapses to a horizontal strip on narrow screens ---- */
 @media (max-width: 900px) {
-  .shell { grid-template-columns: 1fr; min-height: 0; }
+  /* The horizontal nav is a scroll container, but its min-content width is the sum of every
+     link. A plain 1fr track therefore grows to that sum (over a thousand pixels), and the
+     centred container is pushed off-screen. minmax(0, 1fr) + min-width: 0 keeps the strip
+     inside the viewport and lets the nav scroll horizontally instead. */
+  .shell { grid-template-columns: minmax(0, 1fr); min-height: 0; }
+  .rail { min-width: 0; }
+  .container { max-width: none; margin: 0; }
   .rail__nav {
+    min-width: 0;
+    width: 100%;
     flex-direction: row;
     gap: 0.15rem;
     max-height: none;
@@ -1025,5 +1121,4 @@ select:focus { outline: none; border-color: var(--royal); box-shadow: 0 0 0 3px 
 @media (max-width: 560px) {
   .rail__link { padding: 0.45rem 0.55rem; font-size: 0.85rem; }
   .rail__link .nav-ico { margin-right: 0; }
-  .modal { max-height: 100vh; border-radius: 0; }
 }
