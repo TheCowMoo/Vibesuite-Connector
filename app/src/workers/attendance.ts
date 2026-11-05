@@ -427,6 +427,11 @@ export async function dispatchSession(
   }
 
   const roster = await deliverRoster(session, report, segments, conn, opts.forceRoster === true);
+  const latest = await getSession(sessionId);
+  if (latest) {
+    latest.lastDispatchedAt = Date.now();
+    await saveSession(latest);
+  }
   return { dispatched, failed, segments: segments.counts, roster, workflows, workflowError };
 }
 
@@ -516,13 +521,19 @@ async function deliverRoster(
     session.rosterRevision = revision;
     session.rosterSentAt = Date.now();
     session.rosterError = undefined;
-    await saveSession(session);
+    const latest = (await getSession(session.id)) ?? session;
+    latest.rosterRevision = revision;
+    latest.rosterSentAt = session.rosterSentAt;
+    latest.rosterError = undefined;
+    await saveSession(latest);
     inc('attendance_roster_sent_total', {}, sent);
     return { sent, skipped: false, revision };
   } catch (err) {
     const message = (err as Error).message;
     session.rosterError = message;
-    await saveSession(session);
+    const latest = (await getSession(session.id)) ?? session;
+    latest.rosterError = message;
+    await saveSession(latest);
     inc('attendance_roster_errors_total');
     logger.error({ sessionId: session.id, err: message }, 'attendance roster delivery failed');
     return { sent, skipped: false, error: message, revision };

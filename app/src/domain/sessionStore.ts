@@ -68,6 +68,8 @@ export interface SessionRecord {
   /** Last roster revision delivered successfully; an unchanged result is not resent. */
   rosterRevision?: string;
   rosterSentAt?: number;
+  /** When "Send results" last ran for this call (tags, workflows, webhooks, export). */
+  lastDispatchedAt?: number;
   /** Why the last roster delivery failed — surfaced so it is not a silent loss. */
   rosterError?: string;
   /** Every workflow assignment attempt, newest first, for the session detail. */

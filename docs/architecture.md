@@ -356,7 +356,7 @@ The invited list is resolved by `resolveInvitedEmails()` in this order:
 ### Routing attendance into GHL workflows
 
 A second, independent channel can put the contact into a GoHighLevel workflow. It is configured per
-connection in **Attendance automations**, alongside (not instead of) tags, webhooks and the roster.
+connection in **After-call actions**, alongside (not instead of) tags, webhooks and the full-list export.
 
 **Normalisation.** `zoom.ts` already fetched the poll and Q&A report rows; `buildZoomBehavior()`
 (`domain/zoomBehavior.ts`, pure) joins them to the attendee list and produces one `ZoomBehavior` per
@@ -708,7 +708,7 @@ deliberately leaves `#campaignNew` visible, because that is the tour's opening t
 
 Navigation lives in a **left rail** (`.rail`, `--rail-w: 224px`) grouped by plain labels: Campaigns
 and Invitations first, then *Set up* (Google accounts, Contact lists, Sending accounts, Documents),
-*Insights* (Statistics, Who attended, Deliverability, Assistant) and *Workspace* (People, Settings). A slim `.topbar` carries
+*Insights* (Statistics, Calls, Deliverability, Assistant) and *Workspace* (People, Settings). A slim `.topbar` carries
 only the brand and the help/account menus. Below 900px the rail flattens into a horizontal scrolling
 strip and the group labels hide.
 
@@ -784,7 +784,7 @@ API routes and Redis keys keep their original names, so use this table when read
 | Contact lists | `list`, `/api/lists`, `list:{id}` |
 | Documents | `knowledge`, `/api/knowledge` |
 | Invitations | `invite`, `/api/invites`, `list:{id}:invited` |
-| Who attended | `session`, `attendance`, `/api/sessions`, `attendance:{sessionId}` |
+| Calls | `session`, `attendance`, `/api/sessions`, `attendance:{sessionId}` |
 | Statistics | `stats`, `/api/stats/overview`, `statsOverview` |
 | Campaigns | `campaign`, `/api/campaigns`, `campaign:{id}` |
 | Sending accounts | `sender`, `/api/senders`, `sender:*` |

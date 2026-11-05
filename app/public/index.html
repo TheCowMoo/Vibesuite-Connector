@@ -57,7 +57,7 @@
 
       <div class="rail__group">Insights</div>
       <button class="rail__link" data-view="stats"><span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="21" x2="21" y2="21"/><rect x="5" y="11" width="4" height="10"/><rect x="11" y="6" width="4" height="15"/><rect x="17" y="14" width="4" height="7"/></svg></span>Statistics</button>
-      <button class="rail__link" data-view="attendance"><span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg></span>Who attended</button>
+      <button class="rail__link" data-view="attendance"><span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg></span>Calls</button>
       <button class="rail__link" data-view="deliverability" data-role="admin" hidden><span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg></span>Deliverability</button>
       <button class="rail__link" data-view="advisor" data-role="admin" hidden><span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1"/><circle cx="12" cy="12" r="2.5"/></svg></span>Assistant</button>
 
@@ -221,14 +221,20 @@
     <option value="Australia/Sydney"></option>
   </datalist>
 
-  <!-- Attendance -->
+  <!-- Calls -->
   <section id="view-attendance" class="view" hidden>
     <div class="page-head">
       <div>
-        <h1 class="page-head__title">Who attended</h1>
-        <p class="page-head__sub">See who actually showed up to each video call.</p>
+        <h1 class="page-head__title">Calls &amp; attendance</h1>
+        <p class="page-head__sub">See who joined, then send the results to GHL.</p>
       </div>
-      <button class="btn btn--primary" id="newSessionBtn">+ New video call</button>
+      <div class="page-head__actions">
+        <div class="menu-wrap">
+          <button class="btn btn--outline" id="attendanceActionsBtn">After-call actions &#9662;</button>
+          <div class="menu" id="attendanceActionsMenu"></div>
+        </div>
+        <button class="btn btn--primary" id="newSessionBtn">+ Add call</button>
+      </div>
     </div>
 
     <div class="summary" id="attendanceSummaryStrip"></div>
@@ -589,15 +595,21 @@
 <div class="backdrop" id="sessionDetail" hidden>
   <div class="modal modal--wide" role="dialog" aria-modal="true" aria-labelledby="sessionDetailTitle">
     <div class="modal__head">
-      <h2 class="modal__title" id="sessionDetailTitle">Video call</h2>
+      <h2 class="modal__title" id="sessionDetailTitle">Call details</h2>
       <button class="icon-btn" data-close="sessionDetail" aria-label="Close">&times;</button>
     </div>
     <div id="sessionDetailBody"></div>
     <div class="modal__foot">
-      <button class="btn btn--outline" id="sessionEdit">Edit call</button>
-      <button class="btn btn--outline" id="sessionDispatch">Send to GHL</button>
-      <button class="btn btn--outline" id="sessionRoster">Send roster</button>
+      <button class="btn btn--ghost" id="sessionEdit">Edit call</button>
+      <div class="menu-wrap">
+        <button class="btn btn--ghost" id="sessionMore" aria-haspopup="true" aria-expanded="false">More &#9662;</button>
+        <div class="menu menu--up" id="sessionMoreMenu">
+          <button type="button" class="menu__item" id="sessionRoster">Send full list</button>
+          <button type="button" class="menu__item" id="sessionManageActions">Manage actions</button>
+        </div>
+      </div>
       <span class="spacer"></span>
+      <button class="btn btn--primary" id="sessionDispatch">Send results</button>
       <button class="btn btn--ghost" data-close="sessionDetail">Close</button>
     </div>
   </div>
@@ -607,7 +619,7 @@
 <div class="backdrop" id="editSession" hidden>
   <div class="modal" role="dialog" aria-modal="true" aria-labelledby="editSessionTitle">
     <div class="modal__head">
-      <h2 class="modal__title" id="editSessionTitle">Edit video call</h2>
+      <h2 class="modal__title" id="editSessionTitle">Edit call</h2>
       <button class="icon-btn" data-close="editSession" aria-label="Close">&times;</button>
     </div>
     <label class="field"><span class="field__label">Type of call</span>
@@ -644,7 +656,7 @@
 <div class="backdrop" id="newSession" hidden>
   <div class="modal" role="dialog" aria-modal="true" aria-labelledby="newSessionTitle">
     <div class="modal__head">
-      <h2 class="modal__title" id="newSessionTitle">New video call</h2>
+      <h2 class="modal__title" id="newSessionTitle">Add a call</h2>
       <button class="icon-btn" data-close="newSession" aria-label="Close">&times;</button>
     </div>
     <form id="newSessionForm" novalidate>
@@ -662,7 +674,7 @@
         </select>
       </label>
       <label class="field"><span class="field__label">Meeting or webinar ID</span><input name="externalId" placeholder="e.g. 85412345678" /></label>
-      <label class="field"><span class="field__label">Video call name</span><input name="title" placeholder="e.g. Product webinar" /></label>
+      <label class="field"><span class="field__label">Call name</span><input name="title" placeholder="e.g. Product webinar" /></label>
       <label class="field"><span class="field__label">Join link (optional)</span><input name="joinUrl" placeholder="Leave blank and we'll look it up in Zoom" /></label>
       <div class="invite-row">
         <label class="field"><span class="field__label">Start</span><input type="datetime-local" name="startTime" id="sessionStart" /><span class="field__hint" data-hint-for="sessionStart"></span></label>
@@ -675,85 +687,104 @@
     <div class="modal__foot">
       <span class="spacer"></span>
       <button class="btn btn--ghost" data-close="newSession">Cancel</button>
-      <button class="btn btn--primary" id="newSessionSave">Create video call</button>
+      <button class="btn btn--primary" id="newSessionSave">Add call</button>
     </div>
   </div>
 </div>
 
-<!-- Attendance automations -->
+<!-- After-call actions -->
 <div class="backdrop" id="attendanceAutomations" hidden>
   <div class="modal modal--wide" role="dialog" aria-modal="true" aria-labelledby="attendanceAutomationsTitle">
     <div class="modal__head">
-      <h2 class="modal__title" id="attendanceAutomationsTitle">Actions for who attended</h2>
+      <h2 class="modal__title" id="attendanceAutomationsTitle">After-call actions</h2>
       <button class="icon-btn" data-close="attendanceAutomations" aria-label="Close">&times;</button>
     </div>
     <div id="attendanceAutomationsBody">
-      <fieldset class="field">
-        <legend class="field__label">GHL integration method</legend>
-        <label class="radio"><input type="radio" name="attendanceDeliveryMode" value="both" /> Both API + webhooks (default)</label>
-        <label class="radio"><input type="radio" name="attendanceDeliveryMode" value="api" /> API only</label>
-        <label class="radio"><input type="radio" name="attendanceDeliveryMode" value="webhook" /> Webhooks only</label>
-      </fieldset>
+      <p class="hint" id="attendanceActionsSummary">Tags on · no workflows · no full-list export.</p>
 
-      <h3 class="detail__sub">Contact tags</h3>
-      <p class="hint">One tag per outcome. Blank uses the server defaults; a blank partial tag falls back to the attended tag, so existing workflows keep working.</p>
+      <h3 class="detail__sub">1. Label results in GHL</h3>
+      <p class="hint">One tag per result. Blank uses the server defaults; a blank Brief visit tag falls back to the Attended tag.</p>
       <div class="sender__grid">
         <label class="field"><span class="field__label">Attended</span><input id="attTagAttended" placeholder="attended" /></label>
-        <label class="field"><span class="field__label">Partial</span><input id="attTagPartial" placeholder="attended" /></label>
+        <label class="field"><span class="field__label">Brief visit</span><input id="attTagPartial" placeholder="attended" /></label>
         <label class="field"><span class="field__label">No-show</span><input id="attTagNoShow" placeholder="no-show" /></label>
-        <label class="field"><span class="field__label">Not invited</span><input id="attTagNotInvited" placeholder="not-invited" /></label>
+        <label class="field"><span class="field__label">Walk-in</span><input id="attTagNotInvited" placeholder="not-invited" /></label>
       </div>
-      <label class="field"><span class="field__label">Segment custom field ID (optional)</span><input id="attCustomField" placeholder="GHL custom field id" /></label>
+      <label class="field"><span class="field__label">Copy the result to a GHL field (optional)</span><input id="attCustomField" placeholder="GHL custom field id" /></label>
 
-      <h3 class="detail__sub">GHL workflows</h3>
-      <p class="hint">Add each GoHighLevel workflow this account may use. Paste the workflow ID from the GHL workflow URL; the name is only for this panel.</p>
+      <h3 class="detail__sub">2. Add people to workflows</h3>
+      <p class="hint">Add the workflows this account may use, then write rules that choose one. First enabled match wins.</p>
       <div id="attendanceWorkflowsList"></div>
-      <button class="btn btn--ghost btn--sm" id="attendanceAddWorkflowBtn">+ Add workflow</button>
+      <button class="btn btn--ghost btn--sm" id="attendanceAddWorkflowBtn">+ Connect workflow</button>
 
-      <h3 class="detail__sub">GHL workflow rules</h3>
-      <p class="hint">First enabled match wins. Every condition and poll condition must match. These run automatically during “Send to GHL” and every scheduled sync.</p>
+      <h4 class="detail__sub">Workflow rules</h4>
+      <p class="hint">If every condition matches, add the person to the chosen workflow. These run after every call and when you press Send results.</p>
       <div id="attendanceWorkflowRulesList"></div>
-      <button class="btn btn--ghost btn--sm" id="attendanceAddWorkflowRuleBtn">+ Add workflow rule</button>
+      <button class="btn btn--ghost btn--sm" id="attendanceAddWorkflowRuleBtn">+ Add rule</button>
 
-      <h3 class="detail__sub">AI workflow routing (optional)</h3>
-      <p class="hint">Runs after the rules for people no rule matched. The model sees anonymous attendee IDs and behavior (including poll, Q&amp;A and registration answers); the attendee name/email fields are not sent, but free-text answers may contain whatever the attendee typed.</p>
-      <label class="daychk"><input type="checkbox" id="attAiEnabled" /><span>Enable AI routing</span></label>
-      <div class="sender__grid">
-        <label class="field"><span class="field__label">Mode</span>
-          <select id="attAiMode">
-            <option value="preview">Preview then apply (safe default)</option>
-            <option value="auto">Automatic</option>
-          </select>
-        </label>
-        <label class="field"><span class="field__label">Confidence threshold</span><input id="attAiThreshold" type="number" min="0" max="1" step="0.05" value="0.7" /></label>
-        <label class="field"><span class="field__label">Max attendees per session (0 = all)</span><input id="attAiMax" type="number" min="0" step="1" value="25" /></label>
+      <h3 class="detail__sub">AI matching (optional)</h3>
+      <p class="hint">After your rules, AI can pick a workflow for people no rule matched. It sees anonymous attendee IDs and behavior; the attendee name/email fields are not sent, but free-text answers may contain whatever the attendee typed.</p>
+      <label class="daychk"><input type="checkbox" id="attAiEnabled" /><span>Let AI choose workflows</span></label>
+      <div id="attAiControls" hidden>
+        <div class="sender__grid">
+          <label class="field"><span class="field__label">Mode</span>
+            <select id="attAiMode">
+              <option value="preview">Review first (recommended)</option>
+              <option value="auto">Apply automatically</option>
+            </select>
+          </label>
+          <label class="field"><span class="field__label">AI confidence</span>
+            <select id="attAiThreshold">
+              <option value="0.5">Low</option>
+              <option value="0.7">Medium</option>
+              <option value="0.9">High</option>
+            </select>
+          </label>
+          <label class="field"><span class="field__label">Limit AI to (0 = everyone)</span><input id="attAiMax" type="number" min="0" step="1" value="25" /></label>
+        </div>
+        <p class="muted" id="attAiNote">Review first shows proposals in the call before anything is applied. Apply automatically adds eligible matches.</p>
       </div>
-      <p class="muted" id="attAiNote">Preview only proposes; nothing is applied until you review it in the call details. Automatic applies proposals at or above the threshold.</p>
 
-      <h3 class="detail__sub">Roster webhook</h3>
-      <p class="hint">Optional. Sends each segment (or one snapshot) to your own endpoint, with a revision so an unchanged result is not resent.</p>
-      <label class="field"><span class="field__label">Roster URL (optional)</span><input id="attRosterUrl" placeholder="https://hooks.example.com/attendance" /></label>
-      <div class="sender__grid">
-        <label class="field"><span class="field__label">Shape</span><select id="attRosterShape"><option value="segments">One request per segment</option><option value="session">One request per session</option></select></label>
-        <label class="field"><span class="field__label">Bearer token (optional)</span><input id="attRosterToken" placeholder="Leave blank to keep the current token" /></label>
+      <button type="button" class="advanced-toggle" id="attAdvancedToggle" aria-expanded="false" aria-controls="attAdvancedBody">
+        <span>Advanced</span>
+        <span class="muted" id="attAdvancedHint">Not configured</span>
+        <span class="advanced-toggle__state" id="attAdvancedState">Show</span>
+      </button>
+      <div id="attAdvancedBody" class="advanced-body" hidden>
+        <h4 class="detail__sub">How tags are sent</h4>
+        <fieldset class="field">
+          <label class="radio"><input type="radio" name="attendanceDeliveryMode" value="both" /> API + webhooks (default)</label>
+          <label class="radio"><input type="radio" name="attendanceDeliveryMode" value="api" /> API only</label>
+          <label class="radio"><input type="radio" name="attendanceDeliveryMode" value="webhook" /> Webhooks only</label>
+          <p class="hint">Controls tags and per-person webhooks. Workflows, AI matching and full-list export are separate.</p>
+        </fieldset>
+
+        <h4 class="detail__sub">Full call list export</h4>
+        <p class="hint">Send the whole call list to your own endpoint. Sometimes called a roster.</p>
+        <label class="field"><span class="field__label">Webhook URL (optional)</span><input id="attRosterUrl" placeholder="https://hooks.example.com/attendance" /></label>
+        <div class="sender__grid">
+          <label class="field"><span class="field__label">Send</span><select id="attRosterShape"><option value="segments">One request per result group</option><option value="session">One request per call</option></select></label>
+          <label class="field"><span class="field__label">Bearer token (optional)</span><input id="attRosterToken" placeholder="Leave blank to keep the current token" /></label>
+        </div>
+        <p class="muted" id="attRosterTokenState"></p>
+        <label class="daychk"><input type="checkbox" id="attRosterClearToken" /><span>Remove the stored token</span></label>
+
+        <h4 class="detail__sub">Per-person webhooks</h4>
+        <p class="hint">Send a webhook when someone matches every condition. These are separate from workflow rules.</p>
+        <div id="attendanceRulesList"></div>
+        <button class="btn btn--ghost btn--sm" id="attendanceAddRuleBtn">+ Add webhook rule</button>
+
+        <h4 class="detail__sub">Developer examples</h4>
+        <p class="muted">Per-person payload</p>
+        <pre class="snapshot" id="attendanceSnapshot">…</pre>
+        <p class="muted">Full-list payload</p>
+        <pre class="snapshot" id="attendanceRosterSnapshot">…</pre>
       </div>
-      <p class="muted" id="attRosterTokenState"></p>
-      <label class="daychk"><input type="checkbox" id="attRosterClearToken" /><span>Remove the stored token</span></label>
-
-      <h3 class="detail__sub">Webhook rules</h3>
-      <p class="hint">Each rule fires its webhook when ALL of its conditions match an attendee outcome. Fields and values come from the video-attendance catalog.</p>
-      <div id="attendanceRulesList"></div>
-      <button class="btn btn--ghost btn--sm" id="attendanceAddRuleBtn">+ Add rule</button>
-
-      <h3 class="detail__sub">Example of what gets sent</h3>
-      <pre class="snapshot" id="attendanceSnapshot">…</pre>
-      <h3 class="detail__sub">Example roster payload</h3>
-      <pre class="snapshot" id="attendanceRosterSnapshot">…</pre>
     </div>
     <div class="modal__foot">
       <span class="spacer"></span>
       <button class="btn btn--ghost" data-close="attendanceAutomations">Cancel</button>
-      <button class="btn btn--primary" id="attendanceAutomationsSave">Save</button>
+      <button class="btn btn--primary" id="attendanceAutomationsSave">Save actions</button>
     </div>
   </div>
 </div>

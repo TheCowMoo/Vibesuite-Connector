@@ -5,6 +5,8 @@ export interface CatalogField {
   label: string;
   operators: ConditionOperator[];
   values?: string[];
+  /** Friendly labels for raw values (the stored/compared value stays `values`). */
+  valueLabels?: Record<string, string>;
   sample?: string;
 }
 
@@ -54,16 +56,18 @@ export const INTEGRATION_CATALOG: IntegrationCatalog[] = [
       // Per attendee
       {
         key: 'attendanceStatus',
-        label: 'Attendance status',
+        label: 'Attendance result',
         operators: ['equals', 'not_equals'],
         values: ['attended', 'no_show', 'partial'],
+        valueLabels: { attended: 'Attended', partial: 'Brief visit', no_show: 'No-show' },
         sample: 'attended',
       },
       {
         key: 'segment',
-        label: 'Attendance segment',
+        label: 'Result group',
         operators: ['equals', 'not_equals'],
         values: ['attended', 'partial', 'no_show', 'not_invited'],
+        valueLabels: { attended: 'Attended', partial: 'Brief visit', no_show: 'No-show', not_invited: 'Walk-in' },
         sample: 'no_show',
       },
       {

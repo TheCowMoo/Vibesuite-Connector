@@ -12,7 +12,7 @@ Five objects, one of which is a job:
 |---|---|---|
 | **Google accounts** | A connected calendar **and** a sending mailbox, with its own limits | Creates the calendar events and receives the RSVP updates |
 | **Contact lists** | An uploaded list, sorted into groups, plus the memory of who was already invited | Decides who gets invited, and stops repeat invitations |
-| **Who attended** (video calls) | A real event — usually a Zoom meeting — and its attendance report | Turns "they said yes" into "they showed up" |
+| **Calls** (video calls) | A real event — usually a Zoom meeting — and its attendance report | Turns "they said yes" into "they showed up" |
 | **Campaigns** | A durable job that binds a list + event + mailboxes (+ optional video call) | Sends a large audience over several days, paced, with per-person state |
 | **Invitations** | A one-off send, right now | Small or urgent sends that do not need a job |
 
@@ -100,99 +100,98 @@ one manual batch — caps and cooldowns still apply.
 
 Deleting a list leaves campaigns that reference it unable to start — they lose their audience.
 
-### Video calls
+### Calls
 
-**Who attended → + New video call** creates the event record: title, optional join link (Zoom is looked up
-if you leave it blank), start/end, the Google account it belongs to, an optional Zoom host, and an optional
-link back to an invitation.
+**Calls → + Add call** creates the event record: title, optional join link (Zoom is looked up if you leave
+it blank), start/end, the Google account it belongs to, an optional Zoom host, and an optional link back to
+an invitation.
 
-Attendance syncs on its own after the call, and **Sync now** forces a refresh. **Details** shows who
-attended and who did not, and **Send to GHL** pushes those results to your CRM.
+Attendance syncs on its own after the call, and **Sync** forces a refresh. **View results** shows who
+joined and who did not. **Send results** runs the account's after-call actions and sends the results to
+GHL. The call opens in four tabs: **People**, **Polls & Q&A**, **Registration** and **Workflows**.
 
 A call linked to a campaign inherits that campaign's **frozen recipients** as its invited list, so
-attendance matches the people who were actually emailed. A standalone call has no invited list: the people
-who joined appear under **“Attended — not on the invited list”**, and no-show counts stay empty until the
-call is linked to a campaign or an invitation.
+attendance matches the people who were actually emailed. A standalone call has no invited list: people who
+joined appear as **Walk-ins**, and no-show counts stay empty until the call is linked to a campaign or an
+invitation.
 
-If Zoom has no report yet — normal for a while after a webinar ends — the call stays **Pending** and the
+If Zoom has no report yet — normal for a while after a webinar ends — the call shows **Waiting** and the
 panel retries hourly for up to 24 hours. Nothing is stored as “0 attended” in the meantime.
 
-If it stays pending, open **Details → What the last sync tried**: each attempt shows the call type, the
-Zoom host that asked, the HTTP status of the report and of the past-call fallback, and Zoom's own message.
-**Edit call** corrects the type, ID or host without deleting the call, and saving re-syncs immediately. The
-panel also retries the other call type and the other connected hosts on its own when the first answer is a
-404.
+If it stays waiting, open **View results → What the last sync tried**: each attempt shows the call type,
+the Zoom host that asked, the HTTP status of the report and of the past-call fallback, and Zoom's own
+message. **Edit call** corrects the type, ID or host without deleting the call, and saving re-syncs
+immediately. The panel also retries the other call type and the other connected hosts on its own when the
+first answer is a 404.
 
-### Sending attendance to GHL and your own endpoint
+### After-call actions
 
-**Google accounts → ⋯ → Attendance automations** controls delivery for that account:
+Open **Calls → After-call actions** or **Google accounts → ⋯ → After-call actions**. The settings apply to
+every call on that account.
 
-- **Contact tags** — one per segment: attended, partial, no-show, not invited. A blank partial tag falls
-  back to the attended tag, so existing workflows do not change.
-- **Segment custom field** — optional GHL field ID that receives `attended` / `partial` / `no_show` /
-  `not_invited`.
-- **Webhook rules** — per-person webhook rules. Conditions can now target `segment`, `invited` and
-  `invitedSource`, alongside minutes watched and session fields.
-- **Roster webhook** — optional URL that receives each whole segment, or one snapshot containing all
-  segments. Every request carries a `revision`; an unchanged result is not resent. Add an optional bearer
-  token if your endpoint expects one — it is stored encrypted, and leaving the field blank keeps the
-  current token.
+Each person gets one result:
 
-The four segments are:
-
-| Segment | Meaning |
+| Result | Meaning |
 |---|---|
-| attended | Invited and watched at least the minimum minutes |
-| partial | Invited and watched less than the minimum |
-| no_show | Invited but never joined |
-| not_invited | Joined but not on the invited list (walk-ins) |
+| Attended | Invited and watched at least the minimum minutes |
+| Brief visit | Invited and watched less than the minimum |
+| No-show | Invited but never joined |
+| Walk-in | Joined but not on the invited list |
+
+The dialog has three parts:
+
+1. **Label results in GHL** — one tag per result, plus an optional GHL custom field that receives
+   `Attended`, `Brief visit`, `No-show` or `Walk-in`. A blank Brief visit tag falls back to the Attended
+   tag, so existing workflows do not change.
+2. **Add people to workflows** — the workflows this account may use, and the rules that choose one.
+   AI matching is optional and lives here too.
+3. **Advanced** — how tags are sent, the full call list export, per-person webhooks, and developer
+   examples. These are still fully editable; they are collapsed because most accounts do not use them.
+
+**Send results** runs everything configured: tags, per-person webhooks, workflow rules, AI matching and
+the full-list export. It runs automatically after a successful sync too. **More → Send full list** forces
+only the full-list export, even when its content is unchanged.
 
 The invited list is cross-referenced automatically: a campaign-linked call uses the campaign's sent
 recipients, a one-off invitation uses the attendee list of the calendar event it created, and a standalone
-call can name a list with **Edit call**. If none is linked, everyone who joined is `not_invited` and no
+call can name a list with **Edit call**. If none is linked, everyone who joined is a walk-in and no
 no-shows are invented.
 
-**Send to GHL** delivers per contact. **Send roster** forces the roster even when it is unchanged. The same
-delivery runs automatically after a successful sync; the roster is skipped when its content has not
-changed.
+### Routing attendees into workflows
 
-### Routing attendees into GHL workflows
+In **After-call actions → Add people to workflows**, connect each GHL workflow this account may use: give
+it a name for this panel and paste the workflow ID (the part after `/workflow/` in the GHL workflow URL).
+The name is only for you; the ID is what GHL receives.
 
-The same **Attendance automations** dialog has a **GHL workflows** section. Add a workflow by pasting its
-GHL workflow ID (the part after `/workflow/` in the GHL workflow URL) and a name for this panel. The
-display name is only for you; the ID is what GHL receives.
+Then add **workflow rules**. Rules are checked from top to bottom and the first enabled match wins, so put
+the narrowest rule first. Every normal condition and every poll condition must match:
 
-Then create **GHL workflow rules**. Rules are checked from top to bottom and the first enabled match wins,
-so put the narrowest rule first. Every normal condition and every Zoom poll condition must match:
-
-- Normal conditions use the video-attendance catalog — status, segment, minutes, focus score, attendance
+- Normal conditions use the attendance catalog — result, invited source, minutes, engagement, attendance
   percentage, poll count/answers, Q&A, registration answers, joined-late/left-early, device/location/
-  network and the session fields.
-- Poll conditions target one exact poll question: **answered**, **did not answer**, **answer is**,
-  **answer contains**, **answer is not** or **answer does not contain**. "Did not answer" only fires when
-  that question actually ran in the call, so a poll you forgot to launch does not tag everyone.
-- If you leave a rule with no conditions at all it is a catch-all. That is useful as the last rule, and
-  dangerous as the first.
+  network and the call fields.
+- Poll conditions target one poll question: **answered**, **did not answer**, **answer is**, **answer
+  contains**, **answer is not** or **answer does not contain**. “Did not answer” only fires when that
+  question actually ran in the call, so a poll you forgot to launch does not match everyone.
+- A rule with no conditions matches everyone. That is useful as the last rule and dangerous as the first.
 
-**Workflow event start time** is either **Now** or **the call's start time**. It is the timestamp GHL uses
-for time-based workflow steps.
+**Start workflow at** is either **Now** or **When the call started**. It is the timestamp GHL uses for
+time-based workflow steps.
 
-Open a call's **Details** to see poll answers by question, every Q&A entry, registration answers, and the
-poll/Q&A/registration/late columns on each attendee. **Preview routes** shows what the rules and (if
-enabled) AI would do before anything is sent. Tick the rows you want and **Apply selected**. Already
-applied workflows are skipped; one workflow per person per call is the default. To add a second one
-deliberately, use the manual email + workflow control and confirm. **Create rule from this answer** on a
-poll opens Attendance automations with a pre-filled poll rule.
+Open a call's **View results → Workflows** tab to review matches before anything is added.
+**Review workflow matches** shows what the rules and, if enabled, AI would do. Tick the rows you want and
+press **Add selected to workflows**. Already-applied workflows are skipped; one workflow per person per
+call is the default. To add a second one deliberately, use **Add someone manually** and confirm.
+**Make this a rule** on a poll answer opens After-call actions with a pre-filled poll rule.
 
-AI routing is optional and off by default. Add a short "what is this workflow for?" note on each workflow,
-then enable AI, choose **Preview then apply** (safe) or **Automatic**, set a confidence threshold (0.7 is
-a reasonable start) and, if you want a cost cap, the maximum attendees per call (default 25; 0 = all; the
-first N unmatched in attended → partial → no-show → not-invited order). The model only sees
-anonymous `p1`, `p2`, … rows and the behavior above — not the attendee name/email fields — and it can only
-choose from the workflow IDs you added. Free-text poll, Q&A and registration answers are sent as the
-attendee typed them, so treat AI routing as a data-sharing decision. In preview mode nothing is applied
-until you review it; automatic mode applies only proposals at or above the threshold. AI runs **after**
-the deterministic rules, and only for people those rules did not match.
+AI matching is optional and off by default. Add a short “When should AI pick this?” note to each workflow,
+then turn on **Let AI choose workflows**, choose **Review first** (recommended) or **Apply automatically**,
+and pick **Low / Medium / High** confidence. If you want a cost cap, set **Limit AI to** a number of people
+(default 25; 0 = everyone; the first N unmatched in attended → brief visit → no-show → walk-in order). The
+model only sees anonymous `p1`, `p2`, … rows and the behavior above — not the attendee name/email fields —
+and it can only choose from the workflow IDs you added. Free-text poll, Q&A and registration answers are
+sent as the attendee typed them, so treat AI matching as a data-sharing decision. With **Review first**
+nothing is applied until you review it; **Apply automatically** adds only matches at or above the chosen
+confidence. AI runs after the deterministic rules, and only for people those rules did not match.
 
 
 ### Replies in GoHighLevel
@@ -524,10 +523,10 @@ planner in each wizard already accounts for the caps, so trust *When it will fin
 | Campaign is "Sending" but nothing goes out | Outside sending hours, caps already used by another campaign, or the mailbox is paused/cooling | Check **Sending accounts**; wait for the window or add a mailbox |
 | `N didn't go through` chip | Some recipients failed (bad address, provider refusal) | Details shows the error per recipient; failures re-queue automatically |
 | Scheduled campaign is Paused with a reason | Its audience was empty at activation | Fix the audience, then Resume |
-| Attendance sections are empty | Zoom reports not readable, or the call has not happened | **Who attended → Sync now**; if it stays empty, Settings → Video conferencing → **Check access** |
-| Synced, but 0 attended while Details lists people under “not on the invited list” | The call has no invited list linked | Link it to the campaign or invitation that sent the invitations, then Sync now. Campaign-linked calls pick this up automatically |
+| Attendance sections are empty | Zoom reports not readable, or the call has not happened | **Calls → Sync**; if it stays empty, Settings → Video conferencing → **Check access** |
+| Synced, but 0 attended while View results lists people as Walk-ins | The call has no invited list linked | Link it to the campaign or invitation that sent the invitations, then Sync. Campaign-linked calls pick this up automatically |
 | “Zoom has no report for this call yet”, or the call stays Pending with `HTTP 404` | Zoom has no past call under that ID, type or host | Press **Edit call**, set the right **Type of call**, paste the numeric ID or join link, pick the hosting Zoom account, then save. The panel also tries the other type and other hosts automatically |
-| Call stays Pending and details show `HTTP 401` | The host's Zoom authorisation is dead | Disconnect the host in Settings → Video conferencing, then Connect again |
+| Call stays Waiting and View results shows `HTTP 401` | The host's Zoom authorisation is dead | Disconnect the host in Settings → Video conferencing, then Connect again |
 | Zoom says "Invalid access token" | The authorisation is dead (recreated app, rotated secret, changed scopes) | Disconnect the host, then Connect again |
 | Numbers differ between campaign and Statistics | Different windows/denominators | See *What the words mean* above |
 

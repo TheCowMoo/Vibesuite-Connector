@@ -167,7 +167,7 @@
       if (c.ghlAuthType === 'oauth') {
         items += '<a class="menu__item" href="/oauth/ghl/start?connectionId=' + encodeURIComponent(c.id) + '">' + icon('link') + '<span>Connect GHL</span></a>';
       }
-      items += menuBtn('attendanceAutomations', 'Attendance automations', 'sliders', c.id);
+      items += menuBtn('attendanceAutomations', 'After-call actions', 'sliders', c.id);
       items += menuBtn('delete', 'Delete', 'trash', c.id, true);
 
       var card = document.createElement('div');
@@ -360,6 +360,7 @@
   var editingAiWorkflow = { enabled: false, mode: 'preview', confidenceThreshold: 0.7, maxAttendees: 25 };
   var pendingWorkflowSeed = null;
   var sessionWorkflowPreview = null;
+  var attendanceAdvancedOpen = false;
 
   function loadCatalog() {
     return api('/api/integrations').then(function (d) {
@@ -417,9 +418,12 @@
     var rules = editingRules;
     el.innerHTML = '';
     if (rules.length === 0) {
-      el.innerHTML = '<p class="muted">No rules yet — add one below.</p>';
+      el.innerHTML = currentScope === 'attendance'
+        ? '<p class="muted">No webhook rules yet.</p>'
+        : '<p class="muted">No rules yet — add one below.</p>';
     }
     rules.forEach(function (rule) { el.appendChild(ruleEl(rule)); });
+    if (currentScope === 'attendance') refreshAttendanceActionsSummary();
   }
 
   function ruleEl(rule) {
@@ -431,13 +435,16 @@
 
     var title = document.createElement('span');
     title.className = 'rule__title';
-    title.textContent = 'Rule';
+    title.textContent = currentScope === 'attendance' ? 'Webhook rule' : 'Rule';
 
     var en = document.createElement('input');
     en.type = 'checkbox';
     en.checked = !!rule.enabled;
     en.title = 'Enabled';
-    en.addEventListener('change', function () { rule.enabled = en.checked; });
+    en.addEventListener('change', function () {
+      rule.enabled = en.checked;
+      if (currentScope === 'attendance') refreshAttendanceActionsSummary();
+    });
 
     var del = document.createElement('button');
     del.type = 'button';
@@ -459,14 +466,14 @@
     nameLabel.innerHTML = '<span class="field__label">Rule name</span>';
     var nameInput = document.createElement('input');
     nameInput.value = rule.name || '';
-    nameInput.placeholder = 'e.g. Webinar accepted';
+    nameInput.placeholder = currentScope === 'attendance' ? 'e.g. Send to Zapier' : 'e.g. Webinar accepted';
     nameInput.addEventListener('input', function () { rule.name = nameInput.value; });
     nameLabel.appendChild(nameInput);
     box.appendChild(nameLabel);
 
     var condTitle = document.createElement('p');
     condTitle.className = 'rule__cond-title';
-    condTitle.textContent = 'When ALL of these match:';
+    condTitle.textContent = 'If all of these are true:';
     box.appendChild(condTitle);
 
     var condList = document.createElement('div');
@@ -546,7 +553,7 @@
       meta.values.forEach(function (v) {
         var o = document.createElement('option');
         o.value = v;
-        o.textContent = v;
+        o.textContent = meta.valueLabels && meta.valueLabels[v] ? meta.valueLabels[v] : v;
         valueControl.appendChild(o);
       });
       valueControl.value = cond.value || '';
@@ -604,10 +611,12 @@
     if (!el) return;
     el.innerHTML = '';
     if (!editingWorkflows.length) {
-      el.innerHTML = '<p class="muted">No workflows yet — add one below.</p>';
+      el.innerHTML = '<p class="muted">No workflows connected yet.</p>';
+      refreshAttendanceActionsSummary();
       return;
     }
     editingWorkflows.forEach(function (w) { el.appendChild(workflowRowEl(w)); });
+    refreshAttendanceActionsSummary();
   }
 
   function workflowRowEl(w) {
@@ -648,10 +657,10 @@
 
     var idLabel = document.createElement('label');
     idLabel.className = 'field';
-    idLabel.innerHTML = '<span class="field__label">GHL workflow ID</span>';
+    idLabel.innerHTML = '<span class="field__label">Workflow ID</span>';
     var idInput = document.createElement('input');
     idInput.value = w.workflowId || '';
-    idInput.placeholder = 'Paste the id from the workflow URL';
+    idInput.placeholder = 'Paste the ID from the workflow URL';
     idInput.addEventListener('input', function () {
       var previous = w.workflowId;
       w.workflowId = idInput.value.trim();
@@ -665,7 +674,7 @@
 
     var criteriaLabel = document.createElement('label');
     criteriaLabel.className = 'field';
-    criteriaLabel.innerHTML = '<span class="field__label">What is this workflow for? (shown to the AI)</span>';
+    criteriaLabel.innerHTML = '<span class="field__label">When should AI pick this?</span>';
     var criteria = document.createElement('textarea');
     criteria.rows = 3;
     criteria.value = w.criteria || '';
@@ -682,10 +691,12 @@
     if (!el) return;
     el.innerHTML = '';
     if (!editingWorkflowRules.length) {
-      el.innerHTML = '<p class="muted">No workflow rules yet — add one below.</p>';
+      el.innerHTML = '<p class="muted">No rules yet.</p>';
+      refreshAttendanceActionsSummary();
       return;
     }
     editingWorkflowRules.forEach(function (rule) { el.appendChild(workflowRuleEl(rule)); });
+    refreshAttendanceActionsSummary();
   }
 
   function workflowRuleEl(rule) {
@@ -701,7 +712,10 @@
     en.type = 'checkbox';
     en.checked = !!rule.enabled;
     en.title = 'Enabled';
-    en.addEventListener('change', function () { rule.enabled = en.checked; });
+    en.addEventListener('change', function () {
+      rule.enabled = en.checked;
+      refreshAttendanceActionsSummary();
+    });
     var del = document.createElement('button');
     del.type = 'button';
     del.className = 'icon-btn';
@@ -728,7 +742,7 @@
 
     var workflowLabel = document.createElement('label');
     workflowLabel.className = 'field';
-    workflowLabel.innerHTML = '<span class="field__label">Add the contact to</span>';
+    workflowLabel.innerHTML = '<span class="field__label">Then add to</span>';
     var workflowSel = document.createElement('select');
     workflowSel.innerHTML = '<option value="">— pick a workflow —</option>' + editingWorkflows.map(function (w) {
       var label = w.name || w.workflowId || 'Untitled workflow';
@@ -747,9 +761,9 @@
 
     var eventLabel = document.createElement('label');
     eventLabel.className = 'field';
-    eventLabel.innerHTML = '<span class="field__label">Workflow event start time</span>';
+    eventLabel.innerHTML = '<span class="field__label">Start workflow at</span>';
     var eventSel = document.createElement('select');
-    eventSel.innerHTML = '<option value="now">Now</option><option value="session_start">The call’s start time</option>';
+    eventSel.innerHTML = '<option value="now">Now</option><option value="session_start">When the call started</option>';
     eventSel.value = rule.eventStartTime === 'session_start' ? 'session_start' : 'now';
     eventSel.addEventListener('change', function () { rule.eventStartTime = eventSel.value; });
     eventLabel.appendChild(eventSel);
@@ -757,7 +771,7 @@
 
     var condTitle = document.createElement('p');
     condTitle.className = 'rule__cond-title';
-    condTitle.textContent = 'When ALL of these match:';
+    condTitle.textContent = 'If all of these are true:';
     box.appendChild(condTitle);
 
     var condList = document.createElement('div');
@@ -780,7 +794,7 @@
 
     var pollTitle = document.createElement('p');
     pollTitle.className = 'rule__cond-title';
-    pollTitle.textContent = 'Zoom poll answers (all must match):';
+    pollTitle.textContent = 'And these poll answers:';
     box.appendChild(pollTitle);
 
     var pollList = document.createElement('div');
@@ -805,7 +819,7 @@
       var catchAll = document.createElement('p');
       catchAll.className = 'muted';
       catchAll.style.fontSize = '0.8rem';
-      catchAll.textContent = 'No conditions: this is a catch-all. It will match everyone this rule sees.';
+      catchAll.textContent = 'This rule matches everyone. Put it last.';
       box.appendChild(catchAll);
     }
 
@@ -819,7 +833,7 @@
     var question = document.createElement('input');
     question.className = 'poll-q';
     question.value = cond.question || '';
-    question.placeholder = 'Exact Zoom poll question';
+    question.placeholder = 'Poll question';
     question.addEventListener('input', function () { cond.question = question.value; });
 
     var op = document.createElement('select');
@@ -1698,11 +1712,26 @@
   /* ---- Attendance ---- */
   var attendanceSessions = [];
   var currentSessionId = null;
+  var currentSessionData = null;
+  var currentAttendanceData = null;
+  var sessionDetailTab = 'people';
+  var expandedPeople = {};
+  var RESULT_LABELS = {
+    attended: 'Attended',
+    partial: 'Brief visit',
+    no_show: 'No-show',
+    not_invited: 'Walk-in'
+  };
+  var RESULT_ORDER = ['attended', 'partial', 'no_show', 'not_invited'];
+
+  function resultLabel(status) {
+    return RESULT_LABELS[status] || status || '—';
+  }
 
   function sessionChip(status) {
-    if (status === 'synced') return '<span class="chip chip--success">Synced</span>';
+    if (status === 'synced') return '<span class="chip chip--success">Ready</span>';
     if (status === 'failed') return '<span class="chip chip--danger">Failed</span>';
-    return '<span class="chip chip--neutral">Pending</span>';
+    return '<span class="chip chip--neutral">Waiting</span>';
   }
 
   function providerLabel(p) {
@@ -1711,8 +1740,23 @@
     return 'Zoom';
   }
 
+  function renderAttendanceActionsMenu() {
+    var menu = document.getElementById('attendanceActionsMenu');
+    if (!menu) return;
+    var conns = state.connections || [];
+    if (!conns.length) {
+      menu.innerHTML = '<p class="muted" style="padding:0.5rem 0.6rem">Add a Google account first.</p>';
+      return;
+    }
+    menu.innerHTML = conns.map(function (c) {
+      return '<button type="button" class="menu__item" data-attendance-actions="' + esc(c.id) + '">' +
+        icon('sliders') + '<span>' + esc(c.name) + '</span></button>';
+    }).join('');
+  }
+
   function loadAttendance() {
     document.getElementById('sessionsList').innerHTML = skeletonCards(3);
+    renderAttendanceActionsMenu();
     return api('/api/sessions').then(function (d) {
       attendanceSessions = d.sessions || [];
       renderAttendanceSummary(attendanceSessions);
@@ -1724,15 +1768,15 @@
     var el = document.getElementById('attendanceSummaryStrip');
     var synced = sessions.filter(function (s) { return s.status === 'synced'; }).length;
     el.innerHTML =
-      '<div class="summary__item"><span class="summary__value">' + sessions.length + '</span><span class="summary__label">sessions</span></div>' +
-      '<div class="summary__item"><span class="summary__value">' + synced + '</span><span class="summary__label">synced</span></div>';
+      '<div class="summary__item"><span class="summary__value">' + sessions.length + '</span><span class="summary__label">calls</span></div>' +
+      '<div class="summary__item"><span class="summary__value">' + synced + '</span><span class="summary__label">results ready</span></div>';
   }
 
   function renderSessions(sessions) {
     var el = document.getElementById('sessionsList');
     el.innerHTML = '';
     if (!sessions.length) {
-      el.innerHTML = '<div class="empty"><div class="empty__icon">' + icon('video') + '</div><h2 class="empty__title">No video calls yet</h2><p class="empty__text">Add a video call to see who showed up to it.</p><button class="btn btn--accent" id="emptySessionsCta">New video call</button></div>';
+      el.innerHTML = '<div class="empty"><div class="empty__icon">' + icon('video') + '</div><h2 class="empty__title">No calls yet</h2><p class="empty__text">Add a call to see who joined and send the results.</p><button class="btn btn--accent" id="emptySessionsCta">+ Add call</button></div>';
       document.getElementById('emptySessionsCta').addEventListener('click', openNewSession);
       return;
     }
@@ -1752,35 +1796,40 @@
             : '') +
         '</div>' +
         '<div class="conn__actions">' +
-          '<button class="btn btn--primary btn--sm" data-action="syncSession" data-id="' + esc(s.id) + '">Sync now</button>' +
-          '<button class="btn btn--ghost btn--sm" data-action="openSession" data-id="' + esc(s.id) + '">Details</button>' +
+          '<button class="btn btn--primary btn--sm" data-action="syncSession" data-id="' + esc(s.id) + '">Sync</button>' +
+          '<button class="btn btn--ghost btn--sm" data-action="openSession" data-id="' + esc(s.id) + '">View results</button>' +
           '<button class="btn btn--danger btn--sm" data-action="deleteSession" data-id="' + esc(s.id) + '">Delete</button>' +
         '</div>';
       el.appendChild(box);
     });
   }
 
-  function syncSession(id) {
-    var btn = document.querySelector('#sessionsList [data-action="syncSession"][data-id="' + id + '"]');
-    withBusy(btn, api('/api/sessions/' + id + '/sync', { method: 'POST' }))
+  function syncSession(id, btn) {
+    var button = btn || document.querySelector('#sessionsList [data-action="syncSession"][data-id="' + id + '"]');
+    withBusy(button, api('/api/sessions/' + id + '/sync', { method: 'POST' }))
       .then(function (r) {
         // Pending means Zoom has no report yet; saying "synced (0 attended)" would be a lie.
         if (r.status === 'pending') {
           toast('Zoom has no report for this call yet — it will retry automatically.', 'info');
         } else {
           var unlisted = (r.report.attendedNotInvited || []).length;
-          toast('Attendance synced (' + r.report.attendedCount + ' attended, ' + r.report.noShowCount + ' no-show' +
-            (unlisted ? ', ' + unlisted + ' not on the invited list' : '') + ')', 'success');
+          toast('Results synced (' + r.report.attendedCount + ' attended, ' + r.report.noShowCount + ' no-show' +
+            (unlisted ? ', ' + unlisted + ' walk-in' + (unlisted === 1 ? '' : 's') : '') + ')', 'success');
         }
         loadAttendance();
+        if (currentSessionId === id && !document.getElementById('sessionDetail').hidden) openSession(id);
       })
       .catch(function (e) { toast(e.message, 'error'); });
   }
 
-  function openSession(id) {
+  function openSession(id, tab) {
     currentSessionId = id;
     sessionWorkflowPreview = null;
+    sessionDetailTab = tab || 'people';
+    expandedPeople = {};
     api('/api/sessions/' + id).then(function (d) {
+      currentSessionData = d.session;
+      currentAttendanceData = d.attendance || null;
       renderSessionDetail(d.session, d.attendance);
       // Re-rendering an already-open detail must not stack a second copy on the modal stack.
       if (document.getElementById('sessionDetail').hidden) openModal('sessionDetail');
@@ -1872,100 +1921,291 @@
       .catch(function (e) { toast(e.message, 'error'); });
   }
 
-  function renderSessionDetail(session, attendance) {
-    document.getElementById('sessionDetailTitle').textContent = session.title || 'Session';
-    var head = '<div class="detail__head">' + esc(session.title) + ' ' + sessionChip(session.status) + '</div>' +
-      '<table class="kv">' +
-      '<tr><th>Provider</th><td>' + esc(providerLabel(session.provider)) + ' · ' + esc(session.sessionType || 'meeting') + '</td></tr>' +
-      '<tr><th>Meeting ID</th><td>' + esc(session.externalId) + '</td></tr>' +
-      '<tr><th>Start</th><td>' + new Date(session.startTime).toLocaleString() + '</td></tr>' +
-      '<tr><th>End</th><td>' + new Date(session.endTime).toLocaleString() + '</td></tr>' +
-      (session.error ? '<tr><th>Error</th><td>' + esc(session.error) + '</td></tr>' : '') +
-      ((session.warnings || []).length
-        ? '<tr><th>Notes</th><td>' + session.warnings.map(function (w) { return esc(w); }).join('<br>') + '</td></tr>'
-        : '') +
-      '</table>';
-
-    var body = head;
-    if (!attendance) {
-      body += session.status === 'pending'
-        ? '<p class="muted">Zoom has no report for this call yet. It retries automatically for 24 hours after the call ends; you can also press "Sync now".</p>'
-        : '<p class="muted">No attendance synced yet — click "Sync now".</p>';
-    } else {
-      var partialCount = (attendance.attended || []).filter(function (p) { return p.status === 'partial'; }).length;
-      var pollCount = attendance.pollQuestionCount !== undefined ? attendance.pollQuestionCount : (attendance.polls || []).length;
-      var pollLabel = attendance.pollQuestionCount !== undefined ? 'poll questions' : 'poll responses';
-      var pollRespondentsHtml = attendance.pollRespondentCount !== undefined
-        ? '<div class="summary__item"><span class="summary__value">' + attendance.pollRespondentCount + '</span><span class="summary__label">poll respondents</span></div>'
-        : '';
-      body += '<div class="summary" style="margin:0.5rem 0 1rem">' +
-        '<div class="summary__item"><span class="summary__value">' + attendance.invitedCount + '</span><span class="summary__label">invited</span></div>' +
-        '<div class="summary__item"><span class="summary__value">' + Math.max(0, attendance.attendedCount - partialCount) + '</span><span class="summary__label">attended</span></div>' +
-        '<div class="summary__item"><span class="summary__value">' + partialCount + '</span><span class="summary__label">partial</span></div>' +
-        '<div class="summary__item"><span class="summary__value">' + attendance.noShowCount + '</span><span class="summary__label">no-show</span></div>' +
-        '<div class="summary__item"><span class="summary__value">' + ((attendance.attendedNotInvited || []).length) + '</span><span class="summary__label">not on list</span></div>' +
-        '<div class="summary__item"><span class="summary__value">' + Math.round((attendance.attendanceRate || 0) * 100) + '%</span><span class="summary__label">attendance</span></div>' +
-        '<div class="summary__item"><span class="summary__value">' + (attendance.registrantCount || 0) + '</span><span class="summary__label">registrants</span></div>' +
-        '<div class="summary__item"><span class="summary__value">' + pollCount + '</span><span class="summary__label">' + pollLabel + '</span></div>' +
-        pollRespondentsHtml +
-        '<div class="summary__item"><span class="summary__value">' + ((attendance.qa || []).length) + '</span><span class="summary__label">Q&amp;A</span></div>' +
-        '</div>';
-
-      var sourceLabels = {
-        campaign: 'campaign recipients',
-        invitation: 'calendar invitation',
-        list: 'contact list',
-        none: 'not linked'
-      };
-      if (attendance.invitedSource) {
-        body += '<p class="muted stats-note">Invited list: ' + esc(sourceLabels[attendance.invitedSource] || attendance.invitedSource) + '.</p>';
-      }
-      if (session.rosterError) {
-        body += '<p class="muted">Roster webhook failed: ' + esc(session.rosterError) + '</p>';
-      } else if (session.rosterSentAt) {
-        body += '<p class="muted stats-note">Roster last sent ' + esc(prettyDate(session.rosterSentAt)) + '.</p>';
-      }
-
-      body += workflowSectionHTML(session, attendance);
-
-      var stats = attendance.sessionStats || {};
-      var statKeys = Object.keys(stats);
-      if (statKeys.length) {
-        body += '<h3 class="detail__sub">Session stats</h3><table class="map"><tbody>' +
-          statKeys.map(function (k) { return '<tr><th>' + esc(k) + '</th><td>' + esc(stats[k]) + '</td></tr>'; }).join('') +
-          '</tbody></table>';
-      }
-
-      body += '<h3 class="detail__sub">Attended (' + attendance.attendedCount + ')</h3>' + attendanceTable(attendance.attended);
-
-      body += '<h3 class="detail__sub">No-show (' + attendance.noShowCount + ')</h3>' +
-        (attendance.noShow.length ? '<table class="map"><tbody>' + attendance.noShow.map(function (e) { return '<tr><td>' + esc(e) + '</td></tr>'; }).join('') + '</tbody></table>' : '<p class="muted">None</p>');
-
-      // These people are in the Zoom report but not in the invited list. Hiding them made a successful
-      // sync look like an empty one, so they get their own section and are never counted as attended.
-      var unlisted = attendance.attendedNotInvited || [];
-      if (unlisted.length) {
-        body += '<h3 class="detail__sub">Attended — not on the invited list (' + unlisted.length + ')</h3>' +
-          '<p class="muted">These people joined the call but are not in the invited list it is linked to, so they count as neither attended nor no-show.</p>' +
-          attendanceTable(unlisted);
-      }
-
-      if ((attendance.absentees || []).length) {
-        body += '<h3 class="detail__sub">Absentees (' + attendance.absentees.length + ')</h3><table class="map"><tbody>' +
-          attendance.absentees.map(function (e) { return '<tr><td>' + esc(e) + '</td></tr>'; }).join('') + '</tbody></table>';
-      }
-
-      body += pollSummaryHTML(attendance) + qaTableHTML(attendance) + registrationTableHTML(attendance);
-      body += behaviorDetailHTML((attendance.attended || []).concat(unlisted));
+  function afterCallSummaryLine(session) {
+    var conn = sessionConnection(session);
+    if (!conn) return 'Link this call to a Google account to run after-call actions.';
+    var parts = [];
+    var mode = conn.attendanceDeliveryMode || 'both';
+    parts.push(mode === 'webhook' ? 'Tags off' : 'Tags on');
+    var rules = (conn.attendanceWorkflowRules || []).filter(function (r) { return r.enabled !== false; });
+    if (rules.length) parts.push(rules.length + ' workflow rule' + (rules.length === 1 ? '' : 's'));
+    else if ((conn.attendanceWorkflows || []).length) parts.push('No workflow rules');
+    else parts.push('No workflows');
+    var ai = conn.attendanceAiWorkflow;
+    if (ai && ai.enabled && (conn.attendanceWorkflows || []).length) {
+      parts.push('AI: ' + (ai.mode === 'auto' ? 'automatic' : 'review first'));
     }
-    // A pending call should never be a mystery: show exactly what Zoom said to each attempt.
+    if (conn.attendanceRoster && conn.attendanceRoster.url) parts.push('Full-list export on');
+    var hooks = (conn.attendanceRules || []).filter(function (r) { return r.enabled !== false; });
+    if (mode !== 'api' && hooks.length) parts.push(hooks.length + ' per-person webhook' + (hooks.length === 1 ? '' : 's'));
+    return parts.join(' · ');
+  }
+
+  function sessionStatusHTML(session) {
+    var meta = [];
+    if (session.lastDispatchedAt) meta.push('Last run ' + prettyDate(session.lastDispatchedAt));
+    if (session.rosterSentAt) meta.push('Full list sent ' + prettyDate(session.rosterSentAt));
+    var error = session.rosterError
+      ? '<div class="session-status__error">Full-list export failed: ' + esc(session.rosterError) + '</div>'
+      : '';
+    var conn = sessionConnection(session);
+    var manage = conn
+      ? '<button type="button" class="link-btn" data-session-action="manage">Manage actions</button>'
+      : '<button type="button" class="link-btn" data-session-action="edit">Link an account</button>';
+
+    return '<div class="session-status">' +
+      '<div>' +
+        '<div class="session-status__title">After-call actions</div>' +
+        '<div class="session-status__line">' + esc(afterCallSummaryLine(session)) + '</div>' +
+        (meta.length ? '<div class="session-status__meta">' + esc(meta.join(' · ')) + '</div>' : '') +
+        error +
+      '</div>' +
+      manage +
+    '</div>';
+  }
+
+  function configureSessionPrimary(session, attendance) {
+    var btn = document.getElementById('sessionDispatch');
+    if (!btn) return;
+    var conn = sessionConnection(session);
+    if (!attendance) {
+      btn.textContent = 'Sync';
+      btn.dataset.sessionAction = 'sync';
+      return;
+    }
+    if (!conn) {
+      btn.textContent = 'Link an account';
+      btn.dataset.sessionAction = 'edit';
+      return;
+    }
+    btn.textContent = session.lastDispatchedAt ? 'Send again' : 'Send results';
+    btn.dataset.sessionAction = 'dispatch';
+  }
+
+  function sessionTabsHTML(attendance) {
+    var people = (attendance.attended || []).length + (attendance.attendedNotInvited || []).length + (attendance.noShow || []).length;
+    var tabs = [
+      ['people', 'People', people],
+      ['polls', 'Polls & Q&A', ''],
+      ['registration', 'Registration', (attendance.registrantDetails || []).length],
+      ['workflows', 'Workflows', (sessionWorkflowPreview && sessionWorkflowPreview.assignments ? sessionWorkflowPreview.assignments.length : '')]
+    ];
+    return '<div class="session-tabs" role="tablist">' + tabs.map(function (tab) {
+      var active = sessionDetailTab === tab[0];
+      var count = tab[2] !== '' && tab[2] !== undefined ? ' <span class="session-tab__count">' + tab[2] + '</span>' : '';
+      return '<button type="button" class="session-tab' + (active ? ' is-active' : '') + '" data-session-tab="' + tab[0] + '" role="tab" aria-selected="' + (active ? 'true' : 'false') + '">' + tab[1] + count + '</button>';
+    }).join('') + '</div>';
+  }
+
+  function personKey(p) {
+    return String(p.email || p.name || '').toLowerCase();
+  }
+
+  function allResultRows(attendance) {
+    var rows = [];
+    (attendance.attended || []).forEach(function (p) {
+      rows.push({ person: p, result: p.status === 'partial' ? 'partial' : 'attended' });
+    });
+    (attendance.attendedNotInvited || []).forEach(function (p) {
+      rows.push({ person: p, result: 'not_invited' });
+    });
+    (attendance.noShow || []).forEach(function (email) {
+      rows.push({ person: { email: email, status: 'no_show' }, result: 'no_show' });
+    });
+    rows.sort(function (a, b) {
+      var ai = RESULT_ORDER.indexOf(a.result);
+      var bi = RESULT_ORDER.indexOf(b.result);
+      if (ai !== bi) return ai - bi;
+      return String(a.person.email || a.person.name || '').localeCompare(String(b.person.email || b.person.name || ''));
+    });
+    return rows;
+  }
+
+  function detailGroup(title, items) {
+    if (!items.length) return '';
+    return '<div class="person-detail__group"><div class="person-detail__title">' + title + '</div><ul class="person-detail__list">' +
+      items.map(function (item) { return '<li>' + item + '</li>'; }).join('') + '</ul></div>';
+  }
+
+  function detailLine(label, value) {
+    if (value === undefined || value === null || value === '') return '';
+    return '<div class="person-detail__fact"><span>' + esc(label) + '</span><strong>' + esc(value) + '</strong></div>';
+  }
+
+  function personDetailHTML(p, result) {
+    var b = p.behavior;
+    var h = result === 'not_invited' ? '<p class="muted">Joined without being on the invited list.</p>' : '';
+    if (!b) return h + '<p class="muted">No Zoom behavior for this person — they did not join.</p>';
+
+    var polls = (b.pollAnswers || []).map(function (a) { return esc(a.question) + ': ' + esc(a.answer); });
+    var qa = (b.qa || []).map(function (q) { return esc(q.question) + (q.answer ? ' → ' + esc(q.answer) : ''); });
+    var reg = (b.registrationAnswers || []).map(function (a) { return esc(a.question) + ': ' + esc(a.answer); });
+
+    var share = [];
+    if (b.shareDesktop) share.push('desktop');
+    if (b.shareApplication) share.push('application');
+
+    var facts = [
+      detailLine('Joined', p.joinedAt ? prettyDate(p.joinedAt) : ''),
+      detailLine('Left', p.leftAt ? prettyDate(p.leftAt) : ''),
+      detailLine('Joined late', b.joinedLateMinutes !== undefined ? b.joinedLateMinutes + ' min' : ''),
+      detailLine('Left early', b.leftEarlyMinutes !== undefined ? b.leftEarlyMinutes + ' min' : ''),
+      detailLine('Attended', b.attendedPortionPct !== undefined ? b.attendedPortionPct + '%' : ''),
+      detailLine('Device', b.device),
+      detailLine('Location', b.location),
+      detailLine('Network', b.networkType),
+      detailLine('Camera', b.camera),
+      detailLine('Microphone', b.microphone),
+      detailLine('Shared', share.join(', '))
+    ].filter(Boolean).join('');
+
+    var groups = detailGroup('Poll answers', polls) + detailGroup('Q&A', qa) + detailGroup('Registration', reg);
+    if (!groups && !facts) return h + '<p class="muted">No extra details.</p>';
+    return h + '<div class="person-detail__grid">' +
+      (groups ? '<div>' + groups + '</div>' : '') +
+      (facts ? '<div class="person-detail__facts">' + facts + '</div>' : '') +
+      '</div>';
+  }
+
+  function personRowHTML(p, result) {
+    var key = personKey(p);
+    var open = !!expandedPeople[key];
+    var b = p.behavior || {};
+    var name = p.name || p.email || '—';
+    var email = p.name && p.email ? p.email : '';
+    var polls = b.pollQuestionCount ? String(b.pollAnsweredCount || 0) + '/' + b.pollQuestionCount : '—';
+    var qa = b.qaAskedCount !== undefined ? String(b.qaAskedCount) : '—';
+    var reg = b.registrationAnswerCount !== undefined ? String(b.registrationAnswerCount) : '—';
+    var duration = p.durationSec !== undefined ? Math.round(p.durationSec / 60) + ' min' : '—';
+    var engagement = p.attentivenessScore !== undefined ? String(p.attentivenessScore) : '—';
+
+    var row = '<tr class="person-row' + (open ? ' is-open' : '') + '">' +
+      '<td><button type="button" class="person-toggle" data-person-toggle="' + esc(key) + '" aria-expanded="' + (open ? 'true' : 'false') + '">' +
+        '<span class="person-toggle__name">' + esc(name) + '</span>' +
+        (email ? '<span class="person-toggle__email">' + esc(email) + '</span>' : '') +
+      '</button></td>' +
+      '<td><span class="result-chip result-chip--' + result + '">' + esc(resultLabel(result)) + '</span></td>' +
+      '<td>' + duration + '</td><td>' + engagement + '</td><td>' + polls + '</td><td>' + qa + '</td><td>' + reg + '</td></tr>';
+
+    if (open) row += '<tr class="person-detail"><td colspan="7">' + personDetailHTML(p, result) + '</td></tr>';
+    return row;
+  }
+
+  function callNotesHTML(attendance) {
+    var h = '';
+    var stats = attendance.sessionStats || {};
+    var statKeys = Object.keys(stats);
+    if (statKeys.length) {
+      h += '<details class="mini-details"><summary>Call details</summary><table class="map"><tbody>' +
+        statKeys.map(function (k) { return '<tr><th>' + esc(k) + '</th><td>' + esc(stats[k]) + '</td></tr>'; }).join('') +
+        '</tbody></table></details>';
+    }
+    if ((attendance.absentees || []).length) {
+      h += '<details class="mini-details"><summary>Also listed absent by Zoom (' + attendance.absentees.length + ')</summary>' +
+        '<p class="muted">' + attendance.absentees.map(function (e) { return esc(e); }).join(' · ') + '</p></details>';
+    }
+    return h;
+  }
+
+  function peopleTabHTML(attendance) {
+    var rows = allResultRows(attendance);
+    if (!rows.length) return '<p class="muted">No one joined this call.</p>';
+    return '<div class="table-scroll"><table class="map people-table"><thead><tr>' +
+      '<th>Person</th><th>Result</th><th>Time</th><th>Engagement</th><th>Polls</th><th>Q&amp;A</th><th>Registration</th>' +
+      '</tr></thead><tbody>' +
+      rows.map(function (row) { return personRowHTML(row.person, row.result); }).join('') +
+      '</tbody></table></div>' + callNotesHTML(attendance);
+  }
+
+  function pollsTabHTML(attendance) {
+    var hasPolls = (attendance.pollSummary || []).length || (attendance.polls || []).length;
+    var hasQa = (attendance.qa || []).length;
+    if (!hasPolls && !hasQa) return '<p class="muted">No polls or Q&amp;A for this call.</p>';
+    var pollHtml = pollSummaryHTML(attendance);
+    if (!pollHtml && (attendance.polls || []).length) {
+      pollHtml = '<p class="muted">Poll rows are present, but this report predates the poll summary. Sync again to group the answers.</p>';
+    }
+    return pollHtml + qaTableHTML(attendance);
+  }
+
+  function registrationTabHTML(attendance) {
+    return registrationTableHTML(attendance) || '<p class="muted">No registration answers for this call.</p>';
+  }
+
+  function rerenderSessionDetail(keepScroll) {
+    var modal = document.querySelector('#sessionDetail .modal');
+    var top = modal ? modal.scrollTop : 0;
+    renderSessionDetail(currentSessionData, currentAttendanceData);
+    if (modal) modal.scrollTop = keepScroll ? top : 0;
+  }
+
+  function renderSessionDetail(session, attendance) {
+    document.getElementById('sessionDetailTitle').textContent = session.title || 'Call details';
+    var sourceLabels = {
+      campaign: 'Campaign',
+      invitation: 'Calendar invite',
+      list: 'Contact list',
+      none: 'Not linked'
+    };
+    var meta = [
+      providerLabel(session.provider) + ' ' + (session.sessionType || 'meeting'),
+      new Date(session.startTime).toLocaleString() + ' – ' + new Date(session.endTime).toLocaleTimeString()
+    ];
+    if (session.externalId) meta.push('ID ' + session.externalId);
+    if (attendance && attendance.invitedSource) {
+      meta.push('Who was invited: ' + (sourceLabels[attendance.invitedSource] || attendance.invitedSource));
+    }
+
+    var body = '<div class="detail__head">' + esc(session.title) + ' ' + sessionChip(session.status) + '</div>' +
+      '<div class="session-meta">' + esc(meta.join(' · ')) + '</div>' +
+      (session.error ? '<p class="session-meta session-meta--error">' + esc(session.error) + '</p>' : '') +
+      ((session.warnings || []).length
+        ? '<p class="session-meta">' + session.warnings.map(function (w) { return esc(w); }).join(' · ') + '</p>'
+        : '');
+
+    if (!attendance) {
+      body += '<p class="muted">' + (session.status === 'pending'
+        ? 'Zoom has no report for this call yet. It retries automatically for 24 hours after the call ends.'
+        : 'No results synced yet — press Sync.') + '</p>';
+      if (session.status !== 'synced' && session.syncDiagnostics) {
+        body += '<h3 class="detail__sub">What the last sync tried</h3>' + syncDiagnosticsTable(session.syncDiagnostics);
+      }
+      document.getElementById('sessionDetailBody').innerHTML = body;
+      configureSessionPrimary(session, null);
+      return;
+    }
+
+    var partialCount = (attendance.attended || []).filter(function (p) { return p.status === 'partial'; }).length;
+    var walkIns = (attendance.attendedNotInvited || []).length;
+    body += '<div class="summary" style="margin:0.7rem 0 1rem">' +
+      '<div class="summary__item"><span class="summary__value">' + attendance.invitedCount + '</span><span class="summary__label">invited</span></div>' +
+      '<div class="summary__item"><span class="summary__value">' + Math.max(0, attendance.attendedCount - partialCount) + '</span><span class="summary__label">attended</span></div>' +
+      '<div class="summary__item"><span class="summary__value">' + partialCount + '</span><span class="summary__label">brief visits</span></div>' +
+      '<div class="summary__item"><span class="summary__value">' + attendance.noShowCount + '</span><span class="summary__label">no-shows</span></div>' +
+      '<div class="summary__item"><span class="summary__value">' + walkIns + '</span><span class="summary__label">walk-ins</span></div>' +
+      '<div class="summary__item"><span class="summary__value">' + Math.round((attendance.attendanceRate || 0) * 100) + '%</span><span class="summary__label">attendance</span></div>' +
+      '</div>';
+
+    body += sessionStatusHTML(session);
+    body += sessionTabsHTML(attendance);
+
+    var tabBody = '';
+    if (sessionDetailTab === 'polls') tabBody = pollsTabHTML(attendance);
+    else if (sessionDetailTab === 'registration') tabBody = registrationTabHTML(attendance);
+    else if (sessionDetailTab === 'workflows') tabBody = workflowSectionHTML(session, attendance);
+    else tabBody = peopleTabHTML(attendance);
+    body += '<div id="sessionTabBody" role="tabpanel">' + tabBody + '</div>';
+
     if (session.status !== 'synced' && session.syncDiagnostics) {
       body += '<h3 class="detail__sub">What the last sync tried</h3>' + syncDiagnosticsTable(session.syncDiagnostics);
     }
 
     document.getElementById('sessionDetailBody').innerHTML = body;
+    configureSessionPrimary(session, attendance);
+    if (sessionDetailTab === 'workflows' && sessionWorkflowPreview) {
+      renderSessionWorkflowPreview(sessionWorkflowPreview);
+    }
   }
-
   function syncDiagnosticsTable(d) {
     function status(v) { return v === undefined ? 'not tried' : String(v); }
     var rows = (d.attempts || []).map(function (a) {
@@ -1992,18 +2232,18 @@
   }
 
   function workflowStatusChip(status) {
-    if (status === 'applied') return '<span class="chip chip--success">applied</span>';
-    if (status === 'failed') return '<span class="chip chip--danger">failed</span>';
-    return '<span class="chip chip--neutral">skipped</span>';
+    if (status === 'applied') return '<span class="chip chip--success">Added</span>';
+    if (status === 'failed') return '<span class="chip chip--danger">Failed</span>';
+    return '<span class="chip chip--neutral">Skipped</span>';
   }
 
   function workflowAssignmentsTable(assignments) {
-    if (!assignments.length) return '<p class="muted">No workflow assignments yet.</p>';
+    if (!assignments.length) return '<p class="muted">No workflows added from this call yet.</p>';
     var rows = assignments.slice(0, 200).map(function (a) {
       var detail = [a.reason, a.error].filter(Boolean).join(' · ');
       var confidence = a.confidence !== undefined ? ' · ' + Math.round(a.confidence * 100) + '%' : '';
       return '<tr><td>' + esc(a.email || a.name || '—') + '</td><td>' + esc(a.workflowName || a.workflowId) + '</td>' +
-        '<td>' + esc(a.source) + confidence + '</td><td>' + workflowStatusChip(a.status) + '</td>' +
+        '<td>' + esc(workflowSourceLabel(a.source)) + confidence + '</td><td>' + workflowStatusChip(a.status) + '</td>' +
         '<td>' + esc(detail) + '</td><td>' + esc(prettyDate(a.at)) + '</td></tr>';
     }).join('');
     return '<div class="table-scroll"><table class="map"><thead><tr><th>Person</th><th>Workflow</th><th>Source</th><th>Status</th><th>Detail</th><th>When</th></tr></thead><tbody>' +
@@ -2014,24 +2254,24 @@
   function workflowSectionHTML(session, attendance) {
     var conn = sessionConnection(session);
     var workflows = conn && conn.attendanceWorkflows ? conn.attendanceWorkflows : [];
-    var h = '<h3 class="detail__sub">GHL workflows</h3>';
+    var h = '';
 
     if (!conn) {
-      return h + '<p class="muted">Link this call to an account with GHL workflows to route attendees.</p>';
+      return '<p class="muted">Link this call to a Google account to run workflows.</p>';
     }
     if (!workflows.length) {
-      return h + '<p class="muted">No workflows are configured for this account.</p>' +
-        '<button class="btn btn--outline btn--sm" data-workflow-action="openAutomations">Open attendance automations</button>';
+      return '<p class="muted">No workflows are connected for this account.</p>' +
+        '<button class="btn btn--outline btn--sm" data-workflow-action="openAutomations">Manage actions</button>';
     }
 
-    h += '<p class="muted">Rules run first; AI proposals only fill in people no rule matched. One workflow per person per call.</p>';
+    h += '<p class="muted">Rules run first. AI fills in people no rule matched. One workflow per person per call.</p>';
     h += '<div class="conn__actions">' +
-      '<button class="btn btn--primary btn--sm" data-workflow-action="preview">Preview routes</button>' +
-      '<button class="btn btn--ghost btn--sm" data-workflow-action="openAutomations">Edit workflows</button>' +
+      '<button class="btn btn--primary btn--sm" data-workflow-action="preview">Review workflow matches</button>' +
+      '<button class="btn btn--ghost btn--sm" data-workflow-action="openAutomations">Manage actions</button>' +
       '</div>';
 
-    h += '<div class="sender__grid" style="margin-top:0.6rem">' +
-      '<label class="field"><span class="field__label">Add one person manually</span><input id="sessionWorkflowEmail" placeholder="email@example.com" /></label>' +
+    h += '<div class="sender__grid" style="margin-top:0.75rem">' +
+      '<label class="field"><span class="field__label">Add someone manually</span><input id="sessionWorkflowEmail" placeholder="email@example.com" /></label>' +
       '<label class="field"><span class="field__label">Workflow</span><select id="sessionWorkflowManualSelect">' +
         workflows.map(function (w) {
           return '<option value="' + esc(w.workflowId) + '">' + esc(w.name || w.workflowId) + '</option>';
@@ -2040,8 +2280,9 @@
       '<label class="field"><span class="field__label">&nbsp;</span><button class="btn btn--outline btn--sm" data-workflow-action="manual">Add to workflow</button></label>' +
       '</div>';
 
-    h += workflowAssignmentsTable(session.workflowAssignments || []);
     h += '<div id="sessionWorkflowPreview"></div>';
+    h += '<h4 class="detail__sub">Assignment history</h4>';
+    h += workflowAssignmentsTable(session.workflowAssignments || []);
     return h;
   }
 
@@ -2052,14 +2293,14 @@
     polls.forEach(function (poll) {
       var answers = poll.answers || [];
       h += '<div class="rule" style="margin-bottom:0.6rem"><div class="rule__head"><span class="rule__title">' +
-        esc(poll.question) + '</span><span class="muted">' + poll.respondents + ' responded</span></div>';
+        esc(poll.question) + '</span><span class="muted">' + poll.respondents + ' answered</span></div>';
       if (!answers.length) {
         h += '<p class="muted">No answers recorded.</p>';
       } else {
         h += '<div class="table-scroll"><table class="map"><thead><tr><th>Answer</th><th>Count</th><th></th></tr></thead><tbody>' +
           answers.map(function (a) {
             return '<tr><td>' + esc(a.answer) + '</td><td>' + a.count + '</td><td>' +
-              '<button class="btn btn--ghost btn--sm" data-poll-question="' + esc(poll.question) + '" data-poll-answer="' + esc(a.answer) + '">Create rule from this answer</button>' +
+              '<button class="btn btn--ghost btn--sm" data-poll-question="' + esc(poll.question) + '" data-poll-answer="' + esc(a.answer) + '">Make this a rule</button>' +
               '</td></tr>';
           }).join('') + '</tbody></table></div>';
       }
@@ -2095,110 +2336,64 @@
       }).join('') + '</tbody></table></div>';
   }
 
-  function behaviorDetailHTML(people) {
-    var rows = (people || []).filter(function (p) {
-      var b = p.behavior;
-      return b && (
-        (b.pollAnswers || []).length ||
-        (b.qa || []).length ||
-        (b.registrationAnswers || []).length ||
-        b.joinedLateMinutes !== undefined ||
-        b.leftEarlyMinutes !== undefined
-      );
-    }).map(function (p) {
-      var b = p.behavior;
-      var polls = (b.pollAnswers || []).map(function (a) {
-        return esc(a.question) + ': ' + esc(a.answer);
-      }).join('<br>') || '—';
-      var qa = (b.qa || []).map(function (q) {
-        return esc(q.question) + (q.answer ? ' → ' + esc(q.answer) : '');
-      }).join('<br>') || '—';
-      var reg = (b.registrationAnswers || []).map(function (a) {
-        return esc(a.question) + ': ' + esc(a.answer);
-      }).join('<br>') || '—';
-      var timing = (b.joinedLateMinutes !== undefined || b.leftEarlyMinutes !== undefined)
-        ? String(b.joinedLateMinutes || 0) + ' / ' + String(b.leftEarlyMinutes || 0) + ' min'
-        : '—';
-      return '<tr><td>' + esc(p.email || p.name || '—') + '</td><td>' + polls + '</td><td>' + qa + '</td><td>' + reg + '</td><td>' + timing + '</td></tr>';
-    });
-
-    if (!rows.length) return '';
-    return '<h3 class="detail__sub">Poll, Q&amp;A and registration detail</h3>' +
-      '<div class="table-scroll"><table class="map"><thead><tr><th>Person</th><th>Poll answers</th><th>Q&amp;A</th><th>Registration</th><th>Late / early</th></tr></thead><tbody>' +
-      rows.join('') + '</tbody></table></div>';
-  }
-
-  function attendanceTable(people) {
-    if (!people.length) return '<p class="muted">None</p>';
-    return '<div class="table-scroll"><table class="map"><thead><tr><th>Email</th><th>Name</th><th>Status</th><th>Duration</th><th>Focus</th><th>Guest</th><th>Polls</th><th>Q&amp;A</th><th>Reg.</th><th>Late / early</th></tr></thead><tbody>' +
-      people.map(function (p) {
-        var min = p.durationSec !== undefined ? Math.round(p.durationSec / 60) + ' min' : '—';
-        var att = p.attentivenessScore !== undefined ? String(p.attentivenessScore) : '—';
-        var guest = p.isGuest === undefined ? '—' : (p.isGuest ? 'yes' : 'no');
-        var b = p.behavior || {};
-        var polls = b.pollQuestionCount
-          ? String(b.pollAnsweredCount || 0) + '/' + b.pollQuestionCount
-          : '—';
-        var qa = b.qaAskedCount !== undefined ? String(b.qaAskedCount) : '—';
-        var reg = b.registrationAnswerCount !== undefined ? String(b.registrationAnswerCount) : '—';
-        var timing = (b.joinedLateMinutes !== undefined || b.leftEarlyMinutes !== undefined)
-          ? String(b.joinedLateMinutes || 0) + ' / ' + String(b.leftEarlyMinutes || 0)
-          : '—';
-        return '<tr><td>' + esc(p.email || '—') + '</td><td>' + esc(p.name || '—') + '</td><td>' + esc(p.status) + '</td><td>' + min + '</td><td>' + att + '</td><td>' + guest + '</td>' +
-          '<td title="' + esc(b.pollAnswerText || 'No poll answers') + '">' + polls + '</td>' +
-          '<td title="' + esc(b.qaQuestionText || 'No Q&A') + '">' + qa + '</td>' +
-          '<td title="' + esc(b.registrationAnswerText || 'No registration answers') + '">' + reg + '</td>' +
-          '<td title="joined late / left early (minutes)">' + timing + '</td></tr>';
-      }).join('') + '</tbody></table></div>';
-  }
-
-  function dispatchSession() {
+  function dispatchSession(btn) {
     if (!currentSessionId) return;
-    withBusy(document.getElementById('sessionDispatch'), api('/api/sessions/' + currentSessionId + '/dispatch', {
+    var button = btn || document.getElementById('sessionDispatch');
+    withBusy(button, api('/api/sessions/' + currentSessionId + '/dispatch', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({})
     }))
       .then(function (r) {
-        var parts = [r.dispatched + ' contact' + (r.dispatched === 1 ? '' : 's')];
+        var parts = [];
+        if (r.dispatched) parts.push(r.dispatched + ' people');
         if (r.failed) parts.push(r.failed + ' failed');
         if (r.workflows && r.workflows.applied) parts.push(r.workflows.applied + ' workflow' + (r.workflows.applied === 1 ? '' : 's'));
         if (r.workflows && r.workflows.failed) parts.push(r.workflows.failed + ' workflow failed');
         if (r.workflowError) parts.push('workflow error');
-        if (r.roster && r.roster.error) parts.push('roster failed');
-        else if (r.roster && !r.roster.skipped) parts.push('roster sent');
-        toast('Sent (' + parts.join(', ') + ')', r.failed || (r.workflows && r.workflows.failed) || r.workflowError || (r.roster && r.roster.error) ? 'error' : 'success');
+        if (r.roster && r.roster.error) parts.push('full-list export failed');
+        else if (r.roster && !r.roster.skipped) parts.push('full list sent');
+        var bad = r.failed || (r.workflows && r.workflows.failed) || r.workflowError || (r.roster && r.roster.error);
+        toast(parts.length ? 'Sent: ' + parts.join(' · ') : 'Nothing new to send', bad ? 'error' : 'success');
         openSession(currentSessionId);
       })
       .catch(function (e) { toast(e.message, 'error'); });
   }
 
-  function sendRoster() {
+  function sendRoster(btn) {
     if (!currentSessionId) return;
-    withBusy(document.getElementById('sessionRoster'), api('/api/sessions/' + currentSessionId + '/dispatch', {
+    var button = btn || document.getElementById('sessionRoster');
+    withBusy(button, api('/api/sessions/' + currentSessionId + '/dispatch', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ rosterOnly: true, forceRoster: true })
     }))
       .then(function (r) {
         var roster = r.roster || {};
-        if (roster.error) toast('Roster failed: ' + roster.error, 'error');
+        if (roster.error) toast('Full-list export failed: ' + roster.error, 'error');
         else if (roster.reason === 'no_connection') toast('Link this call to a Google account first', 'error');
         else if (roster.reason === 'empty') toast('Nothing to send for this call yet', 'info');
-        else if (roster.skipped) toast('No roster webhook is configured for this account', 'info');
-        else toast('Roster sent (' + roster.sent + ' request' + (roster.sent === 1 ? '' : 's') + ')', 'success');
+        else if (roster.skipped) toast('No full-list export is configured for this account', 'info');
+        else toast('Full list sent (' + roster.sent + ' request' + (roster.sent === 1 ? '' : 's') + ')', 'success');
         openSession(currentSessionId);
       })
       .catch(function (e) { toast(e.message, 'error'); });
+  }
+
+  function workflowSourceLabel(source) {
+    if (source === 'rule') return 'Rule';
+    if (source === 'ai') return 'AI';
+    if (source === 'manual') return 'Manual';
+    return source || '—';
   }
 
   function renderSessionWorkflowPreview(preview) {
     var el = document.getElementById('sessionWorkflowPreview');
     if (!el) return;
     var p = preview || {};
-    var h = '<div class="rule" style="margin-top:0.6rem">' +
-      '<div class="rule__head"><span class="rule__title">Proposed routes</span><span class="muted">' +
-      (p.assignments ? p.assignments.length : 0) + ' proposal' + ((p.assignments ? p.assignments.length : 0) === 1 ? '' : 's') + '</span></div>';
+    var h = '<div class="rule" style="margin-top:0.75rem">' +
+      '<div class="rule__head"><span class="rule__title">Workflow matches</span><span class="muted">' +
+      (p.assignments ? p.assignments.length : 0) + ' match' + ((p.assignments ? p.assignments.length : 0) === 1 ? '' : 'es') + '</span></div>';
 
     if (p.error) h += '<p class="muted" style="color:var(--danger)">' + esc(p.error) + '</p>';
     if ((p.rejected || []).length) {
@@ -2206,10 +2401,10 @@
     }
 
     if (!p.assignments || !p.assignments.length) {
-      h += '<p class="muted">No proposals. Add a workflow rule or enable AI routing in Attendance automations.</p>';
+      h += '<p class="muted">No matches. Add a workflow rule or turn on AI matching in After-call actions.</p>';
     } else {
-      h += '<p class="muted">Rule matches are checked. AI proposals below the confidence threshold are shown but cannot be applied here. Already-applied workflows are skipped.</p>' +
-        '<div class="table-scroll"><table class="map"><thead><tr><th></th><th>Person</th><th>Workflow</th><th>Source</th><th>Confidence</th><th>Why</th></tr></thead><tbody>' +
+      h += '<p class="muted">Rules run first. AI matches below the chosen confidence are shown but cannot be applied here. Already-applied workflows are skipped.</p>' +
+        '<div class="table-scroll"><table class="map"><thead><tr><th></th><th>Person</th><th>Workflow</th><th>Source</th><th>AI confidence</th><th>Why</th></tr></thead><tbody>' +
         p.assignments.map(function (a) {
           var selectable = !!a.workflowId && (a.source === 'rule' || a.eligible);
           var checkbox = selectable
@@ -2218,10 +2413,10 @@
           var confidence = a.confidence !== undefined ? Math.round(a.confidence * 100) + '%' : '—';
           var why = a.reason || (a.workflowId ? '' : 'No clear fit');
           return '<tr><td>' + checkbox + '</td><td>' + esc(a.email || a.name || '—') + '</td>' +
-            '<td>' + esc(a.workflowName || a.workflowId || '—') + '</td><td>' + esc(a.source) + '</td>' +
+            '<td>' + esc(a.workflowName || a.workflowId || '—') + '</td><td>' + esc(workflowSourceLabel(a.source)) + '</td>' +
             '<td>' + confidence + '</td><td>' + esc(why) + '</td></tr>';
         }).join('') + '</tbody></table></div>' +
-        '<div class="conn__actions"><button class="btn btn--primary btn--sm" data-workflow-action="apply">Apply selected</button>' +
+        '<div class="conn__actions"><button class="btn btn--primary btn--sm" data-workflow-action="apply">Add selected to workflows</button>' +
         '<button class="btn btn--ghost btn--sm" data-workflow-action="cancelPreview">Cancel</button></div>';
     }
     h += '</div>';
@@ -2235,7 +2430,10 @@
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({})
     }))
-      .then(function (r) { renderSessionWorkflowPreview(r.preview); })
+      .then(function (r) {
+        sessionWorkflowPreview = r.preview || null;
+        renderSessionWorkflowPreview(r.preview);
+      })
       .catch(function (e) { toast(e.message, 'error'); });
   }
 
@@ -2245,7 +2443,7 @@
       return { email: cb.getAttribute('data-wf-email'), workflowId: cb.getAttribute('data-wf-id') };
     });
     if (!selected.length) {
-      toast('Select at least one proposal', 'error');
+      toast('Select at least one match', 'error');
       return;
     }
 
@@ -2255,11 +2453,11 @@
       body: JSON.stringify({ selected: selected })
     }))
       .then(function (r) {
-        var parts = [r.applied + ' applied'];
+        var parts = [r.applied + ' added'];
         if (r.skipped) parts.push(r.skipped + ' skipped');
         if (r.failed) parts.push(r.failed + ' failed');
-        toast(parts.join(', '), r.failed ? 'error' : (r.applied ? 'success' : 'info'));
-        openSession(currentSessionId);
+        toast(parts.join(' · '), r.failed ? 'error' : (r.applied ? 'success' : 'info'));
+        openSession(currentSessionId, 'workflows');
       })
       .catch(function (e) { toast(e.message, 'error'); });
   }
@@ -2282,7 +2480,7 @@
         var a = r.assignment || {};
         if (a.status === 'applied') {
           toast('Added to ' + (a.workflowName || a.workflowId), 'success');
-          openSession(currentSessionId);
+          openSession(currentSessionId, 'workflows');
           return;
         }
         if (a.status === 'skipped' && /different workflow/i.test(a.error || '')) {
@@ -2298,7 +2496,7 @@
     send(false).catch(function (e) { toast(e.message, 'error'); });
   }
 
-  function openSessionWorkflowAutomations(seed) {
+  function openSessionWorkflowAutomations(seed, options) {
     var session = attendanceSessions.filter(function (s) { return s.id === currentSessionId; })[0];
     var open = function (s) {
       if (!s || !s.connectionId) {
@@ -2307,7 +2505,7 @@
       }
       var conn = (state.connections || []).filter(function (c) { return c.id === s.connectionId; })[0];
       if (conn) {
-        openAttendanceAutomations(s.connectionId, seed);
+        openAttendanceAutomations(s.connectionId, seed, options);
         return;
       }
       api('/api/connections/' + s.connectionId).then(function (d) {
@@ -2317,7 +2515,7 @@
         }
         state.connections = state.connections || [];
         state.connections.push(d.connection);
-        openAttendanceAutomations(s.connectionId, seed);
+        openAttendanceAutomations(s.connectionId, seed, options);
       }).catch(function (e) { toast(e.message, 'error'); });
     };
     if (session) {
@@ -2335,6 +2533,31 @@
   }
 
   document.getElementById('sessionDetailBody').addEventListener('click', function (e) {
+    var tab = e.target.closest('[data-session-tab]');
+    if (tab) {
+      sessionDetailTab = tab.getAttribute('data-session-tab');
+      rerenderSessionDetail(false);
+      return;
+    }
+
+    var person = e.target.closest('[data-person-toggle]');
+    if (person) {
+      var key = person.getAttribute('data-person-toggle');
+      expandedPeople[key] = !expandedPeople[key];
+      rerenderSessionDetail(true);
+      return;
+    }
+
+    var sessionAction = e.target.closest('[data-session-action]');
+    if (sessionAction) {
+      var sa = sessionAction.getAttribute('data-session-action');
+      if (sa === 'sync') syncSession(currentSessionId, sessionAction);
+      else if (sa === 'edit') openEditSession();
+      else if (sa === 'manage') openSessionWorkflowAutomations(null, { advanced: true });
+      else if (sa === 'dispatch') dispatchSession(sessionAction);
+      return;
+    }
+
     var pollBtn = e.target.closest('[data-poll-question]');
     if (pollBtn) {
       createRuleFromPoll(pollBtn.getAttribute('data-poll-question'), pollBtn.getAttribute('data-poll-answer'));
@@ -2349,6 +2572,7 @@
     else if (action === 'manual') manualAssignSessionWorkflow(btn);
     else if (action === 'openAutomations') openSessionWorkflowAutomations();
     else if (action === 'cancelPreview') {
+      sessionWorkflowPreview = null;
       var preview = document.getElementById('sessionWorkflowPreview');
       if (preview) preview.innerHTML = '';
     }
@@ -2431,16 +2655,47 @@
     };
     if (!body.externalId || !body.title || !body.startTime || !body.endTime) { toast('Meeting ID, title, start and end are required', 'error'); return; }
     api('/api/sessions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
-      .then(function () { closeModal('newSession'); toast('Session created', 'success'); loadAttendance(); })
+      .then(function () { closeModal('newSession'); toast('Call added', 'success'); loadAttendance(); })
       .catch(function (e) { toast(e.message, 'error'); });
   }
 
   document.getElementById('newSessionBtn').addEventListener('click', openNewSession);
   document.getElementById('newSessionSave').addEventListener('click', saveNewSession);
-  document.getElementById('sessionDispatch').addEventListener('click', dispatchSession);
-  document.getElementById('sessionRoster').addEventListener('click', sendRoster);
+  document.getElementById('sessionDispatch').addEventListener('click', function () {
+    var action = this.dataset.sessionAction || 'dispatch';
+    if (action === 'sync') syncSession(currentSessionId, this);
+    else if (action === 'edit') openEditSession();
+    else dispatchSession(this);
+  });
+  document.getElementById('sessionRoster').addEventListener('click', function () {
+    closeAllMenus();
+    sendRoster(this);
+  });
+  document.getElementById('sessionMore').addEventListener('click', function () {
+    toggleMenu(this);
+    this.setAttribute('aria-expanded', this.closest('.menu-wrap').querySelector('.menu').classList.contains('is-open') ? 'true' : 'false');
+  });
+  document.getElementById('sessionManageActions').addEventListener('click', function () {
+    closeAllMenus();
+    openSessionWorkflowAutomations(null, { advanced: true });
+  });
   document.getElementById('sessionEdit').addEventListener('click', openEditSession);
   document.getElementById('editSessionSave').addEventListener('click', saveEditSession);
+  document.getElementById('attendanceActionsBtn').addEventListener('click', function () {
+    var conns = state.connections || [];
+    if (conns.length === 1) {
+      openAttendanceAutomations(conns[0].id);
+      return;
+    }
+    renderAttendanceActionsMenu();
+    toggleMenu(this);
+  });
+  document.getElementById('attendanceActionsMenu').addEventListener('click', function (e) {
+    var btn = e.target.closest('[data-attendance-actions]');
+    if (!btn) return;
+    closeAllMenus();
+    openAttendanceAutomations(btn.getAttribute('data-attendance-actions'));
+  });
 
   document.getElementById('sessionsList').addEventListener('click', function (e) {
     var btn = e.target.closest('[data-action]');
@@ -2456,10 +2711,64 @@
     }
   });
 
-  function openAttendanceAutomations(id, seed) {
+  function setAttendanceAdvanced(open) {
+    attendanceAdvancedOpen = !!open;
+    var body = document.getElementById('attAdvancedBody');
+    var toggle = document.getElementById('attAdvancedToggle');
+    var state = document.getElementById('attAdvancedState');
+    if (body) body.hidden = !attendanceAdvancedOpen;
+    if (toggle) toggle.setAttribute('aria-expanded', attendanceAdvancedOpen ? 'true' : 'false');
+    if (state) state.textContent = attendanceAdvancedOpen ? 'Hide' : 'Show';
+  }
+
+  function aiThresholdChoice(value) {
+    var threshold = Number(value);
+    if (!isFinite(threshold)) return '0.7';
+    if (threshold >= 0.8) return '0.9';
+    if (threshold >= 0.6) return '0.7';
+    return '0.5';
+  }
+
+  function refreshAiControls() {
+    var enabled = document.getElementById('attAiEnabled');
+    var controls = document.getElementById('attAiControls');
+    if (enabled && controls) controls.hidden = !enabled.checked;
+  }
+
+  function refreshAttendanceActionsSummary() {
+    var summary = document.getElementById('attendanceActionsSummary');
+    if (!summary) return;
+    var checked = document.querySelector('#attendanceAutomationsBody input[name="attendanceDeliveryMode"]:checked');
+    var mode = (checked && checked.value) || 'both';
+    var parts = [mode === 'webhook' ? 'Tags off' : 'Tags on'];
+    var rules = editingWorkflowRules.filter(function (r) { return r.enabled !== false; });
+    if (rules.length) parts.push(rules.length + ' workflow rule' + (rules.length === 1 ? '' : 's'));
+    else if (editingWorkflows.length) parts.push('No workflow rules');
+    else parts.push('No workflows');
+    var ai = document.getElementById('attAiEnabled');
+    if (ai && ai.checked && editingWorkflows.length) {
+      parts.push('AI: ' + (document.getElementById('attAiMode').value === 'auto' ? 'automatic' : 'review first'));
+    }
+    var roster = document.getElementById('attRosterUrl');
+    if (roster && roster.value.trim()) parts.push('Full-list export on');
+    var hooks = editingRules.filter(function (r) { return r.enabled !== false; });
+    if (mode !== 'api' && hooks.length) parts.push(hooks.length + ' per-person webhook' + (hooks.length === 1 ? '' : 's'));
+    summary.textContent = parts.join(' · ');
+
+    var hint = document.getElementById('attAdvancedHint');
+    if (hint) {
+      var advanced = [];
+      if (roster && roster.value.trim()) advanced.push('full-list export on');
+      if (hooks.length) advanced.push(hooks.length + ' webhook rule' + (hooks.length === 1 ? '' : 's'));
+      hint.textContent = advanced.length ? advanced.join(' · ') : 'Not configured';
+    }
+  }
+
+  function openAttendanceAutomations(id, seed, options) {
     var c = state.connections.filter(function (x) { return x.id === id; })[0];
     if (!c) return;
     automationsId = id;
+    document.getElementById('attendanceAutomationsTitle').textContent = 'After-call actions · ' + c.name;
     pendingWorkflowSeed = seed || null;
     editingRules = (c.attendanceRules || []).map(function (r) { return JSON.parse(JSON.stringify(r)); });
     editingWorkflows = (c.attendanceWorkflows || []).map(function (w) { return JSON.parse(JSON.stringify(w)); });
@@ -2483,8 +2792,10 @@
 
     document.getElementById('attAiEnabled').checked = !!editingAiWorkflow.enabled;
     document.getElementById('attAiMode').value = editingAiWorkflow.mode === 'auto' ? 'auto' : 'preview';
-    document.getElementById('attAiThreshold').value = String(editingAiWorkflow.confidenceThreshold ?? 0.7);
-    document.getElementById('attAiMax').value = String(editingAiWorkflow.maxAttendees ?? 0);
+    document.getElementById('attAiThreshold').value = aiThresholdChoice(editingAiWorkflow.confidenceThreshold);
+    document.getElementById('attAiMax').value = String(editingAiWorkflow.maxAttendees ?? 25);
+    refreshAiControls();
+    setAttendanceAdvanced(!!(options && options.advanced));
 
     var roster = c.attendanceRoster || {};
     document.getElementById('attRosterUrl').value = roster.url || '';
@@ -2503,6 +2814,7 @@
         editingWorkflowRules.push(newWorkflowRule(pendingWorkflowSeed));
       }
       renderWorkflowRules();
+      refreshAttendanceActionsSummary();
       pendingWorkflowSeed = null;
       document.getElementById('attendanceSnapshot').textContent = JSON.stringify({
         event: 'attendance.result', sessionId: 'sess_…', provider: 'zoom', title: c.name,
@@ -2527,6 +2839,11 @@
           var list = document.getElementById('attendanceWorkflowRulesList');
           if (list) list.scrollIntoView({ block: 'center' });
         }, 60);
+      } else if (options && options.advanced) {
+        setTimeout(function () {
+          var advanced = document.getElementById('attAdvancedToggle');
+          if (advanced) advanced.scrollIntoView({ block: 'center' });
+        }, 60);
       }
     });
   }
@@ -2547,6 +2864,19 @@
     renderRules();
   });
 
+  document.getElementById('attAiEnabled').addEventListener('change', function () {
+    refreshAiControls();
+    refreshAttendanceActionsSummary();
+  });
+  document.getElementById('attAiMode').addEventListener('change', refreshAttendanceActionsSummary);
+  document.getElementById('attAdvancedToggle').addEventListener('click', function () {
+    setAttendanceAdvanced(!attendanceAdvancedOpen);
+  });
+  document.getElementById('attRosterUrl').addEventListener('input', refreshAttendanceActionsSummary);
+  $$('#attendanceAutomationsBody input[name="attendanceDeliveryMode"]').forEach(function (radio) {
+    radio.addEventListener('change', refreshAttendanceActionsSummary);
+  });
+
   document.getElementById('attendanceAutomationsSave').addEventListener('click', function () {
     var checked = document.querySelector('#attendanceAutomationsBody input[name="attendanceDeliveryMode"]:checked');
     var mode = (checked && checked.value) || 'both';
@@ -2563,7 +2893,7 @@
 
     var missingWorkflow = workflows.filter(function (w) { return !w.workflowId || !w.name; })[0];
     if (missingWorkflow) {
-      toast('Each workflow needs a name and a GHL workflow ID', 'error');
+      toast('Each workflow needs a name and an ID', 'error');
       return;
     }
 
@@ -2650,7 +2980,13 @@
       clearAttendanceRosterToken: document.getElementById('attRosterClearToken').checked
     };
     api('/api/connections/' + automationsId, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
-      .then(function () { closeModal('attendanceAutomations'); toast('Attendance automations saved', 'success'); return load(); })
+      .then(function () {
+        closeModal('attendanceAutomations');
+        toast('After-call actions saved', 'success');
+        return load().then(function () {
+          if (currentSessionId && !document.getElementById('sessionDetail').hidden) openSession(currentSessionId);
+        });
+      })
       .catch(function (err) { toast(err.message, 'error'); });
   });
 
@@ -3229,6 +3565,7 @@
   function closeModal(id) {
     var el = $('#' + id);
     if (!el) return;
+    closeAllMenus();
     var wasOpen = openStack.indexOf(id) !== -1;
     el.classList.remove('is-open');
     setTimeout(function () { el.hidden = true; }, 160);
@@ -3264,6 +3601,8 @@
 
   function closeAllMenus() {
     $$('.menu.is-open').forEach(function (m) { m.classList.remove('is-open'); });
+    var sessionMore = document.getElementById('sessionMore');
+    if (sessionMore) sessionMore.setAttribute('aria-expanded', 'false');
   }
   function toggleMenu(btn) {
     var wrap = btn.closest('.menu-wrap');
@@ -5229,7 +5568,7 @@
         '<div class="summary__item"><span class="summary__value">' + f.noShow + '</span><span class="summary__label">didn\'t show</span></div>' +
       '</div>';
     } else {
-      html += '<p class="muted">Who showed up appears once the linked video call has been synced in the <strong>Who attended</strong> tab.</p>';
+      html += '<p class="muted">Who showed up appears once the linked video call has been synced in the <strong>Calls</strong> tab.</p>';
     }
 
     var head = '<tr><th>Account</th><th>Sent</th><th>Yes</th><th>No</th><th>Maybe</th><th>No reply</th>' + (withAtt ? '<th>Showed up</th>' : '') + '</tr>';
@@ -5753,7 +6092,7 @@
     },
     {
       title: 'See who turned up',
-      body: 'Link a video call and we match the people who joined against the people you invited, so you know who actually showed up.'
+      body: 'Link a call and we match joiners against the people you invited. After the call, Send results labels them, adds them to workflows, or exports the full list.'
     },
     {
       title: 'Send a one-off invitation',

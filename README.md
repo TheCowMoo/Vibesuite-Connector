@@ -180,9 +180,9 @@ Key counters: `webhook_received_total`, `webhook_rejected_total`, `jobs_enqueued
 | GET | `/oauth/ghl/start?connectionId=` | redirect to GHL OAuth |
 | GET | `/oauth/ghl/callback` | complete GHL OAuth |
 | GET | `/api/stats/overview?days=30` | cross-campaign statistics (1–365 days) |
-| POST | `/api/sessions/:id/workflows/preview` | rule + optional AI workflow proposals (no GHL writes) |
-| POST | `/api/sessions/:id/workflows/apply` | apply selected workflow proposals |
-| POST | `/api/sessions/:id/workflows/assign` | manually add one contact to one workflow |
+| POST | `/api/sessions/:id/workflows/preview` | workflow matches (no GHL writes) |
+| POST | `/api/sessions/:id/workflows/apply` | add selected matches to workflows |
+| POST | `/api/sessions/:id/workflows/assign` | manually add one contact to a workflow |
 
 ## Notes & caveats
 
