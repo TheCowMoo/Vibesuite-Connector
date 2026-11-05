@@ -2671,6 +2671,10 @@
     closeAllMenus();
     sendRoster(this);
   });
+  document.getElementById('sessionExport').addEventListener('click', function () {
+    closeAllMenus();
+    if (currentSessionId) openStatsExport({ scope: 'calls', sessionId: currentSessionId });
+  });
   document.getElementById('sessionMore').addEventListener('click', function () {
     toggleMenu(this);
     this.setAttribute('aria-expanded', this.closest('.menu-wrap').querySelector('.menu').classList.contains('is-open') ? 'true' : 'false');
@@ -6394,6 +6398,149 @@
       '</div>';
   }
 
+  /* ---- Statistics export ---- */
+  var CAMPAIGN_EXPORT_SCOPES = ['campaigns', 'campaign-senders', 'campaign-variants'];
+  var OVERVIEW_EXPORT_SCOPES = ['summary', 'daily', 'mailboxes'];
+  var statsExportCampaignList = [];
+  var statsExportSessionList = [];
+
+  function isCampaignExportScope(scope) {
+    return CAMPAIGN_EXPORT_SCOPES.indexOf(scope) !== -1;
+  }
+
+  function isOverviewExportScope(scope) {
+    return OVERVIEW_EXPORT_SCOPES.indexOf(scope) !== -1;
+  }
+
+  /** Fetch only the list this scope can filter by; a failure leaves "All" usable. */
+  function loadStatsExportLists(scope) {
+    var jobs = [];
+    if (isCampaignExportScope(scope)) {
+      jobs.push(api('/api/campaigns').then(function (r) {
+        statsExportCampaignList = r.campaigns || [];
+      }).catch(function (e) {
+        statsExportCampaignList = [];
+        toast('Could not load campaigns to filter by: ' + e.message, 'info');
+      }));
+    }
+    if (scope === 'calls') {
+      jobs.push(api('/api/sessions').then(function (r) {
+        statsExportSessionList = r.sessions || [];
+      }).catch(function (e) {
+        statsExportSessionList = [];
+        toast('Could not load calls to filter by: ' + e.message, 'info');
+      }));
+    }
+    return Promise.all(jobs);
+  }
+
+  function renderStatsExportTargets(scope, selectedId) {
+    var wrap = document.getElementById('statsExportTargetWrap');
+    var label = document.getElementById('statsExportTargetLabel');
+    var select = document.getElementById('statsExportTarget');
+    var campaigns = isCampaignExportScope(scope);
+    var calls = scope === 'calls';
+    if (!campaigns && !calls) {
+      wrap.hidden = true;
+      select.innerHTML = '';
+      return;
+    }
+    wrap.hidden = false;
+    label.textContent = campaigns ? 'Only this campaign' : 'Only this call';
+    var items = campaigns ? statsExportCampaignList : statsExportSessionList;
+    var options = ['<option value="">' + (campaigns ? 'All campaigns' : 'All calls') + '</option>'];
+    items.forEach(function (item) {
+      var text = campaigns
+        ? (item.name + (item.status ? ' · ' + item.status : ''))
+        : (item.title + (item.startTime ? ' · ' + prettyDate(item.startTime) : ''));
+      options.push('<option value="' + esc(item.id) + '">' + esc(text) + '</option>');
+    });
+    select.innerHTML = options.join('');
+    if (selectedId) {
+      var exists = items.some(function (item) { return item.id === selectedId; });
+      if (exists) select.value = selectedId;
+    }
+  }
+
+  function applyStatsExportDefaults(scope) {
+    var period = document.getElementById('statsExportPeriod');
+    var allOption = period.querySelector('option[value="all"]');
+    var hint = document.getElementById('statsExportHint');
+    if (isOverviewExportScope(scope)) {
+      allOption.disabled = true;
+      period.value = 'page';
+      hint.textContent = 'Summary, daily and sending-account exports use the page period (last ' +
+        statsDays + ' days). One file per export.';
+    } else {
+      allOption.disabled = false;
+      period.value = 'all';
+      hint.textContent = 'Campaign and call exports include every record unless you choose the page period. One file per export.';
+    }
+  }
+
+  function openStatsExport(options) {
+    options = options || {};
+    var scope = options.scope || 'summary';
+    if (!isOverviewExportScope(scope) && !isCampaignExportScope(scope) && scope !== 'calls') scope = 'summary';
+    document.getElementById('statsExportScope').value = scope;
+    document.getElementById('statsExportFormat').value = 'csv';
+    renderStatsExportTargets(scope, options.campaignId || options.sessionId || '');
+    applyStatsExportDefaults(scope);
+    openModal('statsExportModal');
+    loadStatsExportLists(scope).then(function () {
+      renderStatsExportTargets(scope, options.campaignId || options.sessionId || '');
+    });
+  }
+
+  function onStatsExportScopeChange(scope) {
+    renderStatsExportTargets(scope, '');
+    applyStatsExportDefaults(scope);
+    loadStatsExportLists(scope).then(function () {
+      renderStatsExportTargets(scope, '');
+    });
+  }
+
+  function statsExportUrl() {
+    var scope = document.getElementById('statsExportScope').value;
+    var period = document.getElementById('statsExportPeriod').value;
+    var format = document.getElementById('statsExportFormat').value;
+    var target = document.getElementById('statsExportTarget').value;
+    var params = new URLSearchParams();
+    params.set('scope', scope);
+    params.set('period', period === 'all' ? 'all' : String(statsDays));
+    params.set('format', format === 'json' ? 'json' : 'csv');
+    if (target && isCampaignExportScope(scope)) params.set('campaignId', target);
+    if (target && scope === 'calls') params.set('sessionId', target);
+    return '/api/stats/export?' + params.toString();
+  }
+
+  function downloadStatsExport() {
+    var button = document.getElementById('statsExportDownload');
+    withBusy(button, fetch(statsExportUrl(), { credentials: 'same-origin' }).then(function (res) {
+      if (!res.ok) {
+        return res.json().catch(function () { return {}; }).then(function (data) {
+          throw new Error(data.error || res.statusText || 'export failed');
+        });
+      }
+      var disposition = res.headers.get('Content-Disposition') || '';
+      var match = /filename="([^"]+)"/.exec(disposition);
+      return res.blob().then(function (blob) {
+        var objectUrl = URL.createObjectURL(blob);
+        var link = document.createElement('a');
+        link.href = objectUrl;
+        link.download = match ? match[1] : 'vibesuite-export.csv';
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        setTimeout(function () { URL.revokeObjectURL(objectUrl); }, 1000);
+        toast('Export downloaded', 'success');
+      });
+    })).catch(function (e) {
+      toast(e.message, 'error');
+    });
+  }
+
+
   function loadStatsOverview() {
     var kpis = document.getElementById('statsKpis');
     if (!kpis) return Promise.resolve();
@@ -6515,6 +6662,25 @@
     statsRangeEl.addEventListener('change', function () {
       statsDays = Number(this.value) || 30;
       loadStatsOverview();
+    });
+  }
+
+  var statsExportBtn = document.getElementById('statsExport');
+  if (statsExportBtn) {
+    statsExportBtn.addEventListener('click', function () { openStatsExport(); });
+  }
+  var statsExportScopeEl = document.getElementById('statsExportScope');
+  if (statsExportScopeEl) {
+    statsExportScopeEl.addEventListener('change', function () { onStatsExportScopeChange(this.value); });
+  }
+  var statsExportDownloadBtn = document.getElementById('statsExportDownload');
+  if (statsExportDownloadBtn) {
+    statsExportDownloadBtn.addEventListener('click', downloadStatsExport);
+  }
+  var campaignExportBtn = document.getElementById('campaignExport');
+  if (campaignExportBtn) {
+    campaignExportBtn.addEventListener('click', function () {
+      if (currentCampaignId) openStatsExport({ scope: 'campaigns', campaignId: currentCampaignId });
     });
   }
 

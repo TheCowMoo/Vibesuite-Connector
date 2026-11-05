@@ -532,6 +532,23 @@ the browser for the requested period, never persisted, and disappears automatica
 activity exists — the `hasActivity` flag is computed across all campaigns and sessions, so an empty
 *period* on an established account still shows honest zeros rather than samples.
 
+### Exporting statistics
+
+`GET /api/stats/export?scope=…&period=…&format=…` returns one attachment built on demand from the same
+stores the pages read — nothing is cached, queued or persisted, so an export cannot disagree with the
+dashboard. Scopes are `summary`, `daily`, `campaigns`, `campaign-senders`, `campaign-variants`, `calls`
+and `mailboxes`; `campaignId` / `sessionId` narrow a campaign or call export to one record and produce
+a 404 when it does not exist. `period` is 1–365 or `all`; campaign exports use the overview rule (a
+campaign belongs to the period when it sent inside it), call exports window on `startTime`, and the
+three overview scopes clamp `all` to 365 because a daily series needs a length.
+
+Rows are built by `statsExport.ts` (pure) from `collectCampaignStats()` and `collectStatsOverview()`
+output, so funnel and RSVP arithmetic is shared with the detail pages rather than reimplemented. CSV is
+RFC 4180 with a UTF-8 BOM and CRLF rows (`toCsv()`); `format=json` returns the same rows keyed by column
+key. Percentages are numbers (0–100, one decimal), timestamps are ISO 8601, and attendance cells stay
+blank when the campaign or call has no attendance data. The call scope is the **latest sync only**:
+there are no per-person rows and no sync-run history, because neither is stored.
+
 ### One blast per account (and optional rounds)
 
 The default is **one Calendar event per sending account**. Every recipient that account may contact

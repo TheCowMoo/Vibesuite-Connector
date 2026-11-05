@@ -445,6 +445,31 @@ A brand-new account shows **labelled sample data** so the page is not a wall of 
 “Sample data — nothing here is real.”; it is generated in the browser, never stored, and disappears the moment
 real invitations or video calls exist. An established account with an empty period shows honest zeros instead.
 
+### Exporting the numbers
+
+**Export ▾** on the Statistics tab downloads one table at a time, as **CSV** (opens in Excel, Numbers
+or Sheets) or **JSON**:
+
+| Export | One row per |
+|---|---|
+| Summary | the chosen period — totals, reply mix, rates |
+| Invitations per day | day |
+| Campaigns | campaign — full funnel and rates |
+| Campaigns × sending account | campaign and mailbox |
+| Campaigns × copy variant | campaign and copy variant |
+| Zoom calls | call — latest sync, attendance, polls, Q&A |
+| Sending accounts | mailbox — totals for the period |
+
+- **Period** is either this page's period or **All time**. Campaign and call exports default to all
+  time; the three overview exports always use the page period.
+- **Only this campaign / Only this call** narrows a campaign or call export to one record.
+- Campaign **Details → Export stats** and **Calls → More → Export call stats** open the same dialog
+  preselected to that record.
+- A call export reflects its **latest sync**. Older sync attempts are not kept, so there is no sync
+  history to download.
+- Attendance cells are **blank** when a campaign or call has no attendance data — never a fake zero.
+  Timestamps are ISO 8601 (UTC) and percentages are plain numbers.
+
 ### What the words mean
 
 | Word | Means |
@@ -555,6 +580,7 @@ Server-side failures (deploy, Redis, worker restarts) are covered in [`DEPLOYMEN
 | Mailbox readiness and batch arbitration | `app/src/domain/campaignSchedule.ts` |
 | Campaign funnel | `app/src/domain/campaignStats.ts`, `campaignStatsCollect.ts` |
 | Cross-campaign rollup | `app/src/domain/statsOverview.ts`, `statsCollect.ts` |
+| Statistics export tables | `app/src/domain/statsExport.ts`, `statsExportCollect.ts` |
 | HTTP routes | `app/src/api/routes/campaigns.ts`, `invites.ts`, `sessions.ts`, `stats.ts` |
 | Panel views and card actions | `app/public/app.js` (`campaignActions`, `renderCampaigns`) |
 | Design notes for all of the above | [`architecture.md`](architecture.md) — *Senders & campaigns*, *Scheduling and ending*, *Audience* |

@@ -281,13 +281,16 @@
         <h1 class="page-head__title">Statistics</h1>
         <p class="page-head__sub">How your invitations, replies and attendance are going.</p>
       </div>
-      <label class="field stats-range"><span class="field__label">Period</span>
-        <select id="statsRange">
-          <option value="7">Last 7 days</option>
-          <option value="30" selected>Last 30 days</option>
-          <option value="90">Last 90 days</option>
-        </select>
-      </label>
+      <div class="page-head__actions">
+        <label class="field stats-range"><span class="field__label">Period</span>
+          <select id="statsRange">
+            <option value="7">Last 7 days</option>
+            <option value="30" selected>Last 30 days</option>
+            <option value="90">Last 90 days</option>
+          </select>
+        </label>
+        <button class="btn btn--outline" id="statsExport">Export &#9662;</button>
+      </div>
     </div>
 
     <div id="statsBanner"></div>
@@ -605,6 +608,7 @@
         <button class="btn btn--ghost" id="sessionMore" aria-haspopup="true" aria-expanded="false">More &#9662;</button>
         <div class="menu menu--up" id="sessionMoreMenu">
           <button type="button" class="menu__item" id="sessionRoster">Send call report</button>
+          <button type="button" class="menu__item" id="sessionExport">Export call stats</button>
           <button type="button" class="menu__item" id="sessionManageActions">Manage actions</button>
         </div>
       </div>
@@ -995,8 +999,53 @@
     <div id="campaignDetailBody"></div>
     <div class="modal__foot">
       <button class="btn btn--outline" id="campSendNow">Send the next batch now</button>
+      <button class="btn btn--ghost" id="campaignExport">Export stats</button>
       <span class="spacer"></span>
       <button class="btn btn--ghost" data-close="campaignDetail">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- Export statistics -->
+<div class="backdrop" id="statsExportModal" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="statsExportTitle">
+    <div class="modal__head">
+      <h2 class="modal__title" id="statsExportTitle">Export statistics</h2>
+      <button class="icon-btn" data-close="statsExportModal" aria-label="Close">&times;</button>
+    </div>
+    <label class="field"><span class="field__label">What to export</span>
+      <select id="statsExportScope">
+        <option value="summary">Summary — totals and reply rates</option>
+        <option value="daily">Invitations per day</option>
+        <option value="campaigns">Campaigns — one row per campaign</option>
+        <option value="campaign-senders">Campaigns × sending account</option>
+        <option value="campaign-variants">Campaigns × copy variant</option>
+        <option value="calls">Zoom calls — latest sync per call</option>
+        <option value="mailboxes">Sending accounts — totals</option>
+      </select>
+    </label>
+    <label class="field" id="statsExportTargetWrap" hidden><span class="field__label" id="statsExportTargetLabel">Only this campaign</span>
+      <select id="statsExportTarget"></select>
+    </label>
+    <div class="sender__grid">
+      <label class="field"><span class="field__label">Period</span>
+        <select id="statsExportPeriod">
+          <option value="page">This page's period</option>
+          <option value="all">All time</option>
+        </select>
+      </label>
+      <label class="field"><span class="field__label">Format</span>
+        <select id="statsExportFormat">
+          <option value="csv">CSV (spreadsheet)</option>
+          <option value="json">JSON</option>
+        </select>
+      </label>
+    </div>
+    <p class="hint" id="statsExportHint">One file per export. CSV opens in Excel, Numbers or Sheets.</p>
+    <div class="modal__foot">
+      <span class="spacer"></span>
+      <button class="btn btn--ghost" data-close="statsExportModal">Cancel</button>
+      <button class="btn btn--primary" id="statsExportDownload">Download</button>
     </div>
   </div>
 </div>

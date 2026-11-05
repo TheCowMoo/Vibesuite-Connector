@@ -63,6 +63,14 @@ export function dayKey(ts: number): string {
   return new Date(ts).toISOString().slice(0, 10);
 }
 
+/** Start of the last-N-days window (UTC, including today), clamped to 1–365. */
+export function overviewWindowStart(days: number, now: number): number {
+  const date = new Date(now);
+  const todayStart = Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate());
+  const clamped = Math.min(365, Math.max(1, Math.floor(days)));
+  return todayStart - (clamped - 1) * 86400000;
+}
+
 /**
  * Fold every campaign and session into one overview.
  *
@@ -77,10 +85,8 @@ export function dayKey(ts: number): string {
  */
 export function buildStatsOverview(input: StatsOverviewInput): StatsOverview {
   const days = Math.min(365, Math.max(1, Math.floor(input.days)));
-  const now = new Date(input.now);
 
-  const todayStart = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
-  const windowStart = todayStart - (days - 1) * 86400000;
+  const windowStart = overviewWindowStart(days, input.now);
 
   const daily: Array<{ date: string; sent: number }> = [];
   const dayIndex = new Map<string, number>();
