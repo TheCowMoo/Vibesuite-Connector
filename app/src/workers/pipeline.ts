@@ -6,6 +6,7 @@ import type { GCalEvent } from '../google/types';
 import { getConnection } from '../domain/connectionStore';
 import type { StoredConnection } from '../domain/connection';
 import { stateStore } from '../domain/stateStore';
+import { recordRsvpHistory } from '../domain/rsvpHistoryStore';
 import { acquireLock } from '../domain/lock';
 import { computeChanges, buildChangeFingerprint, type AttendeeChange } from '../domain/dedupe';
 import { toGhlAction } from '../domain/transform';
@@ -39,6 +40,17 @@ export async function processSync(connectionId: string): Promise<void> {
     await runSync(conn);
   } finally {
     // The lock expires automatically via TTL.
+  }
+}
+
+/**
+ * History is a secondary read model: a Redis failure here must never stop the RSVP -> GHL sync.
+ */
+async function recordHistory(connectionId: string, items: GCalEvent[]): Promise<void> {
+  try {
+    await recordRsvpHistory(connectionId, items.filter((e) => e.status !== 'cancelled'));
+  } catch (err) {
+    logger.warn({ connectionId, err: (err as Error).message }, 'rsvp history recording failed');
   }
 }
 
@@ -80,6 +92,7 @@ async function runSync(conn: StoredConnection): Promise<void> {
   const cancelledIds = items.filter((e) => e.status === 'cancelled').map((e) => e.id);
   await stateStore.removeEvents(connectionId, cancelledIds);
   await stateStore.saveStates(connectionId, items.filter((e) => e.status !== 'cancelled'));
+  await recordHistory(connectionId, items);
   await stateStore.saveSyncToken(connectionId, nextSyncToken);
 
   inc('sync_processed_total', { type: 'incremental' });

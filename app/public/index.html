@@ -58,6 +58,7 @@
       <div class="rail__group">Insights</div>
       <button class="rail__link" data-view="stats"><span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="21" x2="21" y2="21"/><rect x="5" y="11" width="4" height="10"/><rect x="11" y="6" width="4" height="15"/><rect x="17" y="14" width="4" height="7"/></svg></span>Statistics</button>
       <button class="rail__link" data-view="attendance"><span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg></span>Calls</button>
+      <button class="rail__link" data-view="campaign-crm"><span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span>Campaign CRM</button>
       <button class="rail__link" data-view="deliverability" data-role="admin" hidden><span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg></span>Deliverability</button>
       <button class="rail__link" data-view="advisor" data-role="admin" hidden><span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1"/><circle cx="12" cy="12" r="2.5"/></svg></span>Assistant</button>
 
@@ -328,6 +329,19 @@
       <button class="btn btn--primary" id="campaignNew">New campaign</button>
     </div>
     <div id="campaignsList"></div>
+  </section>
+
+  <!-- Campaign CRM -->
+  <section id="view-campaign-crm" class="view" hidden>
+    <div class="page-head">
+      <div>
+        <h1 class="page-head__title">Campaign CRM</h1>
+        <p class="page-head__sub">Who replied, who came, and what they did in the linked call.</p>
+      </div>
+      <button class="btn btn--outline" id="crmExport">Export CSV</button>
+    </div>
+    <label class="field crm-picker"><span class="field__label">Campaign</span><select id="crmCampaignPick"></select></label>
+    <div id="crmFullBody"></div>
   </section>
 
   <!-- Senders -->
@@ -1006,6 +1020,7 @@
     <div id="campaignDetailBody"></div>
     <div class="modal__foot">
       <button class="btn btn--outline" id="campSendNow">Send the next batch now</button>
+      <button class="btn btn--ghost" id="campaignPeople">People</button>
       <button class="btn btn--ghost" id="campaignExport">Export stats</button>
       <span class="spacer"></span>
       <button class="btn btn--ghost" data-close="campaignDetail">Close</button>

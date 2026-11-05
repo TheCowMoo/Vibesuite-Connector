@@ -51,6 +51,7 @@
     $('#view-invites').hidden = name !== 'invites';
     $('#view-stats').hidden = name !== 'stats';
     $('#view-attendance').hidden = name !== 'attendance';
+    $('#view-campaign-crm').hidden = name !== 'campaign-crm';
     $('#view-deliverability').hidden = name !== 'deliverability';
     $('#view-advisor').hidden = name !== 'advisor';
     $('#view-campaigns').hidden = name !== 'campaigns';
@@ -63,6 +64,7 @@
     if (name === 'invites') loadInvitesView();
     if (name === 'stats') loadStatsOverview();
     if (name === 'attendance') loadAttendance();
+    if (name === 'campaign-crm') loadCampaignCrmView();
     if (name === 'deliverability') loadDeliverability();
     if (name === 'advisor') loadAdvisor();
     if (name === 'campaigns') loadCampaigns();
@@ -4553,9 +4555,33 @@
   var zoomAccounts = [];
   var currentCampaignId = null;
   var currentCampaign = null;
+  var currentCampaignPlan = null;
+  var currentCampaignStats = null;
+  var campaignDetailTab = 'overview';
   var campCopyVariants = [];
   var editCopyVariants = [];
   var testCopyVariantId = null;
+
+  /* ---- Campaign CRM ---- */
+  var CRM_TAB_LIMIT = 10;
+  var CRM_FULL_LIMIT = 50;
+  var crmCampaigns = [];
+
+  function newCrmState(campaignId, limit) {
+    return {
+      campaignId: campaignId || null,
+      query: { offset: 0, limit: limit },
+      data: null,
+      loading: false,
+      error: '',
+      seq: 0,
+      expanded: {},
+      searchTimer: null,
+    };
+  }
+
+  var crmTabState = newCrmState(null, CRM_TAB_LIMIT);
+  var crmFullState = newCrmState(null, CRM_FULL_LIMIT);
 
   /** Excel-style label: 1=A, 26=Z, 27=AA, 28=AB, … */
   function variantLabel(n) {
@@ -4733,6 +4759,7 @@
     }
     items += menuBtn('campDelete', 'Delete', 'trash', c.id, true);
 
+    out += '<button class="btn btn--ghost btn--sm" data-action="campPeople" data-id="' + id + '">People</button>';
     out += '<button class="btn btn--ghost btn--sm" data-action="campDetail" data-id="' + id + '">Details</button>';
     out += '<div class="menu-wrap">' +
       '<button class="btn btn--menu btn--sm" data-menu-btn aria-label="More actions" aria-haspopup="menu" title="More actions">' + icon('more') + '</button>' +
@@ -5750,9 +5777,13 @@
       .catch(function (e) { toast(e.message, 'error'); });
   }
 
-  function openCampaignDetail(id) {
+  function openCampaignDetail(id, tab) {
     currentCampaignId = id;
     currentCampaign = null;
+    currentCampaignPlan = null;
+    currentCampaignStats = null;
+    campaignDetailTab = tab === 'people' ? 'people' : 'overview';
+    if (crmTabState.campaignId !== id) crmTabState = newCrmState(id, CRM_TAB_LIMIT);
     document.getElementById('campaignDetailBody').innerHTML = skeletonCards(1);
     openModal('campaignDetail');
     return Promise.all([
@@ -5762,7 +5793,10 @@
     ])
       .then(function (r) {
         currentCampaign = r[0].campaign;
-        renderCampaignDetail(r[0].campaign, r[1], r[2] && r[2].stats);
+        currentCampaignPlan = r[1];
+        currentCampaignStats = r[2] && r[2].stats;
+        renderCampaignDetail(currentCampaign, currentCampaignPlan, currentCampaignStats);
+        if (campaignDetailTab === 'people') loadCampaignCrmTab();
       })
       .catch(function (e) {
         document.getElementById('campaignDetailBody').innerHTML = '<p class="muted">' + esc(e.message) + '</p>';
@@ -5881,14 +5915,21 @@
         '</td><td>' + p.failed + '</td><td>' + (p.enabled ? 'yes' : 'no') + '</td></tr>';
     }).join('');
 
-    document.getElementById('campaignDetailBody').innerHTML =
-      '<div class="conn__head">' + campStatusChip(c.status) +
-        '<span class="chip chip--neutral">' + esc(splitLabel(c.senders)) + '</span>' +
-        '<span class="chip chip--neutral">' + esc(campListName(c.listId)) + '</span>' +
-        (c.includeAlreadyInvited ? '<span class="chip chip--warning">includes repeat invitations</span>' : '') +
-        (c.status === 'scheduled' && c.scheduledStartAt ? '<span class="chip chip--neutral">Starts ' + esc(prettyDate(c.scheduledStartAt)) + '</span>' : '') +
-        (c.zoomUserId ? '<span class="chip chip--neutral">Zoom host: ' + esc(zoomAccountLabel(c.zoomUserId)) + '</span>' : '') +
-        (c.sendByAt ? '<span class="chip chip--neutral">Stop by ' + esc(prettyDate(c.sendByAt)) + '</span>' : '') + '</div>' +
+    var tabs = [
+      { id: 'overview', label: 'Overview', count: '' },
+      { id: 'people', label: 'People', count: counts.total }
+    ];
+    var tabBar = '<div class="session-tabs" role="tablist">' + tabs.map(function (tab) {
+      var active = campaignDetailTab === tab.id;
+      var count = tab.count !== '' && tab.count !== undefined
+        ? ' <span class="session-tab__count">' + tab.count + '</span>'
+        : '';
+      return '<button type="button" class="session-tab' + (active ? ' is-active' : '') +
+        '" data-campaign-tab="' + tab.id + '" role="tab" aria-selected="' + (active ? 'true' : 'false') + '">' +
+        tab.label + count + '</button>';
+    }).join('') + '</div>';
+
+    var overview =
       '<div class="summary">' +
         '<div class="summary__item"><span class="summary__value">' + counts.total + '</span><span class="summary__label">people</span></div>' +
         '<div class="summary__item"><span class="summary__value">' + counts.sent + '</span><span class="summary__label">sent</span></div>' +
@@ -5902,6 +5943,649 @@
       '<table class="map"><thead><tr><th>Account</th><th>Share</th><th>Sent</th><th>Waiting</th><th>Couldn\'t send</th><th>On</th></tr></thead><tbody>' +
         (rows || '<tr><td colspan="6" class="muted">Nothing sent yet.</td></tr>') + '</tbody></table>' +
       campaignStatsHtml(stats);
+
+    var peopleContent;
+    if (crmTabState.error) {
+      peopleContent = '<p class="muted">' + esc(crmTabState.error) + '</p>';
+    } else if (crmTabState.data && crmTabState.campaignId === c.id) {
+      peopleContent = crmHtml(crmTabState.data, 'tab', crmTabState);
+    } else {
+      peopleContent = '<p class="muted">Loading people…</p>';
+    }
+
+    document.getElementById('campaignDetailBody').innerHTML =
+      '<div class="conn__head">' + campStatusChip(c.status) +
+        '<span class="chip chip--neutral">' + esc(splitLabel(c.senders)) + '</span>' +
+        '<span class="chip chip--neutral">' + esc(campListName(c.listId)) + '</span>' +
+        (c.includeAlreadyInvited ? '<span class="chip chip--warning">includes repeat invitations</span>' : '') +
+        (c.status === 'scheduled' && c.scheduledStartAt ? '<span class="chip chip--neutral">Starts ' + esc(prettyDate(c.scheduledStartAt)) + '</span>' : '') +
+        (c.zoomUserId ? '<span class="chip chip--neutral">Zoom host: ' + esc(zoomAccountLabel(c.zoomUserId)) + '</span>' : '') +
+        (c.sendByAt ? '<span class="chip chip--neutral">Stop by ' + esc(prettyDate(c.sendByAt)) + '</span>' : '') + '</div>' +
+      tabBar +
+      (campaignDetailTab === 'people'
+        ? '<div data-crm-scope="tab" id="crmTabRoot">' + peopleContent + '</div>'
+        : overview);
+  }
+
+  /* ---- Campaign CRM renderers ---- */
+  function crmStateFor(scope) {
+    return scope === 'full' ? crmFullState : crmTabState;
+  }
+
+  function crmQueryString(state) {
+    var params = new URLSearchParams();
+    ['q', 'rsvp', 'zoom', 'send', 'sender', 'variant', 'followUp', 'sort'].forEach(function (key) {
+      if (state.query[key]) params.set(key, state.query[key]);
+    });
+    params.set('offset', state.query.offset || 0);
+    params.set('limit', state.query.limit || 50);
+    return params.toString();
+  }
+
+  function crmRsvpLabel(value) {
+    if (value === 'accepted') return 'Yes';
+    if (value === 'declined') return 'No';
+    if (value === 'tentative') return 'Maybe';
+    if (value === 'needsAction') return 'No reply';
+    return 'Not sent';
+  }
+
+  function crmZoomLabel(value) {
+    if (value === 'attended') return 'Attended';
+    if (value === 'partial') return 'Brief visit';
+    if (value === 'didnt_join') return "Didn't join";
+    if (value === 'walk_in') return 'Walk-in';
+    if (value === 'not_tracked') return 'Not tracked';
+    return 'Not invited';
+  }
+
+  function crmSendLabel(value) {
+    if (value === 'sent') return 'Sent';
+    if (value === 'failed') return 'Failed';
+    if (value === 'walk_in') return 'Walk-in';
+    return 'Waiting';
+  }
+
+  function crmChip(label, tone) {
+    return '<span class="chip chip--' + tone + '">' + esc(label) + '</span>';
+  }
+
+  function crmRsvpChip(row) {
+    if (row.rsvp === 'accepted') return crmChip('Yes', 'success');
+    if (row.rsvp === 'declined') return crmChip('No', 'danger');
+    if (row.rsvp === 'tentative') return crmChip('Maybe', 'warning');
+    if (row.rsvp === 'needsAction') return crmChip('No reply', 'neutral');
+    return crmChip('Not sent', 'neutral');
+  }
+
+  function crmZoomChip(row) {
+    if (row.zoom === 'attended') return crmChip('Attended', 'success');
+    if (row.zoom === 'partial') return crmChip('Brief visit', 'warning');
+    if (row.zoom === 'didnt_join') return crmChip("Didn't join", 'danger');
+    if (row.zoom === 'walk_in') return crmChip('Walk-in', 'warning');
+    if (row.zoom === 'not_tracked') return crmChip('Not tracked', 'neutral');
+    return crmChip('Not invited', 'neutral');
+  }
+
+  function crmFollowUpChip(row) {
+    var status = row.note && row.note.followUp ? row.note.followUp : 'none';
+    if (status === 'todo') return crmChip('To contact', 'warning');
+    if (status === 'contacted') return crmChip('Contacted', 'neutral');
+    if (status === 'done') return crmChip('Done', 'success');
+    return crmChip('None', 'neutral');
+  }
+
+  function crmSendChip(row) {
+    if (row.sendStatus === 'failed') return crmChip('Failed', 'danger');
+    if (row.sendStatus === 'pending') return crmChip('Waiting', 'warning');
+    if (row.sendStatus === 'walk_in') return crmChip('Walk-in', 'warning');
+    return crmChip('Sent', 'neutral');
+  }
+
+  function crmPersonName(row) {
+    return row.name || row.email || 'Unknown person';
+  }
+
+  function crmSummaryItem(value, label) {
+    return '<div class="summary__item"><span class="summary__value">' + value +
+      '</span><span class="summary__label">' + label + '</span></div>';
+  }
+
+  function crmSummaryHtml(summary) {
+    if (!summary) return '';
+    return '<div class="summary crm-summary">' +
+      crmSummaryItem(summary.people, 'people') +
+      crmSummaryItem(summary.sent, 'sent') +
+      crmSummaryItem(summary.rsvp.accepted, 'said yes') +
+      crmSummaryItem(summary.rsvp.declined, 'said no') +
+      crmSummaryItem(summary.rsvp.tentative, 'maybe') +
+      crmSummaryItem(summary.rsvp.noReply, 'no reply') +
+      crmSummaryItem(summary.zoom.attended, 'attended') +
+      crmSummaryItem(summary.zoom.partial, 'brief visits') +
+      crmSummaryItem(summary.zoom.didntJoin, "didn't join") +
+      crmSummaryItem(summary.zoom.notTracked, 'not tracked') +
+      crmSummaryItem(summary.zoom.walkIns, 'walk-ins') +
+      crmSummaryItem(summary.followUp.open, 'open follow-ups') +
+      '</div>';
+  }
+
+  function crmWarningsHtml(warnings) {
+    if (!warnings || !warnings.length) return '';
+    return '<div class="crm-warnings">' + warnings.map(function (warning) {
+      return '<div class="crm-warning">' + esc(warning) + '</div>';
+    }).join('') + '</div>';
+  }
+
+  function crmSessionHtml(data) {
+    var session = data.session;
+    if (!session) return '';
+    var parts = ['<span class="chip chip--neutral">' + esc(session.provider || 'Call') + '</span>'];
+    parts.push('<span class="muted">' + esc(session.title || 'Linked call') + '</span>');
+    if (session.startTime) parts.push('<span class="muted">' + esc(prettyDate(session.startTime)) + '</span>');
+    parts.push('<button type="button" class="link-btn" data-crm-open-call>Open call results</button>');
+    return '<div class="crm-session">' + parts.join(' · ') + '</div>';
+  }
+
+  function crmSelectHtml(label, key, options, current) {
+    return '<label class="field"><span class="field__label">' + label + '</span>' +
+      '<select data-crm-filter="' + key + '">' + options.map(function (option) {
+        return '<option value="' + esc(option.value) + '"' +
+          (String(current || '') === String(option.value) ? ' selected' : '') + '>' +
+          esc(option.label) + '</option>';
+      }).join('') + '</select></label>';
+  }
+
+  function crmFiltersHtml(data, state) {
+    var q = state.query;
+    var rsvpOptions = [
+      { value: '', label: 'All replies' },
+      { value: 'accepted', label: 'Yes' },
+      { value: 'declined', label: 'No' },
+      { value: 'tentative', label: 'Maybe' },
+      { value: 'no_reply', label: 'No reply' },
+      { value: 'none', label: 'Not sent' }
+    ];
+    var zoomOptions = [
+      { value: '', label: 'All Zoom results' },
+      { value: 'attended', label: 'Attended' },
+      { value: 'partial', label: 'Brief visit' },
+      { value: 'didnt_join', label: "Didn't join" },
+      { value: 'walk_in', label: 'Walk-in' },
+      { value: 'not_tracked', label: 'Not tracked' },
+      { value: 'not_invited', label: 'Not invited' }
+    ];
+    var sendOptions = [
+      { value: '', label: 'All send states' },
+      { value: 'sent', label: 'Sent' },
+      { value: 'pending', label: 'Waiting' },
+      { value: 'failed', label: 'Failed' },
+      { value: 'walk_in', label: 'Walk-in' }
+    ];
+    var followOptions = [
+      { value: '', label: 'All follow-ups' },
+      { value: 'none', label: 'None' },
+      { value: 'todo', label: 'To contact' },
+      { value: 'contacted', label: 'Contacted' },
+      { value: 'done', label: 'Done' }
+    ];
+    var senderOptions = [{ value: '', label: 'All sending accounts' }].concat(
+      (data.filters.senders || []).map(function (sender) {
+        return { value: sender.connectionId, label: sender.name };
+      }),
+    );
+    var variantOptions = [{ value: '', label: 'All copy variants' }].concat(
+      (data.filters.variants || []).map(function (variant) {
+        return { value: variant, label: variant };
+      }),
+    );
+    var sortOptions = [
+      { value: 'name', label: 'Sort by name' },
+      { value: 'rsvp', label: 'Sort by reply' },
+      { value: 'zoom', label: 'Sort by Zoom result' },
+      { value: 'sent', label: 'Sort by sent date' }
+    ];
+
+    return '<div class="crm-filters">' +
+      '<label class="field"><span class="field__label">Search</span>' +
+        '<input data-crm-filter="q" value="' + esc(q.q || '') + '" placeholder="Name, email or company" /></label>' +
+      crmSelectHtml('Reply', 'rsvp', rsvpOptions, q.rsvp) +
+      crmSelectHtml('Zoom', 'zoom', zoomOptions, q.zoom) +
+      crmSelectHtml('Send', 'send', sendOptions, q.send) +
+      crmSelectHtml('Follow-up', 'followUp', followOptions, q.followUp) +
+      crmSelectHtml('Sending account', 'sender', senderOptions, q.sender) +
+      crmSelectHtml('Copy', 'variant', variantOptions, q.variant) +
+      crmSelectHtml('Order', 'sort', sortOptions, q.sort || 'name') +
+      '</div>';
+  }
+
+  function crmToolbarHtml(mode) {
+    var actions = ['<button type="button" class="btn btn--ghost btn--sm" data-crm-refresh>Refresh</button>'];
+    if (mode === 'tab') {
+      actions.push('<button type="button" class="btn btn--outline btn--sm" data-crm-open-full>Open full CRM</button>');
+    }
+    return '<div class="crm-toolbar">' +
+      '<div class="conn__actions">' + actions.join('') + '</div></div>';
+  }
+
+  function crmHistoryHtml(row) {
+    if (!row.rsvpHistory || !row.rsvpHistory.length) {
+      return '<p class="muted">No RSVP change has been recorded yet. The current reply is shown above.</p>';
+    }
+    var items = row.rsvpHistory.slice().sort(function (a, b) { return a.at - b.at; }).map(function (entry) {
+      var label = entry.initial ? 'Tracking started — ' + crmRsvpLabel(entry.status) : 'Changed to ' + crmRsvpLabel(entry.status);
+      return '<li><strong>' + esc(label) + '</strong><span>' + esc(prettyDate(entry.at)) + '</span></li>';
+    });
+    return '<div class="crm-detail__section"><div class="crm-detail__title">RSVP history</div>' +
+      '<ul class="crm-history">' + items.join('') + '</ul>' +
+      '<p class="muted" style="font-size:0.76rem">Times are when our sync detected the change, not Google’s reply time.</p></div>';
+  }
+
+  function crmFact(label, value) {
+    return detailLine(label, value);
+  }
+
+  function crmCampaignFactsHtml(row) {
+    var sent = row.sentAt ? prettyDate(row.sentAt) : '';
+    var facts = [
+      crmFact('Send status', crmSendLabel(row.sendStatus)),
+      crmFact('Sent', sent),
+      crmFact('Sending account', row.senderName),
+      crmFact('Copy', row.variant),
+      crmFact('Reply', crmRsvpLabel(row.rsvp)),
+      crmFact('Zoom result', crmZoomLabel(row.zoom)),
+      crmFact('Event ID', row.eventId),
+      crmFact('Send error', row.sendError),
+      crmFact('Company', row.company),
+      crmFact('Phone', row.phone)
+    ].filter(Boolean).join('');
+    return '<div class="crm-detail__section"><div class="crm-detail__title">Campaign</div>' +
+      (row.walkIn ? '<p class="muted">Joined without being on this campaign’s invited list.</p>' : '') +
+      (facts ? facts : '<p class="muted">No campaign details.</p>') +
+      '</div>';
+  }
+
+  function crmNoteHtml(row) {
+    var status = row.note && row.note.followUp ? row.note.followUp : 'none';
+    var note = row.note && row.note.note ? row.note.note : '';
+    var updated = row.note && row.note.updatedAt
+      ? 'Last updated ' + prettyDate(row.note.updatedAt) + (row.note.updatedBy ? ' by ' + row.note.updatedBy : '')
+      : 'No note yet.';
+    var options = [
+      ['none', 'No follow-up'],
+      ['todo', 'To contact'],
+      ['contacted', 'Contacted'],
+      ['done', 'Done']
+    ].map(function (pair) {
+      return '<option value="' + pair[0] + '"' + (status === pair[0] ? ' selected' : '') + '>' + pair[1] + '</option>';
+    }).join('');
+    return '<div class="crm-note" data-crm-key="' + esc(row.key) + '">' +
+      '<div class="crm-note__row"><span class="field__label">Note and follow-up</span>' +
+        '<select data-crm-followup>' + options + '</select>' +
+        '<button type="button" class="btn btn--primary btn--sm" data-crm-save-note>Save note</button></div>' +
+      '<textarea data-crm-note maxlength="2000" placeholder="Internal note for this campaign…">' + esc(note) + '</textarea>' +
+      '<span class="crm-note__meta">' + esc(updated) + '</span></div>';
+  }
+
+  function crmZoomDetailHtml(row) {
+    if (row.zoom === 'not_invited') {
+      return '<p class="muted">No invitation was delivered to this person, so there is no Zoom result.</p>';
+    }
+    if (row.zoom === 'not_tracked') {
+      return '<p class="muted">The linked Zoom report has no row for this person. Sync the call again to complete the match.</p>';
+    }
+    var result = row.walkIn ? 'not_invited'
+      : row.zoom === 'partial' ? 'partial'
+        : row.zoom === 'attended' ? 'attended'
+          : 'no_show';
+    return personDetailHTML(row, result);
+  }
+
+  function crmRowDetailHtml(row) {
+    return '<div class="crm-detail__grid">' +
+      '<div>' + crmCampaignFactsHtml(row) + crmHistoryHtml(row) + crmNoteHtml(row) + '</div>' +
+      '<div class="crm-detail__section"><div class="crm-detail__title">Zoom behavior</div>' +
+        crmZoomDetailHtml(row) + '</div>' +
+      '</div>';
+  }
+
+  function crmActivityText(row) {
+    var bits = [];
+    if (row.durationSec !== undefined) bits.push(Math.round(row.durationSec / 60) + ' min');
+    if (row.behavior && row.behavior.pollQuestionCount) {
+      bits.push((row.behavior.pollAnsweredCount || 0) + '/' + row.behavior.pollQuestionCount + ' polls');
+    }
+    if (row.behavior && row.behavior.qaAskedCount) bits.push(row.behavior.qaAskedCount + ' Q&A');
+    if (row.behavior && row.behavior.registrationAnswerCount) bits.push(row.behavior.registrationAnswerCount + ' reg');
+    return bits.length ? bits.join(' · ') : '—';
+  }
+
+  function crmTableHtml(data, state) {
+    if (!data.rows.length) {
+      var filtered = ['q', 'rsvp', 'zoom', 'send', 'sender', 'variant', 'followUp'].some(function (key) {
+        return !!(state.query && state.query[key]);
+      });
+      var message = data.summary.people === 0 && data.summary.zoom.walkIns === 0
+        ? 'This campaign has no frozen audience yet. People appear here after Begin sending.'
+        : filtered
+          ? 'No people match these filters.'
+          : 'No people to show.';
+      return '<div class="crm-empty">' + esc(message) +
+        (filtered ? ' <button type="button" class="link-btn" data-crm-reset>Clear filters</button>' : '') + '</div>';
+    }
+
+    var rows = data.rows.map(function (row) {
+      var open = !!(state.expanded && state.expanded[row.key]);
+      var name = crmPersonName(row);
+      var meta = [];
+      if (row.name && row.email) meta.push(row.email);
+      if (row.company) meta.push(row.company);
+      var activity = crmActivityText(row);
+      var sent = row.sentAt ? '<span class="crm-person__meta">' + esc(prettyDate(row.sentAt)) + '</span>' : '';
+      var html = '<tr class="person-row' + (open ? ' is-open' : '') + '">' +
+        '<td><button type="button" class="person-toggle" data-crm-row="' + esc(row.key) + '" aria-expanded="' + (open ? 'true' : 'false') + '">' +
+          '<span class="person-toggle__name">' + esc(name) + '</span>' +
+          (meta.length ? '<span class="crm-person__meta">' + esc(meta.join(' · ')) + '</span>' : '') +
+        '</button></td>' +
+        '<td>' + crmRsvpChip(row) + '</td>' +
+        '<td>' + crmZoomChip(row) + '</td>' +
+        '<td>' + crmFollowUpChip(row) + '</td>' +
+        '<td>' + esc(row.senderName || '—') + '</td>' +
+        '<td>' + esc(row.variant || '—') + '</td>' +
+        '<td>' + crmSendChip(row) + sent + '</td>' +
+        '<td class="crm-activity">' + esc(activity) + '</td>' +
+        '</tr>';
+      if (open) html += '<tr class="crm-detail"><td colspan="8">' + crmRowDetailHtml(row) + '</td></tr>';
+      return html;
+    }).join('');
+
+    return '<div class="table-scroll"><table class="map crm-table"><thead><tr>' +
+      '<th>Person</th><th>Reply</th><th>Zoom</th><th>Follow-up</th><th>Sender</th><th>Copy</th><th>Sent</th><th>Activity</th>' +
+      '</tr></thead><tbody>' + rows + '</tbody></table></div>';
+  }
+
+  function crmPagerHtml(data) {
+    if (!data.total) return '';
+    var start = data.offset + 1;
+    var end = Math.min(data.offset + data.rows.length, data.total);
+    var prev = data.offset > 0;
+    var next = data.offset + data.limit < data.total;
+    return '<div class="crm-pager">' +
+      '<span class="crm-pager__info">Showing ' + start + '–' + end + ' of ' + data.total + '</span>' +
+      '<div class="conn__actions">' +
+        '<button type="button" class="btn btn--ghost btn--sm" data-crm-page="prev"' + (prev ? '' : ' disabled') + '>Previous</button>' +
+        '<button type="button" class="btn btn--ghost btn--sm" data-crm-page="next"' + (next ? '' : ' disabled') + '>Next</button>' +
+      '</div></div>';
+  }
+
+  function crmHtml(data, mode, state) {
+    return crmSessionHtml(data) +
+      crmWarningsHtml(data.warnings) +
+      crmSummaryHtml(data.summary) +
+      crmToolbarHtml(mode) +
+      crmFiltersHtml(data, state) +
+      crmTableHtml(data, state) +
+      crmPagerHtml(data);
+  }
+
+  function updateCrmExportButton() {
+    var btn = document.getElementById('crmExport');
+    if (btn) btn.disabled = !crmFullState.campaignId || !crmFullState.data;
+  }
+
+  function renderCrm(scope) {
+    var state = crmStateFor(scope);
+    var root = scope === 'tab' ? document.getElementById('crmTabRoot') : document.getElementById('crmFullBody');
+    if (!root) return;
+
+    var restore = null;
+    var active = document.activeElement;
+    if (active && active.matches && active.matches('[data-crm-filter="q"]') && root.contains(active)) {
+      restore = { start: active.selectionStart, end: active.selectionEnd };
+    }
+
+    var body;
+    if (state.error) body = '<p class="muted">' + esc(state.error) + '</p>';
+    else if (state.data) body = crmHtml(state.data, scope === 'full' ? 'full' : 'tab', state);
+    else body = '<p class="muted">Loading people…</p>';
+
+    if (scope === 'tab') {
+      root.innerHTML = body;
+    } else {
+      root.innerHTML = '<div data-crm-scope="full">' + body + '</div>';
+      updateCrmExportButton();
+    }
+
+    if (restore) {
+      var input = root.querySelector('[data-crm-filter="q"]');
+      if (input) {
+        input.focus();
+        try { input.setSelectionRange(restore.start, restore.end); } catch (e) { /* input type */ }
+      }
+    }
+  }
+
+  function loadCrm(scope, force) {
+    var state = crmStateFor(scope);
+    if (!state.campaignId) {
+      state.loading = false;
+      renderCrm(scope);
+      return Promise.resolve();
+    }
+    if (!force && state.data && state.data.campaign && state.data.campaign.id === state.campaignId) {
+      renderCrm(scope);
+      return Promise.resolve();
+    }
+
+    state.loading = true;
+    state.error = '';
+    renderCrm(scope);
+    var seq = ++state.seq;
+    var url = '/api/campaigns/' + encodeURIComponent(state.campaignId) + '/crm?' + crmQueryString(state);
+    return api(url)
+      .then(function (data) {
+        if (seq !== state.seq) return;
+        state.loading = false;
+        state.data = data;
+        renderCrm(scope);
+      })
+      .catch(function (err) {
+        if (seq !== state.seq) return;
+        state.loading = false;
+        state.data = null;
+        state.error = err.message;
+        renderCrm(scope);
+      });
+  }
+
+  function loadCampaignCrmTab() {
+    if (!currentCampaignId) return;
+    if (crmTabState.campaignId !== currentCampaignId || !crmTabState.data) {
+      crmTabState = newCrmState(currentCampaignId, CRM_TAB_LIMIT);
+    }
+    loadCrm('tab', false);
+  }
+
+  function setCampaignDetailTab(tab) {
+    campaignDetailTab = tab === 'people' ? 'people' : 'overview';
+    if (currentCampaign) renderCampaignDetail(currentCampaign, currentCampaignPlan, currentCampaignStats);
+    if (campaignDetailTab === 'people') loadCampaignCrmTab();
+  }
+
+  function fillCrmCampaignPicker() {
+    var pick = document.getElementById('crmCampaignPick');
+    if (!pick) return;
+    if (!crmCampaigns.length) {
+      pick.innerHTML = '<option value="">No campaigns yet</option>';
+      pick.disabled = true;
+      return;
+    }
+    pick.disabled = false;
+    pick.innerHTML = crmCampaigns.map(function (camp) {
+      return '<option value="' + esc(camp.id) + '">' + esc(camp.name) + '</option>';
+    }).join('');
+    if (crmFullState.campaignId) pick.value = crmFullState.campaignId;
+  }
+
+  function loadCampaignCrmView() {
+    var body = document.getElementById('crmFullBody');
+    var pick = document.getElementById('crmCampaignPick');
+    if (!body || !pick) return;
+    var exportBtn = document.getElementById('crmExport');
+    if (exportBtn) exportBtn.disabled = true;
+    body.innerHTML = '<p class="muted">Loading campaigns…</p>';
+
+    return api('/api/campaigns')
+      .then(function (data) {
+        crmCampaigns = data.campaigns || [];
+        var hadCampaign = crmFullState.campaignId;
+        var stillExists = hadCampaign && crmCampaigns.some(function (camp) { return camp.id === hadCampaign; });
+        if (!stillExists) {
+          crmFullState = newCrmState(crmCampaigns.length ? crmCampaigns[0].id : null, CRM_FULL_LIMIT);
+        }
+        if (!crmCampaigns.length) {
+          fillCrmCampaignPicker();
+          body.innerHTML = '<div class="crm-empty">No campaigns yet. Create one to see its people here.</div>';
+          updateCrmExportButton();
+          return null;
+        }
+        fillCrmCampaignPicker();
+        return loadCrm('full', !stillExists);
+      })
+      .catch(function (err) {
+        crmFullState.data = null;
+        body.innerHTML = '<p class="muted">Could not load campaigns: ' + esc(err.message) + '</p>';
+        updateCrmExportButton();
+      });
+  }
+
+  function openCampaignCrm(campaignId) {
+    crmFullState = newCrmState(campaignId, CRM_FULL_LIMIT);
+    if (!document.getElementById('campaignDetail').hidden) closeModal('campaignDetail');
+    showView('campaign-crm');
+  }
+
+  function crmDownload() {
+    if (!crmFullState.campaignId || !crmFullState.data) return;
+    var url = '/api/campaigns/' + encodeURIComponent(crmFullState.campaignId) + '/crm/export?' + crmQueryString(crmFullState);
+    var link = document.createElement('a');
+    link.href = url;
+    link.download = '';
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+  }
+
+  function saveCrmNote(button, scope) {
+    var block = button.closest('.crm-note');
+    var state = crmStateFor(scope);
+    if (!block || !state.campaignId) return;
+    var key = block.dataset.crmKey;
+    var select = block.querySelector('[data-crm-followup]');
+    var textarea = block.querySelector('[data-crm-note]');
+    if (!key || !select || !textarea) return;
+
+    withBusy(button, api('/api/campaigns/' + encodeURIComponent(state.campaignId) + '/crm/notes', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        personKey: key,
+        followUp: select.value,
+        note: textarea.value
+      })
+    }))
+      .then(function () {
+        state.expanded[key] = true;
+        toast('Note saved', 'success');
+        return loadCrm(scope, true);
+      })
+      .catch(function (err) { toast(err.message, 'error'); });
+  }
+
+  function handleCrmClick(e, scope) {
+    var state = crmStateFor(scope);
+    var tab = e.target.closest('[data-campaign-tab]');
+    if (tab) {
+      setCampaignDetailTab(tab.dataset.campaignTab);
+      return;
+    }
+
+    var openFull = e.target.closest('[data-crm-open-full]');
+    if (openFull) {
+      openCampaignCrm(state.campaignId);
+      return;
+    }
+
+    var rowButton = e.target.closest('[data-crm-row]');
+    if (rowButton) {
+      var key = rowButton.dataset.crmRow;
+      if (state.expanded[key]) delete state.expanded[key];
+      else state.expanded[key] = true;
+      renderCrm(scope);
+      return;
+    }
+
+    var page = e.target.closest('[data-crm-page]');
+    if (page) {
+      if (page.dataset.crmPage === 'prev') {
+        state.query.offset = Math.max(0, (state.query.offset || 0) - (state.query.limit || 50));
+      } else if (!state.data || state.query.offset + state.query.limit < state.data.total) {
+        state.query.offset = (state.query.offset || 0) + (state.query.limit || 50);
+      }
+      loadCrm(scope, true);
+      return;
+    }
+
+    var save = e.target.closest('[data-crm-save-note]');
+    if (save) {
+      saveCrmNote(save, scope);
+      return;
+    }
+
+    var reset = e.target.closest('[data-crm-reset]');
+    if (reset) {
+      state.query = { offset: 0, limit: state.query.limit };
+      state.expanded = {};
+      loadCrm(scope, true);
+      return;
+    }
+
+    var refresh = e.target.closest('[data-crm-refresh]');
+    if (refresh) {
+      loadCrm(scope, true);
+      return;
+    }
+
+    var openCall = e.target.closest('[data-crm-open-call]');
+    if (openCall && state.data && state.data.session) {
+      var sessionId = state.data.session.id;
+      if (scope === 'tab') closeModal('campaignDetail');
+      showView('attendance');
+      openSession(sessionId);
+    }
+  }
+
+  function handleCrmFilterChange(e, scope) {
+    var el = e.target.closest('[data-crm-filter]');
+    if (!el) return;
+    var state = crmStateFor(scope);
+    clearTimeout(state.searchTimer);
+    state.searchTimer = null;
+    state.query[el.dataset.crmFilter] = el.value;
+    state.query.offset = 0;
+    state.expanded = {};
+    loadCrm(scope, true);
+  }
+
+  function handleCrmFilterInput(e, scope) {
+    var el = e.target.closest('[data-crm-filter="q"]');
+    if (!el) return;
+    var state = crmStateFor(scope);
+    state.query.q = el.value;
+    state.query.offset = 0;
+    clearTimeout(state.searchTimer);
+    state.searchTimer = setTimeout(function () {
+      loadCrm(scope, true);
+    }, 300);
   }
 
   function campaignStatsHtml(stats) {
@@ -6190,6 +6874,37 @@
     if (!btn) return;
     openTestCopy(btn.dataset.testVariant);
   });
+  document.getElementById('campaignDetailBody').addEventListener('click', function (e) {
+    handleCrmClick(e, 'tab');
+  });
+  document.getElementById('campaignDetailBody').addEventListener('change', function (e) {
+    handleCrmFilterChange(e, 'tab');
+  });
+  document.getElementById('campaignDetailBody').addEventListener('input', function (e) {
+    handleCrmFilterInput(e, 'tab');
+  });
+  var campaignPeopleBtn = document.getElementById('campaignPeople');
+  if (campaignPeopleBtn) {
+    campaignPeopleBtn.addEventListener('click', function () {
+      if (currentCampaignId) setCampaignDetailTab('people');
+    });
+  }
+
+  var campaignCrmView = document.getElementById('view-campaign-crm');
+  if (campaignCrmView) {
+    campaignCrmView.addEventListener('click', function (e) { handleCrmClick(e, 'full'); });
+    campaignCrmView.addEventListener('change', function (e) { handleCrmFilterChange(e, 'full'); });
+    campaignCrmView.addEventListener('input', function (e) { handleCrmFilterInput(e, 'full'); });
+  }
+  var crmCampaignPick = document.getElementById('crmCampaignPick');
+  if (crmCampaignPick) {
+    crmCampaignPick.addEventListener('change', function () {
+      crmFullState = newCrmState(this.value || null, CRM_FULL_LIMIT);
+      loadCrm('full', true);
+    });
+  }
+  var crmExportBtn = document.getElementById('crmExport');
+  if (crmExportBtn) crmExportBtn.addEventListener('click', crmDownload);
 
   $('#editCopyAdd').addEventListener('click', addEditCopyVariant);
   var editCopyList = document.getElementById('editCopyVariantsList');
@@ -6247,6 +6962,7 @@
     var action = btn.dataset.action;
 
     if (action === 'campDetail') { openCampaignDetail(id); return; }
+    if (action === 'campPeople') { openCampaignDetail(id, 'people'); return; }
 
     if (action === 'campDelete') {
       withBusy(btn, api('/api/campaigns/' + id, { method: 'DELETE' }))

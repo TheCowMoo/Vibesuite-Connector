@@ -23,7 +23,8 @@ calendar id, location id, and optional webhook URLs. All runtime keys are namesp
    dedupe, then:
    - full sync (`events.list` + `timeMin`) if no `nextSyncToken` exists, or
    - incremental sync (`events.list` + `syncToken`), handling `410 Gone` by resetting.
-4. Attendee `responseStatus` is diffed against last-known state; only actual changes proceed.
+4. Attendee `responseStatus` is diffed against last-known state; only actual changes proceed. The same
+   sync appends changed statuses to the per-event RSVP history (the CRM's forward-only timeline).
 5. Each change maps through the transform matrix and dispatches to GHL using that connection's
    credentials and webhook URLs.
 6. **Safety net.** A reconciliation sweep (`scheduler/reconcile.ts`) calls `processSync()` for every
@@ -44,6 +45,7 @@ calendar id, location id, and optional webhook URLs. All runtime keys are namesp
 | `conn:{id}:secrets` | encrypted OAuth/API tokens (AES-256-GCM) |
 | `conn:{id}:sync:token` | `nextSyncToken` |
 | `conn:{id}:sync:state` | hash `eventId -> JSON{email:responseStatus}` |
+| `conn:{id}:rsvp:history:{eventId}` | hash `email -> JSON[{status, at, initial?}]`, capped at the last 20 observations |
 | `conn:{id}:lock` | per-connection dedupe lock (`SET NX EX 5`) |
 | `conn:{id}:dispatch:seen:{fp}` | idempotency guard for a dispatched change (5-min TTL) |
 | `watch:byChannel:{channelId}` | channel metadata (connectionId, token, resourceId, expiry) |
@@ -60,6 +62,7 @@ calendar id, location id, and optional webhook URLs. All runtime keys are namesp
 | `campaign:{id}:queue:{conn}` | list of pending emails assigned to that mailbox |
 | `campaign:{id}:sender:{conn}` | hash `sent` / `failed` for that mailbox inside the campaign |
 | `campaign:{id}:dispatch:{email}` | idempotency guard: a recipient is invited once per campaign (30-day TTL) |
+| `campaign:{id}:crm:notes` | hash `personKey -> JSON{followUp, note, updatedAt, updatedBy}` (campaign-scoped CRM notes) |
 | `domain:health:{domain}` | cached DNS snapshot for one sending domain (6-hour TTL by default) |
 | `domain:health:index` | set of domains that have a cached snapshot |
 | `domain:health:lock:{domain}` | refresh lock, so two operators cannot fire the same DNS burst (`SET NX EX 90`) |
@@ -188,6 +191,60 @@ keeps its `connectionId` and `eventId`. Rates are real percentages of real denom
 (`rsvpRate = (accepted + declined + tentative) / sent`, `attendanceRate = attended / (accepted +
 tentative)`), never estimates. Bounce/open metrics are intentionally absent until the GHL reminder
 layer exists.
+
+## Campaign CRM
+
+The CRM is a **read model**, not a new source of truth. It joins the existing recipient, RSVP, Zoom and
+source-list data and adds campaign-scoped notes/follow-up plus forward-only RSVP history. The pure layer is
+`domain/campaignCrm.ts` (`buildCampaignCrm()`, filters, sort, summary); `campaignCrmCollect.ts` does the
+I/O; `campaignCrmExport.ts` flattens rows into the existing `ExportTable`; `rsvpHistory.ts` +
+`rsvpHistoryStore.ts` own change history; `campaignNotes.ts` + `campaignNotesStore.ts` own notes.
+
+**Row shape.** Each `CampaignCrmRow` keeps `key` (normalized email, or `walkin:<name>`), optional
+name/company/phone, `walkIn`, the frozen recipient facts (`connectionId`, `senderName`, `variant`,
+`sendStatus`, `sentAt`, `eventId`, `sendError`), `rsvp`, `rsvpHistory`, `zoom`, the Zoom timing/behavior
+fields, and optional `note`. Names are best-effort and never used as identity: Zoom display name first,
+then the source list row (matched by normalized email), then the email. The list is the live list's
+current `result`, so a row removed since the send loses its name but not its invitation.
+
+**Reply and Zoom are separate axes.** `rsvp` is `accepted | declined | tentative | needsAction | none`.
+`zoom` is `attended | partial | didnt_join | walk_in | not_tracked | not_invited`. A sent recipient absent
+from a report is `didnt_join` only when the report explicitly lists them as a no-show; a sent person who
+is in neither Zoom set is `not_tracked`. Pending/failed recipients are `not_invited`, never no-shows.
+Walk-ins come from `attendance.attendedNotInvited` and are separate rows; they do not contribute to the
+invited/RSVP denominators. "Said yes but didn't join" is a filter combination, not a stored status.
+
+**History.** `recordRsvpHistory()` runs in `workers/pipeline.ts` after `saveStates()` on **incremental**
+syncs, where actual status changes are known. It reads the existing per-event hash, appends only when the
+normalized status actually changes, marks the first entry `initial`, and keeps the last 20. It is
+idempotent, so a repeated sync adds nothing. Full syncs deliberately do **not** snapshot every calendar
+event: that would write history for unrelated meetings, and the campaign recipients' baseline is lazy.
+Google does not expose a response timestamp; `at` is when our sync observed the change. The first
+CRM/export read calls `ensureRsvpBaseline()` for sent recipients with an event id. That writes an
+`initial` entry with `HSETNX` only when the email has no history at all; it never invents a reply time and
+is the only write performed by the read route. Deploying the feature is therefore the baseline; anything
+before it cannot be backfilled.
+
+**Notes.** The key is the normalized email, or `walkin:<normalized name>` for a walk-in with no email.
+`campaign:{id}:crm:notes` is a hash, so the note follows the campaign, not the list. Values are
+`{followUp: none|todo|contacted|done, note <= 2000 chars, updatedAt, updatedBy}`. A save with
+`followUp: none` and an empty note deletes the field; deleting the campaign deletes the whole hash. Reads
+are available to anyone who can open the campaign; writes require `owner`, `admin` or `member`.
+
+**API and export.** `GET /api/campaigns/:id/crm` accepts `q`, `rsvp`, `zoom`, `send`, `sender`, `variant`,
+`followUp`, `sort`, `offset`, `limit` (1–200, default 50). The People tab sends `limit=10`; the full view
+sends 50. The response carries the unfiltered `summary` plus the filtered page, so filtering never rewrites
+the campaign totals. `GET /api/campaigns/:id/crm/export` runs the same query parser with
+`{paginate: false}` and returns **all matching rows** as a UTF-8-BOM CSV named
+`vibesuite-campaign-people-<slug>-<date>.csv`. `PATCH /api/campaigns/:id/crm/notes` validates the person
+key, follow-up enum and 2,000-character limit.
+
+**Warnings.** The collector emits explicit warnings for no linked call, no Zoom report, a report generated
+before the last invitation, a report covering fewer invited people than were sent, and walk-ins without an
+email. A missing report never becomes a fake "didn't join" verdict.
+
+**Known gaps.** There is no GHL contact id on the recipient row, so the CRM cannot deep-link to a contact;
+names are best-effort; and there are no RSVP timestamps or comments from Google.
 
 ## Video calls and join links
 
@@ -751,9 +808,9 @@ deliberately leaves `#campaignNew` visible, because that is the tour's opening t
 
 Navigation lives in a **left rail** (`.rail`, `--rail-w: 224px`) grouped by plain labels: Campaigns
 and Invitations first, then *Set up* (Google accounts, Contact lists, Sending accounts, Documents),
-*Insights* (Statistics, Calls, Deliverability, Assistant) and *Workspace* (People, Settings). A slim `.topbar` carries
-only the brand and the help/account menus. Below 900px the rail flattens into a horizontal scrolling
-strip and the group labels hide.
+*Insights* (Statistics, Calls, Campaign CRM, Deliverability, Assistant) and *Workspace* (People, Settings).
+A slim `.topbar` carries only the brand and the help/account menus. Below 900px the rail flattens into a
+horizontal scrolling strip and the group labels hide.
 
 The groups are **labels, not disclosure widgets**, and that is load-bearing: the guided tour targets
 rail buttons by `[data-view]`, and a collapsed group would make its children zero-sized — which
@@ -830,6 +887,11 @@ API routes and Redis keys keep their original names, so use this table when read
 | Calls | `session`, `attendance`, `/api/sessions`, `attendance:{sessionId}` |
 | Statistics | `stats`, `/api/stats/overview`, `statsOverview` |
 | Campaigns | `campaign`, `/api/campaigns`, `campaign:{id}` |
+| Campaign CRM | `campaignCrm`, `/api/campaigns/:id/crm`, `campaign:{id}:crm:notes` |
+| Campaign CRM → People | campaign recipients + attendance; **not** panel users |
+| Walk-in | `attendance.attendedNotInvited` |
+| Follow-up | `note.followUp` (`none`, `todo`, `contacted`, `done`) |
+| Tracking started | first `rsvpHistory` observation (`initial: true`) |
 | Sending accounts | `sender`, `/api/senders`, `sender:*` |
 | Deliverability | `domainHealth`, `/api/deliverability`, `domain:health:*` |
 | Assistant | `advisor`, `/api/advisor`, `advisor:analysis` |

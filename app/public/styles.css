@@ -151,7 +151,7 @@ input[type="datetime-local"], input[type="date"] { font-variant-numeric: tabular
 }
 
 /* ---- Layout ---- */
-.container { max-width: 1200px; margin: 0 auto; padding: 2rem 1.5rem 4rem; }
+.container { max-width: 1200px; margin: 0 auto; padding: 2rem 1.5rem 4rem; min-width: 0; }
 .view { animation: fade 0.2s ease; }
 @keyframes fade { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 
@@ -855,6 +855,64 @@ fieldset.field legend { margin-bottom: 0.4rem; }
 .camp-variant .field__label-row { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; }
 .camp-variant .field { margin-bottom: 0; }
 .camp-variant input, .camp-variant textarea { margin-top: 0; }
+
+/* ---- Campaign CRM ---- */
+.crm-picker { max-width: 460px; }
+.crm-toolbar { display: flex; align-items: center; justify-content: flex-start; gap: 0.75rem; flex-wrap: wrap; margin-bottom: 0.75rem; }
+.crm-warnings { display: grid; gap: 0.4rem; margin-bottom: 1rem; }
+.crm-warning {
+  border-left: 3px solid var(--warning);
+  background: var(--warning-tint);
+  color: var(--ink);
+  padding: 0.5rem 0.7rem;
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  font-size: 0.84rem;
+}
+.crm-warning--info { border-left-color: var(--royal); background: var(--navy-50); }
+.crm-filters {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 0.5rem;
+  margin-bottom: 0.9rem;
+}
+.crm-filters > .field:first-child { grid-column: 1 / -1; }
+.crm-filters .field { margin-bottom: 0; }
+.crm-filters input, .crm-filters select { padding: 0.45rem 0.55rem; font-size: 0.85rem; }
+.crm-table { min-width: 900px; }
+.crm-table th { white-space: nowrap; }
+.crm-table td { vertical-align: top; }
+.crm-table .chip { white-space: nowrap; }
+.crm-person__meta { display: block; color: var(--ink-muted); font-size: 0.76rem; margin-left: 1.05rem; }
+.crm-activity { color: var(--ink-muted); font-size: 0.78rem; line-height: 1.4; }
+.crm-detail td { background: #FAFBFD; padding: 0.9rem; }
+.crm-detail__grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 1rem;
+  /* The detail sits inside a wide, horizontally scrollable table. Keep it in the visible panel. */
+  max-width: min(calc(100vw - 4rem), 39rem);
+}
+.crm-detail__grid .person-detail__fact { gap: 0.75rem; }
+.crm-detail__grid .person-detail__fact strong { min-width: 0; overflow-wrap: anywhere; }
+.crm-detail__section + .crm-detail__section { margin-top: 0.8rem; }
+.crm-detail__title { font-size: 0.78rem; font-weight: 700; color: var(--navy); margin-bottom: 0.3rem; }
+.crm-history { list-style: none; margin: 0.3rem 0 0; padding: 0; display: grid; gap: 0.25rem; font-size: 0.8rem; color: var(--ink-muted); }
+.crm-history li { display: flex; justify-content: space-between; gap: 0.6rem; }
+.crm-history strong { color: var(--ink); font-weight: 600; }
+.crm-note { display: grid; gap: 0.45rem; margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--line); }
+.crm-note__row { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
+.crm-note textarea { min-height: 4rem; }
+.crm-note__meta { color: var(--ink-muted); font-size: 0.76rem; }
+.crm-pager { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; flex-wrap: wrap; margin-top: 0.8rem; }
+.crm-pager__info { color: var(--ink-muted); font-size: 0.82rem; }
+.crm-empty { padding: 1.5rem; text-align: center; color: var(--ink-muted); }
+.crm-session { display: flex; gap: 0.6rem; flex-wrap: wrap; align-items: center; margin-bottom: 0.8rem; }
+.crm-session .muted { font-size: 0.82rem; }
+
+@media (max-width: 560px) {
+  .crm-table { min-width: 800px; }
+  .crm-picker { max-width: none; }
+}
 
 /* ---- Guided tour ---- */
 .tour { position: fixed; inset: 0; z-index: 60; }

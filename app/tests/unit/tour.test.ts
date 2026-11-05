@@ -130,6 +130,7 @@ describe('guided tour wiring', () => {
       'knowledge',
       'stats',
       'attendance',
+      'campaign-crm',
       'deliverability',
       'advisor',
       'team',

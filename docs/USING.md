@@ -24,18 +24,22 @@ Google accounts (who sends) + Contact list (who receives) + Event details
                  └──► calendar invites go out, paced per mailbox
                           └──► replies are mirrored to GoHighLevel
                                    └──► attendance is pulled from Zoom
-                                            └──► Statistics rolls it all up
+                                            └──► Campaign CRM joins reply + attendance + notes per person
+                                                     └──► Statistics rolls it all up
 ```
 
 ## The other tabs
 
 - **Documents** — brand and product notes the AI reads when it sorts a list or drafts an invitation. Better
   documents make better groups and better copy.
+- **Campaign CRM** — a per-person workbench for one campaign: RSVP, Zoom attendance, sending account, copy
+  variant, campaign notes and follow-up. Every campaign also has the same view under **Details → People**.
 - **Deliverability** (owner/admin) — what the internet can verify about the domains behind your sending
   accounts: SPF, DKIM, DMARC, MX and public domain blocklists.
 - **Assistant** (owner/admin) — reviews recent activity and proposes changes you can apply.
-- **People** (owner/admin) — team accounts and roles. Members can browse the product; campaign actions are
-  owner/admin.
+- **People** (owner/admin) — team accounts and roles. This is different from **Campaign CRM → People**:
+  one manages panel users, the other manages the humans on a campaign. Members can browse the product;
+  campaign actions are owner/admin.
 - **Settings** — AI provider/key, Zoom mode and hosts, security, and branding.
 
 ## Before anything works
@@ -450,6 +454,56 @@ invited → sent / failed / still queued
 Everything is broken down **per sending mailbox**, because every recipient row remembers which account
 created the calendar event.
 
+### Campaign CRM (People)
+
+The CRM answers the next question after the funnel: **what should I do about this person?** It joins the
+frozen recipient, the Google RSVP, the linked Zoom report, the campaign note and the RSVP history on one
+row. Open it from **Details → People**, from the **People** action on a campaign card, or from the
+**Campaign CRM** item under *Insights* (which adds a campaign picker).
+
+The tab shows 10 people at a time; the full view shows 50. Both use the same rows and filters.
+
+| Column | What it means |
+|---|---|
+| Person | Zoom display name, then the name from the source list, then the email |
+| Reply | Yes / No / Maybe / No reply; **Not sent** means no invitation was delivered |
+| Zoom | Attended / Brief visit / Didn't join / Walk-in / Not tracked / Not invited |
+| Follow-up | None / To contact / Contacted / Done, from the campaign note |
+| Sender | The Google account that created this person's invitation |
+| Copy | The copy variant used for that invitation |
+| Sent | Delivery state and time |
+| Activity | Call minutes, polls answered, Q&A and registration answers |
+
+Expand a person for campaign facts, RSVP history, the note editor and the same Zoom behavior panel used
+by **Calls**. The five rules that matter:
+
+- **Reply and attendance are separate axes.** "Said yes but didn't join" is a real, filterable combination;
+  it is not hidden inside a single status. Use **Reply = Yes** + **Zoom = Didn't join**.
+- **Pending and failed are not no-shows.** People who never received an invitation show **Not invited** for
+  Zoom and **Not sent** for Reply. They never inflate the no-show count.
+- **Walk-ins are separate.** Someone who joined without being on the campaign's list appears with a
+  **Walk-in** chip. They are counted separately and do not inflate the invited/RSVP denominators. A
+  walk-in without an email can still be annotated by name.
+- **Filters apply to the table, not the summary.** The summary strip always describes the whole campaign,
+  so filtering to one person does not rewrite the campaign totals. **Search** covers name, email, company
+  and phone; the other filters cover reply, Zoom result, send state, sending account, copy and follow-up.
+- **A missing or stale report is called out.** A campaign with no linked call, a call without a Zoom report,
+  or a report synced before the latest invitations gets a warning. **Open call** opens the call's results
+  so you can sync it.
+
+Notes are **campaign-scoped**: the same person can have a different note in another campaign. They allow up
+to 2,000 characters and store who changed them and when. Any signed-in panel user who can reach the view
+may edit them; sending remains owner/admin. Clearing both the note and the follow-up deletes the record.
+
+RSVP history starts **when this version is deployed**. Google does not expose response timestamps, so the
+first observation is labelled **Tracking started**, and later entries say **Changed to …** with the time
+our sync detected the change. There is no backfill and no invented reply time. History is capped at the
+last 20 changes per person.
+
+**Export CSV** downloads **every row matching the current filters**, not just the visible page, with the
+reply, full RSVP history, Zoom behavior, campaign facts, note and follow-up. The file is a normal CSV
+attachment and opens in Excel, Numbers or Sheets.
+
 ### On the Statistics tab
 
 Statistics rolls **every campaign and video call** into one view for the last **7, 30 or 90 days**:
@@ -499,7 +553,12 @@ or Sheets) or **JSON**:
 | Accepted / Declined / Maybe | The RSVP on the calendar invitation |
 | No reply | Invited, but no answer recorded |
 | Attendance | Sent recipients Zoom reported as attending |
-| No-show | Said yes or maybe, but Zoom did not report them as attending |
+| No-show | Invited, but Zoom did not report them as attending; pending/failed recipients are excluded |
+| Walk-in | Joined the linked call without being on the campaign's invited list |
+| Not tracked | Invited, but the Zoom report has no row for them (the report is missing or stale) |
+| Not invited | Pending/failed — no invitation was delivered, so this is not a no-show |
+| Follow-up | A campaign-scoped note state: None, To contact, Contacted or Done |
+| Tracking started | The first RSVP value we observed; not a Google reply timestamp |
 | Acceptance rate | `accepted ÷ sent` |
 | Campaign attendance rate | `attended ÷ (accepted + maybe)` — of the people who said they would come |
 | Statistics attendance rate | `attended ÷ (attended + no-show)` — of the outcomes Zoom actually reported |
@@ -507,8 +566,8 @@ or Sheets) or **JSON**:
 Numbers can differ between a campaign and Statistics without either being wrong: different windows,
 different denominators, and a person can appear in more than one campaign.
 
-Open and bounce rates are deliberately absent — the CRM reminder layer that would measure them does not
-exist yet. RSVP answers are the only reply signal.
+Open and bounce rates are deliberately absent — the campaign CRM tracks replies, attendance and follow-up,
+but no email open or bounce signal exists. RSVP answers are the reply signal.
 
 ## Checking a domain (Deliverability)
 
@@ -600,11 +659,12 @@ Server-side failures (deploy, Redis, worker restarts) are covered in [`DEPLOYMEN
 | Who gets invited (dedupe) | `app/src/domain/audience.ts` |
 | Mailbox readiness and batch arbitration | `app/src/domain/campaignSchedule.ts` |
 | Campaign funnel | `app/src/domain/campaignStats.ts`, `campaignStatsCollect.ts` |
+| Campaign CRM merge, notes, history, CSV | `app/src/domain/campaignCrm.ts`, `campaignCrmCollect.ts`, `campaignCrmExport.ts`, `campaignNotes*.ts`, `rsvpHistory*.ts` |
 | Cross-campaign rollup | `app/src/domain/statsOverview.ts`, `statsCollect.ts` |
 | Statistics export tables | `app/src/domain/statsExport.ts`, `statsExportCollect.ts` |
 | HTTP routes | `app/src/api/routes/campaigns.ts`, `invites.ts`, `sessions.ts`, `stats.ts` |
-| Panel views and card actions | `app/public/app.js` (`campaignActions`, `renderCampaigns`) |
-| Design notes for all of the above | [`architecture.md`](architecture.md) — *Senders & campaigns*, *Scheduling and ending*, *Audience* |
+| Panel views and card actions | `app/public/app.js` (`campaignActions`, `renderCampaigns`, `crmHtml`) |
+| Design notes for all of the above | [`architecture.md`](architecture.md) — *Senders & campaigns*, *Scheduling and ending*, *Audience*, *Campaign CRM* |
 
 The short version for reading code: **a campaign is the only object that owns per-recipient state.** Lists,
 mailboxes, video calls and reply automations are shared and outlive any single campaign.

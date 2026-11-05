@@ -121,10 +121,12 @@ npm test
 ## Dashboard
 
 `app/public` ships a single-page operator console served at `/`: Google account health, contact
-lists, one-off invitations, campaigns, and who attended each call. The **Statistics** tab rolls
-every campaign and session into one view — invitations per day, reply mix, per-mailbox results and
-top campaigns — and shows clearly-labelled sample data on a brand-new account instead of a wall of
-zeros (nothing is stored).
+lists, one-off invitations, campaigns, and who attended each call. **Campaign CRM** joins the RSVP,
+sending account, Zoom attendance, RSVP history and a campaign-scoped note on one row, with filters and
+CSV export; it is available per campaign under **Details → People** and as a full view under *Insights*.
+The **Statistics** tab rolls every campaign and session into one view — invitations per day, reply mix,
+per-mailbox results and top campaigns — and shows clearly-labelled sample data on a brand-new account
+instead of a wall of zeros (nothing is stored).
 
 For a task-by-task walkthrough — what a campaign is for, how to start one, what the statuses mean, and
 how to read the numbers — see [`docs/USING.md`](docs/USING.md).
@@ -181,6 +183,9 @@ Key counters: `webhook_received_total`, `webhook_rejected_total`, `jobs_enqueued
 | GET | `/oauth/ghl/callback` | complete GHL OAuth |
 | GET | `/api/stats/overview?days=30` | cross-campaign statistics (1–365 days) |
 | GET | `/api/stats/export?scope=campaigns&period=all` | download one statistics table as CSV or JSON |
+| GET | `/api/campaigns/:id/crm` | per-person campaign CRM (filters + pagination) |
+| GET | `/api/campaigns/:id/crm/export` | all filtered campaign people as CSV |
+| PATCH | `/api/campaigns/:id/crm/notes` | save a campaign-scoped note/follow-up |
 | POST | `/api/sessions/:id/workflows/preview` | workflow matches (no GHL writes) |
 | POST | `/api/sessions/:id/workflows/apply` | add selected matches to workflows |
 | POST | `/api/sessions/:id/workflows/assign` | manually add one contact to a workflow |

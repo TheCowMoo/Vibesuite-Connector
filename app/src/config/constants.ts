@@ -16,6 +16,8 @@ export const REDIS_KEYS = {
 
   syncToken: (connectionId: string) => `conn:${connectionId}:sync:token`,
   stateHash: (connectionId: string) => `conn:${connectionId}:sync:state`,
+  /** Per-event RSVP history: hash email -> JSON[{status, at, initial?}]. */
+  rsvpHistory: (connectionId: string, eventId: string) => `conn:${connectionId}:rsvp:history:${eventId}`,
   lock: (connectionId: string) => `conn:${connectionId}:lock`,
   dispatched: (connectionId: string, fingerprint: string) => `conn:${connectionId}:dispatch:seen:${fingerprint}`,
 
@@ -75,6 +77,8 @@ export const REDIS_KEYS = {
   campaignQueue: (id: string, connectionId: string) => `campaign:${id}:queue:${connectionId}`,
   campaignSender: (id: string, connectionId: string) => `campaign:${id}:sender:${connectionId}`,
   campaignDispatched: (id: string, email: string) => `campaign:${id}:dispatch:${email.toLowerCase()}`,
+  /** Campaign CRM notes/follow-up: hash personKey -> JSON. */
+  campaignCrmNotes: (id: string) => `campaign:${id}:crm:notes`,
   /** Cache of DNS-based domain reputation, one key per sending domain. */
   domainHealth: (domain: string) => `domain:health:${domain}`,
   domainHealthIndex: () => 'domain:health:index',

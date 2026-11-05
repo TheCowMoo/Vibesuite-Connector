@@ -44,7 +44,8 @@ export async function deleteCampaign(id: string): Promise<void> {
     .srem(REDIS_KEYS.campaignsIndex(), id)
     .del(REDIS_KEYS.campaign(id))
     .del(REDIS_KEYS.campaignRecipients(id))
-    .del(REDIS_KEYS.campaignVariantMap(id));
+    .del(REDIS_KEYS.campaignVariantMap(id))
+    .del(REDIS_KEYS.campaignCrmNotes(id));
   if (rec) {
     for (const s of rec.senders) {
       multi.del(REDIS_KEYS.campaignQueue(id, s.connectionId)).del(REDIS_KEYS.campaignSender(id, s.connectionId));

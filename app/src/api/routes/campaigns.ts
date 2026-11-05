@@ -31,7 +31,13 @@ import { getList } from '../../domain/listStore';
 import { getInvitedEmails } from '../../domain/inviteStore';
 import { buildAudience } from '../../domain/audience';
 import { collectCampaignStats } from '../../domain/campaignStatsCollect';
-import { requireRole } from '../middleware/requireAuth';
+import { collectCampaignCrm } from '../../domain/campaignCrmCollect';
+import { buildCampaignCrmTable } from '../../domain/campaignCrmExport';
+import type { CampaignCrmQuery } from '../../domain/campaignCrm';
+import { defaultCampaignCrmNote, normalizeFollowUp, normalizeNote } from '../../domain/campaignNotes';
+import { deleteCampaignCrmNote, saveCampaignCrmNote } from '../../domain/campaignNotesStore';
+import { toCsv } from '../../domain/statsExport';
+import { getAuthUser, requireRole } from '../middleware/requireAuth';
 
 async function withStats(camp: Campaign): Promise<Record<string, unknown>> {
   const [counts, queues, counters] = await Promise.all([
@@ -73,6 +79,45 @@ function sendByError(c: { sendByAt?: number; scheduledStartAt?: number }, now: n
   return stopTimeError(c, now);
 }
 
+const CRM_RSVP_FILTERS = new Set(['accepted', 'declined', 'tentative', 'no_reply', 'none']);
+const CRM_ZOOM_FILTERS = new Set(['attended', 'partial', 'didnt_join', 'walk_in', 'not_tracked', 'not_invited']);
+const CRM_SEND_FILTERS = new Set(['sent', 'pending', 'failed', 'walk_in']);
+const CRM_FOLLOW_UP_FILTERS = new Set(['none', 'todo', 'contacted', 'done']);
+const CRM_SORTS = new Set(['name', 'rsvp', 'zoom', 'sent']);
+
+function crmString(value: unknown, max = 300): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  return trimmed ? trimmed.slice(0, max) : undefined;
+}
+
+function parseCampaignCrmQuery(raw: unknown): CampaignCrmQuery {
+  const q = (raw || {}) as Record<string, unknown>;
+  const text = crmString(q.q, 200);
+  const rsvp = crmString(q.rsvp, 30);
+  const zoom = crmString(q.zoom, 30);
+  const send = crmString(q.send, 30);
+  const followUp = crmString(q.followUp, 30);
+  const sender = crmString(q.sender, 120);
+  const variant = crmString(q.variant, 20);
+  const sort = crmString(q.sort, 30);
+  const offset = Number(q.offset ?? 0);
+  const limit = Number(q.limit ?? 50);
+
+  return {
+    ...(text ? { q: text } : {}),
+    ...(rsvp && CRM_RSVP_FILTERS.has(rsvp) ? { rsvp } : {}),
+    ...(zoom && CRM_ZOOM_FILTERS.has(zoom) ? { zoom } : {}),
+    ...(send && CRM_SEND_FILTERS.has(send) ? { send } : {}),
+    ...(followUp && CRM_FOLLOW_UP_FILTERS.has(followUp) ? { followUp } : {}),
+    ...(sender ? { sender } : {}),
+    ...(variant ? { variant } : {}),
+    ...(sort && CRM_SORTS.has(sort) ? { sort } : {}),
+    offset: Number.isFinite(offset) ? Math.max(0, Math.floor(offset)) : 0,
+    limit: Number.isFinite(limit) ? Math.min(200, Math.max(1, Math.floor(limit))) : 50,
+  };
+}
+
 export async function campaignRoutes(app: FastifyInstance): Promise<void> {
   const guard = { preHandler: requireRole('owner', 'admin') };
 
@@ -107,6 +152,75 @@ export async function campaignRoutes(app: FastifyInstance): Promise<void> {
     const limit = Math.min(500, Math.max(1, Number(q.limit ?? 100) || 100));
     return { total, offset, recipients: recs.slice(offset, offset + limit) };
   });
+
+  /** Per-person campaign CRM: RSVP, send facts, Zoom behavior, names, history and notes. */
+  app.get('/api/campaigns/:id/crm', async (req, reply) => {
+    const camp = await getCampaign((req.params as { id: string }).id);
+    if (!camp) {
+      reply.code(404).send({ error: 'campaign not found' });
+      return;
+    }
+    return collectCampaignCrm(camp, parseCampaignCrmQuery(req.query));
+  });
+
+  /** All rows matching the current filters, not just the current page. */
+  app.get('/api/campaigns/:id/crm/export', async (req, reply) => {
+    const camp = await getCampaign((req.params as { id: string }).id);
+    if (!camp) {
+      reply.code(404).send({ error: 'campaign not found' });
+      return;
+    }
+    const result = await collectCampaignCrm(camp, parseCampaignCrmQuery(req.query), { paginate: false });
+    const table = buildCampaignCrmTable(result.rows, camp.name);
+    const slug = camp.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 50) || 'campaign';
+    const date = new Date().toISOString().slice(0, 10);
+    reply.header('Content-Type', 'text/csv; charset=utf-8');
+    reply.header('Content-Disposition', `attachment; filename="vibesuite-campaign-people-${slug}-${date}.csv"`);
+    return reply.send(toCsv(table));
+  });
+
+  /** Campaign-scoped notes/follow-up. Viewers can annotate; sending remains owner/admin only. */
+  app.patch(
+    '/api/campaigns/:id/crm/notes',
+    { preHandler: requireRole('owner', 'admin', 'member') },
+    async (req, reply) => {
+      const camp = await getCampaign((req.params as { id: string }).id);
+      if (!camp) {
+        reply.code(404).send({ error: 'campaign not found' });
+        return;
+      }
+
+      const b = (req.body || {}) as { personKey?: unknown; followUp?: unknown; note?: unknown };
+      const personKey = typeof b.personKey === 'string' ? b.personKey.trim() : '';
+      if (!personKey || personKey.length > 320) {
+        reply.code(400).send({ error: 'personKey is required' });
+        return;
+      }
+      const followUp = b.followUp === undefined ? 'none' : normalizeFollowUp(b.followUp);
+      if (!followUp) {
+        reply.code(400).send({ error: 'followUp must be none, todo, contacted or done' });
+        return;
+      }
+      const note = normalizeNote(b.note);
+      if (note === null) {
+        reply.code(400).send({ error: 'note must be 2000 characters or fewer' });
+        return;
+      }
+
+      if (followUp === 'none' && !note) {
+        await deleteCampaignCrmNote(camp.id, personKey);
+        return { ok: true, note: defaultCampaignCrmNote() };
+      }
+
+      const user = getAuthUser(req);
+      const saved = await saveCampaignCrmNote(camp.id, personKey, {
+        followUp,
+        note,
+        updatedBy: user ? (user.name || user.email) : 'panel',
+      });
+      return { ok: true, note: saved };
+    },
+  );
 
   /** Capacity estimate: how long the frozen audience takes across the chosen senders. */
   app.get('/api/campaigns/:id/plan', async (req, reply) => {
