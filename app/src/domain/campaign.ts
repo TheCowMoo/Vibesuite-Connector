@@ -25,6 +25,13 @@ export const CampaignEventSchema = z.object({
 /** A copy variant id. Excel-style letters (A, B, …, Z, AA, AB, …) with no practical limit. */
 export type CopyVariantId = string;
 
+/** An optional link the operator pastes; blank is absent, and only http(s) is accepted. */
+const OptionalHttpUrl = z
+  .string()
+  .trim()
+  .max(2048)
+  .refine((value) => /^https?:\/\/\S+$/i.test(value), { message: 'must be an http(s) link' });
+
 export const CopyVariantSchema = z.object({
   id: z
     .string()
@@ -34,6 +41,14 @@ export const CopyVariantSchema = z.object({
     .max(10),
   summary: z.string().min(1),
   description: z.string().optional(),
+  /**
+   * Optional Zoom registration link for this variant's calendar event. When set, it replaces the
+   * campaign's linked-call link; blank means "use the campaign default".
+   */
+  registrationUrl: z.preprocess(
+    (value) => (typeof value === 'string' && value.trim() === '' ? undefined : value),
+    OptionalHttpUrl.optional(),
+  ),
 });
 export type CopyVariant = z.infer<typeof CopyVariantSchema>;
 

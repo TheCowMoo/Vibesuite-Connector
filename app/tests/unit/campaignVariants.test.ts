@@ -6,7 +6,7 @@ import {
   mirrorPrimaryVariant,
   variantRank,
 } from '../../src/domain/campaignVariants';
-import { CopyVariantsSchema, type CopyVariant } from '../../src/domain/campaign';
+import { CopyVariantSchema, CopyVariantsSchema, type CopyVariant } from '../../src/domain/campaign';
 
 const variants: CopyVariant[] = [
   { id: 'A', summary: 'First', description: 'A description' },
@@ -49,6 +49,20 @@ describe('campaignVariants', () => {
   it('keeps every variant when there are more than four', () => {
     const camp = { event: { summary: 'base' }, copyVariants: [...manyVariants].reverse() };
     expect(campaignVariants(camp).map((v) => v.id)).toEqual(['A', 'B', 'C', 'D', 'E', 'F', 'Z', 'AA']);
+  });
+
+  it('preserves a variant registration link', () => {
+    const camp = {
+      event: { summary: 'base' },
+      copyVariants: [
+        { id: 'B', summary: 'Second', registrationUrl: 'https://zoom.us/webinar/register/WN_b' },
+        { id: 'A', summary: 'First' },
+      ],
+    };
+    expect(campaignVariants(camp).map((v) => v.registrationUrl)).toEqual([
+      undefined,
+      'https://zoom.us/webinar/register/WN_b',
+    ]);
   });
 });
 
@@ -121,5 +135,30 @@ describe('CopyVariantsSchema', () => {
 
   it('rejects ids that are not letters', () => {
     expect(CopyVariantsSchema.safeParse([variants[0], { id: '1', summary: 'Numeric' }]).success).toBe(false);
+  });
+
+  it('accepts an optional http(s) registration link per variant', () => {
+    const parsed = CopyVariantSchema.parse({
+      id: 'B',
+      summary: 'Second',
+      registrationUrl: '  https://zoom.us/webinar/register/WN_b  ',
+    });
+    expect(parsed.registrationUrl).toBe('https://zoom.us/webinar/register/WN_b');
+  });
+
+  it('treats a blank registration link as absent', () => {
+    expect(
+      CopyVariantSchema.parse({ id: 'B', summary: 'Second', registrationUrl: '   ' }).registrationUrl,
+    ).toBeUndefined();
+    expect(CopyVariantSchema.parse({ id: 'B', summary: 'Second' }).registrationUrl).toBeUndefined();
+  });
+
+  it('rejects a registration link without http(s)', () => {
+    expect(
+      CopyVariantSchema.safeParse({ id: 'B', summary: 'Second', registrationUrl: 'zoom.us/register' }).success,
+    ).toBe(false);
+    expect(
+      CopyVariantSchema.safeParse({ id: 'B', summary: 'Second', registrationUrl: 'javascript:alert(1)' }).success,
+    ).toBe(false);
   });
 });

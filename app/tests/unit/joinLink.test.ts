@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { sessionJoinUrl } from '../../src/domain/joinLink';
+import { sessionJoinUrl, variantJoinUrl } from '../../src/domain/joinLink';
 
 const zoom = (over: Partial<Parameters<typeof sessionJoinUrl>[0]> = {}) => ({
   provider: 'zoom',
@@ -37,5 +37,33 @@ describe('sessionJoinUrl', () => {
     expect(sessionJoinUrl({ provider: 'webinargeek', externalId: 'xyz', joinUrl: 'https://x.test/join' })).toBe(
       'https://x.test/join',
     );
+  });
+});
+
+describe('variantJoinUrl', () => {
+  it('prefers the variant registration link over the linked call', () => {
+    expect(
+      variantJoinUrl(
+        { registrationUrl: 'https://zoom.us/webinar/register/WN_a' },
+        zoom({ joinUrl: 'https://zoom.us/w/1' }),
+      ),
+    ).toBe('https://zoom.us/webinar/register/WN_a');
+  });
+
+  it('trims the variant link', () => {
+    expect(variantJoinUrl({ registrationUrl: '  https://zoom.us/webinar/register/WN_a  ' })).toBe(
+      'https://zoom.us/webinar/register/WN_a',
+    );
+  });
+
+  it('falls through to the session when the variant link is blank', () => {
+    expect(variantJoinUrl({ registrationUrl: '   ' }, zoom())).toBe('https://zoom.us/j/85412345678');
+    expect(variantJoinUrl({}, zoom({ joinUrl: 'https://zoom.us/w/9' }))).toBe('https://zoom.us/w/9');
+  });
+
+  it('uses the campaign location when there is no session', () => {
+    expect(variantJoinUrl({}, undefined, 'https://example.com/room')).toBe('https://example.com/room');
+    expect(variantJoinUrl({}, undefined, '   ')).toBeUndefined();
+    expect(variantJoinUrl({})).toBeUndefined();
   });
 });

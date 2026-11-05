@@ -29,3 +29,26 @@ export function sessionJoinUrl(session: JoinLinkSource): string | undefined {
 
   return undefined;
 }
+
+/**
+ * The link one copy variant's calendar event should carry.
+ *
+ * A variant-specific registration link wins over the campaign's linked call, because that is the
+ * whole point of testing copy against different Zoom registration pages. A blank variant link falls
+ * through to the existing session rule, then to whatever manual location the campaign set — so a
+ * campaign without a variant link behaves exactly as it did before.
+ */
+export function variantJoinUrl(
+  variant: { registrationUrl?: string },
+  session?: JoinLinkSource,
+  fallbackLocation?: string,
+): string | undefined {
+  const own = variant.registrationUrl && variant.registrationUrl.trim();
+  if (own) return own;
+
+  const fromSession = session ? sessionJoinUrl(session) : undefined;
+  if (fromSession) return fromSession;
+
+  const fallback = fallbackLocation && fallbackLocation.trim();
+  return fallback || undefined;
+}

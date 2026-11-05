@@ -907,7 +907,8 @@
     <label class="field"><span class="field__label">Description</span><textarea id="campDesc" rows="2" placeholder="Agenda, speaker, what to expect..."></textarea></label>
     <div class="field">
       <label class="daychk"><input type="checkbox" id="campVariantsOn" /><span>Test different copy (unlimited variants)</span></label>
-      <span class="field__hint">A is the subject and description above. Add as many alternates as you like (B, C, D, E…). Each active variant creates its own calendar event per sending account.</span>
+      <span class="field__hint">A is the subject and description above. Add as many alternates as you like (B, C, D, E…). Each active variant creates its own calendar event per sending account, and can carry its own Zoom registration link.</span>
+      <label class="field" id="campVariantALinkWrap" hidden><span class="field__label">Variant A Zoom registration link (optional)</span><input id="campVariantALink" placeholder="Leave blank to use the linked call" /></label>
       <div id="campVariantsList"></div>
       <p class="field__hint" id="campVariantsHint" hidden></p>
       <button type="button" class="btn btn--ghost btn--sm" id="campAddVariant" hidden>Add another variant</button>
@@ -1080,6 +1081,7 @@
     </div>
     <label class="field"><span class="field__label">Subject A (base)</span><input id="editCopySummary" /></label>
     <label class="field"><span class="field__label">Description A</span><textarea id="editCopyDesc" rows="3"></textarea></label>
+    <label class="field"><span class="field__label">Variant A Zoom registration link (optional)</span><input id="editCopyLinkA" placeholder="Leave blank to use the linked call" /></label>
     <div class="field">
       <span class="field__label">Alternate variants</span>
       <div id="editCopyVariantsList"></div>

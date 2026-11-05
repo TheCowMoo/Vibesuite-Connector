@@ -44,7 +44,7 @@ import { allocateEmails, type Campaign, type CampaignSender, type RecipientRecor
 import { assignVariants, campaignVariants, groupEmailsByVariant } from './campaignVariants';
 import { startBlockedByDeadline } from './campaignLifecycle';
 import { dueForNextBatch, senderReadiness } from './campaignSchedule';
-import { sessionJoinUrl } from './joinLink';
+import { variantJoinUrl } from './joinLink';
 
 function describeError(err: unknown): string {
   const e = err as { response?: { status?: number; data?: { error?: { message?: string } | string } }; message?: string };
@@ -55,10 +55,10 @@ function describeError(err: unknown): string {
   return status ? `${status} ${base}` : base;
 }
 
-async function resolveJoinUrl(camp: Campaign): Promise<string | undefined> {
-  if (!camp.sessionId) return undefined;
-  const session = await getSession(camp.sessionId);
-  return session ? sessionJoinUrl(session) : undefined;
+/** The linked call, if this campaign has one. Each variant's link is resolved separately. */
+async function campaignSession(camp: Campaign) {
+  if (!camp.sessionId) return null;
+  return getSession(camp.sessionId);
 }
 
 /** Freeze the audience, drop anyone already invited for that list, partition across senders. */
@@ -209,7 +209,7 @@ export async function sendFromSender(
     return { connectionId: ps.connectionId, sent: 0, failed: 0, remaining: queued, skipped: true, reason: 'nothing queued' };
   }
 
-  const joinUrl = await resolveJoinUrl(camp);
+  const session = await campaignSession(camp);
   const now = new Date();
   const todayISO = isoDate(now);
   const hourISO = isoHour(now);
@@ -247,13 +247,14 @@ export async function sendFromSender(
         const part = parts[i];
         if (!part.length) continue;
         const summary = parts.length > 1 ? `${variant.summary} (${i + 1}/${parts.length})` : variant.summary;
+        const location = variantJoinUrl(variant, session ?? undefined, camp.event.location);
         try {
           const res = await withRetry(
             () =>
               createInviteEvent(conn, {
                 summary,
                 description: variant.description ?? camp.event.description,
-                location: joinUrl || camp.event.location,
+                location,
                 start: camp.event.start,
                 end: camp.event.end,
                 timeZone: camp.event.timeZone,
@@ -543,11 +544,11 @@ export async function sendCampaignTestCopy(
     throw new Error('the event has already started — a test copy would arrive too late');
   }
 
-  const joinUrl = await resolveJoinUrl(camp);
+  const session = await campaignSession(camp);
   const res = await createInviteEvent(conn, {
     summary: `[TEST] ${variant.summary}`,
     description: variant.description ?? camp.event.description,
-    location: joinUrl || camp.event.location,
+    location: variantJoinUrl(variant, session ?? undefined, camp.event.location),
     start: camp.event.start,
     end: camp.event.end,
     timeZone: camp.event.timeZone,

@@ -423,13 +423,21 @@ appended to `session.workflowAssignments` (newest first, cap 1000) and shown in 
 source, status, confidence, reason and error. The report itself, including per-person behaviour and the
 raw poll/Q&A/registration rows, lives in `session:{id}:attendance` as before.
 
-The link a calendar invite carries comes from `sessionJoinUrl()` (`domain/joinLink.ts`), in priority
-order:
+The link a calendar invite carries comes from `variantJoinUrl()` (`domain/joinLink.ts`). It wraps
+`sessionJoinUrl()` so the per-variant rule is one explicit function, in priority order:
 
-1. what the operator typed on the session (they may be pasting a registration or per-guest link);
-2. whatever the provider resolved via `resolveJoinUrl()` — Zoom's `GET /webinars|meetings/{id}` →
+1. `variant.registrationUrl` — an optional Zoom registration link stored on the copy variant, so each
+   variant's calendar event can point at a different registration page; blank is absent;
+2. what the operator typed on the session (they may be pasting a registration or per-guest link);
+3. whatever the provider resolved via `resolveJoinUrl()` — Zoom's `GET /webinars|meetings/{id}` →
    `join_url`, which *does* work before the session;
-3. a synthesised `https://zoom.us/j/{id}`, for older Zoom sessions that have neither.
+4. a synthesised `https://zoom.us/j/{id}`, for older Zoom sessions that have neither;
+5. the campaign event's manual location, as the final fallback.
+
+Both `sendCampaignBatch()` and `sendCampaignTestCopy()` resolve the link per variant, so a test send can
+never silently use another variant's link. Registration and attendance reports remain per linked call:
+per-variant registration numbers exist only when the links lead to separate Zoom sessions (or carry
+Zoom source tracking), and the panel does not infer them.
 
 Resolution happens when a session is created and at the start of `syncSession()` — deliberately
 **before** the report fetch, because that fetch throws for a session that has not run yet, which is

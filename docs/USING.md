@@ -300,10 +300,20 @@ across all variants and each active variant gets its own calendar event per acco
 per-event limit is shared across the variants, so N variants on one account produce N smaller events in
 that round. There is no four-variant ceiling: add as many as you like (A, B, …, Z, AA, AB, …).
 
+Each variant can also carry its own optional **Zoom registration link**. Paste it in the variant row, or
+in **Variant A**'s own field. That variant's calendar event uses the link as its location; blank falls
+back to the campaign's linked call link, then to the event's manual location. This is how you send
+different copy to different registration pages.
+
+Registration and attendance are still read from the campaign's **one linked call**, so per-variant
+registration counts exist only when the links lead to separate Zoom sessions (or carry Zoom source
+tracking). The panel does not invent per-variant registration numbers.
+
 Open **Campaigns → Details** to see every variant and **Send test copy**. A test:
 
 - is a real Google Calendar invite to 1–5 addresses, titled `[TEST] <subject>`;
-- uses the same time, join link and copy as the real variant;
+- uses the same time and copy as the real variant, and that variant's registration link (or the
+  campaign's linked call link when it has none);
 - does **not** enter the queue, mark anyone invited, or appear in the campaign stats;
 - leaves a `[TEST]` event on the sending account's calendar, and its RSVPs are ignored by the sync pipeline.
 

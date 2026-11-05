@@ -5050,6 +5050,17 @@
     }).join('');
   }
 
+  /** Same rule as the server schema: only http(s) links are accepted. */
+  function isHttpUrl(value) {
+    return /^https?:\/\/\S+$/i.test(String(value || '').trim());
+  }
+
+  /** Long registration URLs would blow up a variant card; the title carries the full value. */
+  function linkLabel(url) {
+    var text = String(url || '');
+    return text.length > 64 ? text.slice(0, 61) + '…' : text;
+  }
+
   function nextCampVariantId() {
     return nextVariantId(campCopyVariants);
   }
@@ -5059,7 +5070,9 @@
     var add = document.getElementById('campAddVariant');
     var hint = document.getElementById('campVariantsHint');
     var on = document.getElementById('campVariantsOn').checked;
+    var aLink = document.getElementById('campVariantALinkWrap');
     box.hidden = !on;
+    if (aLink) aLink.hidden = !on;
     box.innerHTML = on ? campCopyVariants.slice().sort(function (a, b) {
       return variantRank(a.id) - variantRank(b.id);
     }).map(function (v) {
@@ -5068,6 +5081,8 @@
         '<button type="button" class="btn btn--ghost btn--sm" data-remove-variant="' + esc(v.id) + '">Remove</button></div>' +
         '<input data-variant-summary="' + esc(v.id) + '" value="' + esc(v.summary || '') + '" placeholder="Subject for variant ' + esc(v.id) + '" />' +
         '<textarea data-variant-desc="' + esc(v.id) + '" rows="2" placeholder="Description for variant ' + esc(v.id) + '">' + esc(v.description || '') + '</textarea>' +
+        '<label class="field"><span class="field__label">Variant ' + esc(v.id) + ' Zoom registration link (optional)</span>' +
+        '<input data-variant-link="' + esc(v.id) + '" value="' + esc(v.registrationUrl || '') + '" placeholder="Leave blank to use the linked call" /></label>' +
         '</div>';
     }).join('') : '';
     var next = nextCampVariantId();
@@ -5090,6 +5105,8 @@
       row.summary = input.value;
       var desc = document.querySelector('#campVariantsList [data-variant-desc="' + id + '"]');
       row.description = desc ? desc.value : '';
+      var link = document.querySelector('#campVariantsList [data-variant-link="' + id + '"]');
+      row.registrationUrl = link ? link.value.trim() : '';
     });
   }
 
@@ -5097,7 +5114,7 @@
     syncCampVariantsFromInputs();
     var id = nextCampVariantId();
     if (!id) return;
-    campCopyVariants.push({ id: id, summary: '', description: '' });
+    campCopyVariants.push({ id: id, summary: '', description: '', registrationUrl: '' });
     renderCampVariants();
     var input = document.querySelector('#campVariantsList [data-variant-summary="' + id + '"]');
     if (input) input.focus();
@@ -5106,6 +5123,8 @@
   function resetCampVariants() {
     campCopyVariants = [];
     document.getElementById('campVariantsOn').checked = false;
+    var aLink = document.getElementById('campVariantALink');
+    if (aLink) aLink.value = '';
     renderCampVariants();
   }
 
@@ -5265,16 +5284,29 @@
           toast('Variant ' + campCopyVariants[vi].id + ' needs a subject', 'error');
           return;
         }
+        var variantLink = String(campCopyVariants[vi].registrationUrl || '').trim();
+        if (variantLink && !isHttpUrl(variantLink)) {
+          toast('Variant ' + campCopyVariants[vi].id + ' needs an http(s) registration link, or leave it blank', 'error');
+          return;
+        }
+      }
+      var variantALink = document.getElementById('campVariantALink').value.trim();
+      if (variantALink && !isHttpUrl(variantALink)) {
+        toast('Variant A needs an http(s) registration link, or leave it blank', 'error');
+        return;
       }
       body.copyVariants = [{
         id: 'A',
         summary: summary,
-        description: body.event.description
+        description: body.event.description,
+        registrationUrl: variantALink || undefined
       }].concat(campCopyVariants.map(function (v) {
+        var link = String(v.registrationUrl || '').trim();
         return {
           id: v.id,
           summary: String(v.summary).trim(),
-          description: String(v.description || '').trim() || undefined
+          description: String(v.description || '').trim() || undefined,
+          registrationUrl: link || undefined
         };
       }));
     }
@@ -5443,6 +5475,9 @@
         '</div>' +
         '<div><strong>' + esc(v.summary) + '</strong></div>' +
         (v.description ? '<div class="muted">' + esc(v.description) + '</div>' : '') +
+        (v.registrationUrl
+          ? '<div class="muted" title="' + esc(v.registrationUrl) + '">Registration link: ' + esc(linkLabel(v.registrationUrl)) + '</div>'
+          : '') +
         '</div>';
     }).join('');
     var editable = (c.status === 'draft' || c.status === 'scheduled') && !c.startedAt;
@@ -5618,7 +5653,10 @@
 
     document.getElementById('testCopyIntro').textContent =
       'Variant ' + variant.id + ' — ' + variant.summary + '. This sends a real Google Calendar invite marked [TEST]. ' +
-      'It does not enter the queue, consume campaign stats, or mark anyone invited.';
+      'It does not enter the queue, consume campaign stats, or mark anyone invited. ' +
+      (variant.registrationUrl
+        ? 'Registration link: ' + variant.registrationUrl + '.'
+        : 'It uses the linked call link.');
     document.getElementById('testCopySender').innerHTML = c.senders.filter(function (s) { return s.enabled; })
       .map(function (s) {
         return '<option value="' + esc(s.connectionId) + '">' + esc(connName(s.connectionId)) + '</option>';
@@ -5644,6 +5682,8 @@
         '<button type="button" class="btn btn--ghost btn--sm" data-remove-edit-variant="' + esc(v.id) + '">Remove</button></div>' +
         '<input data-edit-summary="' + esc(v.id) + '" value="' + esc(v.summary || '') + '" />' +
         '<textarea data-edit-desc="' + esc(v.id) + '" rows="2">' + esc(v.description || '') + '</textarea>' +
+        '<label class="field"><span class="field__label">Variant ' + esc(v.id) + ' Zoom registration link (optional)</span>' +
+        '<input data-edit-link="' + esc(v.id) + '" value="' + esc(v.registrationUrl || '') + '" placeholder="Leave blank to use the linked call" /></label>' +
         '</div>';
     }).join('');
     var next = nextEditVariantId();
@@ -5660,6 +5700,8 @@
       row.summary = input.value;
       var desc = document.querySelector('#editCopyVariantsList [data-edit-desc="' + id + '"]');
       row.description = desc ? desc.value : '';
+      var link = document.querySelector('#editCopyVariantsList [data-edit-link="' + id + '"]');
+      row.registrationUrl = link ? link.value.trim() : '';
     });
   }
 
@@ -5667,7 +5709,7 @@
     syncEditCopyVariants();
     var id = nextEditVariantId();
     if (!id) return;
-    editCopyVariants.push({ id: id, summary: '', description: '' });
+    editCopyVariants.push({ id: id, summary: '', description: '', registrationUrl: '' });
     renderEditCopyVariants();
   }
 
@@ -5678,8 +5720,14 @@
     var primary = variants.filter(function (v) { return v.id === 'A'; })[0] || variants[0];
     document.getElementById('editCopySummary').value = primary.summary || '';
     document.getElementById('editCopyDesc').value = primary.description || '';
+    document.getElementById('editCopyLinkA').value = primary.registrationUrl || '';
     editCopyVariants = variants.filter(function (v) { return v.id !== primary.id; }).map(function (v) {
-      return { id: v.id, summary: v.summary, description: v.description || '' };
+      return {
+        id: v.id,
+        summary: v.summary,
+        description: v.description || '',
+        registrationUrl: v.registrationUrl || ''
+      };
     });
     renderEditCopyVariants();
     openModal('editCopyModal');
@@ -5700,17 +5748,30 @@
         toast('Variant ' + editCopyVariants[i].id + ' needs a subject', 'error');
         return;
       }
+      var variantLink = String(editCopyVariants[i].registrationUrl || '').trim();
+      if (variantLink && !isHttpUrl(variantLink)) {
+        toast('Variant ' + editCopyVariants[i].id + ' needs an http(s) registration link, or leave it blank', 'error');
+        return;
+      }
+    }
+    var variantALink = document.getElementById('editCopyLinkA').value.trim();
+    if (variantALink && !isHttpUrl(variantALink)) {
+      toast('Variant A needs an http(s) registration link, or leave it blank', 'error');
+      return;
     }
 
     var copyVariants = [{
       id: 'A',
       summary: summary,
-      description: description || undefined
+      description: description || undefined,
+      registrationUrl: variantALink || undefined
     }].concat(editCopyVariants.map(function (v) {
+      var link = String(v.registrationUrl || '').trim();
       return {
         id: v.id,
         summary: String(v.summary).trim(),
-        description: String(v.description || '').trim() || undefined
+        description: String(v.description || '').trim() || undefined,
+        registrationUrl: link || undefined
       };
     }));
 
@@ -5758,7 +5819,7 @@
   });
   $('#campVariantsOn').addEventListener('change', function () {
     if (this.checked && !campCopyVariants.length) {
-      campCopyVariants.push({ id: 'B', summary: '', description: '' });
+      campCopyVariants.push({ id: 'B', summary: '', description: '', registrationUrl: '' });
     }
     renderCampVariants();
   });
