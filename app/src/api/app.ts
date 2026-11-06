@@ -25,8 +25,10 @@ import { advisorRoutes } from './routes/advisor';
 import { statsRoutes } from './routes/stats';
 import { deliverabilityRoutes } from './routes/deliverability';
 
+const MAX_REQUEST_BODY_BYTES = 25 * 1024 * 1024;
+
 export function buildApp(): FastifyInstance {
-  const app = Fastify({ logger: false });
+  const app = Fastify({ logger: false, bodyLimit: MAX_REQUEST_BODY_BYTES });
 
   app.setErrorHandler(errorHandler);
 

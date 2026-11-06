@@ -101,6 +101,8 @@ one manual batch — caps and cooldowns still apply.
    the whole list.
 3. The list remembers everyone it has ever invited (`list:{id}:invited`). That memory is shared by every
    campaign and every one-off invite that uses the list.
+4. A single upload can be up to **25 MB**. Split a larger CSV into smaller lists, or remove columns you do
+   not need before uploading.
 
 Deleting a list leaves campaigns that reference it unable to start — they lose their audience.
 

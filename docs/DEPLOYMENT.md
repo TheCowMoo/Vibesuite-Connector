@@ -245,6 +245,7 @@ Rule of thumb:
 | `unknown channel`                                     | Channel not persisted — re-run bootstrap for that connection                              |
 | `410` in worker logs                                  | Expired `syncToken` — handled automatically (reset + full sync)                           |
 | OAuth callback `invalid state`                        | State expired (>10 min) or mismatched — restart the OAuth flow                            |
+| `413 Content Too Large` on a list upload              | Upload exceeds the 25 MB request limit — split the CSV, or raise `client_max_body_size` and `MAX_REQUEST_BODY_BYTES` together and rebuild |
 | **"Awaiting Google" status stuck**                    | Bootstrap/watch failed after OAuth — see below                                            |
 
 ### "Awaiting Google" (OAuth completes but the connection never goes active)

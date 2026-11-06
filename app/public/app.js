@@ -14,6 +14,9 @@
 
   function api(path, opts) {
     return fetch(path, opts).then(function (res) {
+      if (res.status === 413) {
+        throw new Error('That upload is too large. The server accepts up to 25 MB; split the file or remove unused columns.');
+      }
       return res.json().catch(function () { return {}; }).then(function (data) {
         if (!res.ok) throw new Error(data.error || res.statusText);
         return data;
