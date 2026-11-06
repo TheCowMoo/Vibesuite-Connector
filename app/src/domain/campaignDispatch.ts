@@ -2,7 +2,7 @@ import { env } from '../config/env';
 import { logger } from '../lib/logger';
 import { inc } from '../lib/metrics';
 import { createInviteEvent } from '../google/events';
-import { getConnection } from './connectionStore';
+import { getConnection, saveConnection } from './connectionStore';
 import { getList } from './listStore';
 import { eventStartEpoch } from './invite';
 import { planEventGroups } from './inviteEventPlan';
@@ -44,16 +44,8 @@ import { allocateEmails, type Campaign, type CampaignSender, type RecipientRecor
 import { assignVariants, campaignVariants, groupEmailsByVariant } from './campaignVariants';
 import { startBlockedByDeadline } from './campaignLifecycle';
 import { blockedSendReasons, dueForNextBatch, senderCanProgress, senderReadiness } from './campaignSchedule';
+import { describeSendError, isGoogleAuthExpired } from './campaignSendError';
 import { variantJoinUrl } from './joinLink';
-
-function describeError(err: unknown): string {
-  const e = err as { response?: { status?: number; data?: { error?: { message?: string } | string } }; message?: string };
-  const status = e?.response?.status;
-  const d = e?.response?.data?.error;
-  const detail = typeof d === 'string' ? d : d?.message;
-  const base = detail || e?.message || 'unknown error';
-  return status ? `${status} ${base}` : base;
-}
 
 /** The linked call, if this campaign has one. Each variant's link is resolved separately. */
 async function campaignSession(camp: Campaign) {
@@ -188,6 +180,9 @@ export async function sendFromSender(
   if (!conn) {
     return { connectionId: ps.connectionId, sent: 0, failed: 0, remaining: queued, skipped: true, reason: 'connection missing' };
   }
+  if (conn.status !== 'active') {
+    return { connectionId: ps.connectionId, sent: 0, failed: 0, remaining: queued, skipped: true, reason: 'Google account is not connected' };
+  }
 
   const profile = await getSenderProfile(ps.connectionId);
   const gauge = await getSenderGauge(ps.connectionId);
@@ -242,6 +237,7 @@ export async function sendFromSender(
     const grouped = groupEmailsByVariant(claimed, variantByEmail, fallbackVariant, variants);
     let sent = 0;
     let failed = 0;
+    let lastFailure: string | undefined;
     const failedEmails: string[] = [];
 
     for (const variant of variants) {
@@ -291,7 +287,19 @@ export async function sendFromSender(
           await bumpCampaignSender(campaignId, ps.connectionId, 'sent', part.length);
           inc('campaign_invites_sent_total');
         } catch (err) {
-          const msg = describeError(err);
+          const msg = describeSendError(err, conn.googleAuthType);
+          lastFailure = msg;
+          if (isGoogleAuthExpired(msg) && conn.googleAuthType !== 'service_account' && conn.status !== 'disconnected') {
+            // The refresh token is dead, not the campaign. Mark the connection so the panel offers
+            // a reconnect instead of silently retrying a token Google will keep rejecting.
+            conn.status = 'disconnected';
+            conn.updatedAt = Date.now();
+            try {
+              await saveConnection(conn);
+            } catch (saveErr) {
+              logger.error({ connectionId: ps.connectionId, err: (saveErr as Error).message }, 'could not mark Google connection disconnected');
+            }
+          }
           failed += part.length;
           failedEmails.push(...part);
           for (const email of part) {
@@ -319,7 +327,7 @@ export async function sendFromSender(
     const state = await getSenderState(ps.connectionId);
     if (failed > 0) {
       state.errorStreak = (state.errorStreak ?? 0) + 1;
-      state.lastError = 'invite batch failed';
+      state.lastError = lastFailure ?? 'invite batch failed';
       if (state.errorStreak >= env.CAMPAIGN_COOLDOWN_ON_ERRORS) {
         state.cooldownUntil = Date.now() + env.CAMPAIGN_COOLDOWN_HOURS * 3600000;
         logger.warn({ connectionId: ps.connectionId, hours: env.CAMPAIGN_COOLDOWN_HOURS }, 'sender cooled down after repeated errors');
@@ -384,7 +392,8 @@ export async function endCampaign(id: string, reason?: string): Promise<Campaign
 }
 
 export async function redistributeStranded(camp: Campaign): Promise<number> {
-  const [profiles, gauges] = await Promise.all([
+  const [connections, profiles, gauges] = await Promise.all([
+    Promise.all(camp.senders.map((s) => getConnection(s.connectionId))),
     Promise.all(camp.senders.map((s) => getSenderProfile(s.connectionId))),
     Promise.all(camp.senders.map((s) => getSenderGauge(s.connectionId))),
   ]);
@@ -398,6 +407,7 @@ export async function redistributeStranded(camp: Campaign): Promise<number> {
     if (senderCanProgress({
       enabled: s.enabled,
       profileEnabled: profiles[i].enabled,
+      connected: connections[i]?.status === 'active',
       cooling: gauges[i].cooling,
     })) {
       healthy.push(s);

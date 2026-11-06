@@ -246,6 +246,7 @@ Rule of thumb:
 | `410` in worker logs                                  | Expired `syncToken` — handled automatically (reset + full sync)                           |
 | OAuth callback `invalid state`                        | State expired (>10 min) or mismatched — restart the OAuth flow                            |
 | `413 Content Too Large` on a list upload              | Upload exceeds the 25 MB request limit — split the CSV, or raise `client_max_body_size` and `MAX_REQUEST_BODY_BYTES` together and rebuild |
+| Invitations fail with `invalid_grant`                 | Google refresh token expired or was revoked — reconnect the sending account; publish the OAuth consent screen to production; for a service account, check its key and domain-wide delegation |
 | **"Awaiting Google" status stuck**                    | Bootstrap/watch failed after OAuth — see below                                            |
 
 ### "Awaiting Google" (OAuth completes but the connection never goes active)

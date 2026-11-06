@@ -114,7 +114,10 @@ pick them up. Once `errorStreak` reaches `CAMPAIGN_COOLDOWN_ON_ERRORS` the mailb
 paused profile used to be misclassified as healthy, which could leave a queue stuck indefinitely. A
 manual `sendCampaignBatch()` now runs redistribution before its send pass, and returns per-sender
 `blocked` reasons when nothing could be sent, so the UI can explain a zero-send instead of showing
-only "Sent 0". The campaign flips to `completed` when no mailbox has work left. `planSchedule()` powers the
+only "Sent 0". A Google `invalid_grant` is treated as a dead authorization: the recipient keeps the
+actionable error, an OAuth connection is marked `disconnected`, and its queued work is redistributed
+to healthy accounts (a service account keeps its key/delegation advice but is not marked disconnected).
+The campaign flips to `completed` when no mailbox has work left. `planSchedule()` powers the
 capacity planner by walking day by day and summing each mailbox's cap for that date. When the
 campaign wizard supplies the percentage split, it also passes an `allocation` map: each mailbox can
 only send the people assigned to it, so a low-cap 90% mailbox is not mistakenly bailed out by a

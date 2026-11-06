@@ -140,6 +140,11 @@ describe('isStranded', () => {
     expect(senderCanProgress({ enabled: true, profileEnabled: false, cooling: false })).toBe(false);
     expect(isStranded({ enabled: true, profileEnabled: false, cooling: false, queueLength: 5 })).toBe(true);
   });
+
+  it('treats a disconnected Google account as stranded', () => {
+    expect(senderCanProgress({ enabled: true, connected: false, cooling: false })).toBe(false);
+    expect(isStranded({ enabled: true, connected: false, cooling: false, queueLength: 5 })).toBe(true);
+  });
 });
 
 describe('blockedSendReasons', () => {

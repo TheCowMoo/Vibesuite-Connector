@@ -884,6 +884,8 @@ fieldset.field legend { margin-bottom: 0.4rem; }
 .crm-table .chip { white-space: nowrap; }
 .crm-person__meta { display: block; color: var(--ink-muted); font-size: 0.76rem; margin-left: 1.05rem; }
 .crm-activity { color: var(--ink-muted); font-size: 0.78rem; line-height: 1.4; }
+.crm-error { display: block; color: var(--danger); font-size: 0.76rem; line-height: 1.35; margin-top: 0.2rem; max-width: 14rem; overflow-wrap: anywhere; }
+.crm-reconnect { margin: 0.45rem 0 0; font-size: 0.8rem; }
 .crm-detail td { background: #FAFBFD; padding: 0.9rem; }
 .crm-detail__grid {
   display: grid;

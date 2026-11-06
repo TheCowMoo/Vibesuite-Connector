@@ -5961,6 +5961,11 @@
       ? '<div class="invite-result invite-result--error" role="alert" style="margin:0.75rem 0 0">' +
           esc(campaignSendNotice.text) + '</div>'
       : '';
+    var failedNotice = counts.failed
+      ? '<div class="crm-warning" style="margin-top:0.75rem">' + counts.failed + ' invitation' +
+          (counts.failed === 1 ? '' : 's') + " didn't go through. " +
+          '<button type="button" class="link-btn" data-open-crm-failed>See who failed and why</button></div>'
+      : '';
 
     document.getElementById('campaignDetailBody').innerHTML =
       '<div class="conn__head">' + campStatusChip(c.status) +
@@ -5971,6 +5976,7 @@
         (c.zoomUserId ? '<span class="chip chip--neutral">Zoom host: ' + esc(zoomAccountLabel(c.zoomUserId)) + '</span>' : '') +
         (c.sendByAt ? '<span class="chip chip--neutral">Stop by ' + esc(prettyDate(c.sendByAt)) + '</span>' : '') + '</div>' +
       sendNotice +
+      failedNotice +
       tabBar +
       (campaignDetailTab === 'people'
         ? '<div data-crm-scope="tab" id="crmTabRoot">' + peopleContent + '</div>'
@@ -6050,6 +6056,22 @@
     if (row.sendStatus === 'pending') return crmChip('Waiting', 'warning');
     if (row.sendStatus === 'walk_in') return crmChip('Walk-in', 'warning');
     return crmChip('Sent', 'neutral');
+  }
+
+  function crmSendErrorText(error) {
+    if (!error) return '';
+    // The backend already has a specific service-account message; keep it rather than
+    // rewriting it as an OAuth reconnect.
+    if (/service account/i.test(error)) return error;
+    if (/invalid_grant/i.test(error)) return 'Google authorization expired — reconnect this account';
+    return error;
+  }
+
+  function crmGoogleReconnectHtml(row) {
+    if (!row.connectionId || !row.sendError || !/invalid_grant/i.test(row.sendError)) return '';
+    return '<p class="crm-reconnect"><a class="link-btn" href="/oauth/google/start?connectionId=' +
+      encodeURIComponent(row.connectionId) + '">Reconnect Google</a>' +
+      ' <span class="muted">If this is a service account, check its key and domain-wide delegation.</span></p>';
   }
 
   function crmPersonName(row) {
@@ -6204,13 +6226,14 @@
       crmFact('Reply', crmRsvpLabel(row.rsvp)),
       crmFact('Zoom result', crmZoomLabel(row.zoom)),
       crmFact('Event ID', row.eventId),
-      crmFact('Send error', row.sendError),
+      crmFact('Send error', crmSendErrorText(row.sendError)),
       crmFact('Company', row.company),
       crmFact('Phone', row.phone)
     ].filter(Boolean).join('');
     return '<div class="crm-detail__section"><div class="crm-detail__title">Campaign</div>' +
       (row.walkIn ? '<p class="muted">Joined without being on this campaign’s invited list.</p>' : '') +
       (facts ? facts : '<p class="muted">No campaign details.</p>') +
+      crmGoogleReconnectHtml(row) +
       '</div>';
   }
 
@@ -6291,6 +6314,10 @@
       if (row.company) meta.push(row.company);
       var activity = crmActivityText(row);
       var sent = row.sentAt ? '<span class="crm-person__meta">' + esc(prettyDate(row.sentAt)) + '</span>' : '';
+      if (row.sendStatus === 'failed' && row.sendError) {
+        sent += '<span class="crm-error" title="' + esc(row.sendError) + '">' +
+          esc(crmSendErrorText(row.sendError)) + '</span>';
+      }
       var html = '<tr class="person-row' + (open ? ' is-open' : '') + '">' +
         '<td><button type="button" class="person-toggle" data-crm-row="' + esc(row.key) + '" aria-expanded="' + (open ? 'true' : 'false') + '">' +
           '<span class="person-toggle__name">' + esc(name) + '</span>' +
@@ -6421,6 +6448,17 @@
     if (campaignDetailTab === 'people') loadCampaignCrmTab();
   }
 
+  /** Jump from the campaign failure count to the failed rows, with the reason visible. */
+  function openCampaignFailedPeople() {
+    if (!currentCampaignId) return;
+    if (crmTabState.campaignId !== currentCampaignId) crmTabState = newCrmState(currentCampaignId, CRM_TAB_LIMIT);
+    crmTabState.query = { offset: 0, limit: CRM_TAB_LIMIT, send: 'failed' };
+    crmTabState.expanded = {};
+    campaignDetailTab = 'people';
+    if (currentCampaign) renderCampaignDetail(currentCampaign, currentCampaignPlan, currentCampaignStats);
+    loadCrm('tab', true);
+  }
+
   function fillCrmCampaignPicker() {
     var pick = document.getElementById('crmCampaignPick');
     if (!pick) return;
@@ -6513,6 +6551,12 @@
 
   function handleCrmClick(e, scope) {
     var state = crmStateFor(scope);
+    var failedPeople = e.target.closest('[data-open-crm-failed]');
+    if (failedPeople) {
+      openCampaignFailedPeople();
+      return;
+    }
+
     var tab = e.target.closest('[data-campaign-tab]');
     if (tab) {
       setCampaignDetailTab(tab.dataset.campaignTab);
@@ -6872,6 +6916,7 @@
       'nothing queued': 'nothing is queued for it',
       'inter-batch delay': 'waiting for the next batch',
       'campaign sender disabled': 'sending account is off for this campaign',
+      'Google account is not connected': 'Google account is not connected — reconnect it',
       'no enabled sending accounts': 'no sending account is enabled for this campaign',
       'no invitations were sent': 'no invitations were sent'
     };
@@ -6908,7 +6953,7 @@
           var bits = [];
           if (failedText) bits.push(failedText);
           if (blocked) bits.push(blocked);
-          var message = 'Nothing sent' + (bits.length
+          var message = 'This batch sent nothing' + (bits.length
             ? ' — ' + bits.join(' · ')
             : ' — no sending account was ready. Check its switch, sending hours and daily cap.');
           campaignSendNotice = { id: id, text: message };

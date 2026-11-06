@@ -96,12 +96,14 @@ export interface SenderProgressInput {
   enabled: boolean;
   /** The Sending accounts profile switch. It is separate from the campaign row switch. */
   profileEnabled?: boolean;
+  /** False when the Google connection is missing or no longer active. */
+  connected?: boolean;
   cooling: boolean;
 }
 
 /** Can this mailbox make progress at all, ignoring temporary window/cap waits? */
 export function senderCanProgress(input: SenderProgressInput): boolean {
-  return input.enabled && input.profileEnabled !== false && !input.cooling;
+  return input.enabled && input.profileEnabled !== false && input.connected !== false && !input.cooling;
 }
 
 /** A mailbox that cannot make progress right now, so its queued work should move. */
