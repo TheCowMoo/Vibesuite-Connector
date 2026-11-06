@@ -381,7 +381,10 @@ while the campaign is live), **End sending**, **Delete**.
 - **Send a batch** runs one manual pass for that campaign (up to the mailbox's daily headroom, or the
   campaign's per-round limit when batching is on). It skips the "pause between batches" delay, but the
   daily cap, sending hours and cooldowns still apply. While a batched campaign is between rounds, it
-  refuses and tells you when the next round opens.
+  refuses and tells you when the next round opens. Before sending, stranded work on a paused, cooling
+  or campaign-disabled account is moved to a healthy account. If nothing is sent, the banner names the
+  blocker for each account (paused, outside sending hours, daily cap, cooling, off for this campaign,
+  or nothing queued) instead of only saying "Sent 0".
 - **End sending** asks for confirmation and tells you how many people will never be invited. It is **not a
   recall**: invitations already delivered stay in people's calendars.
 - **Delete** removes the campaign and its per-recipient history. Use **End** if you only want it to stop.

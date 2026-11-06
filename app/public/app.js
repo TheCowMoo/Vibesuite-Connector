@@ -4558,6 +4558,7 @@
   var currentCampaignPlan = null;
   var currentCampaignStats = null;
   var campaignDetailTab = 'overview';
+  var campaignSendNotice = null;
   var campCopyVariants = [];
   var editCopyVariants = [];
   var testCopyVariantId = null;
@@ -5953,6 +5954,11 @@
       peopleContent = '<p class="muted">Loading people…</p>';
     }
 
+    var sendNotice = campaignSendNotice && campaignSendNotice.id === c.id
+      ? '<div class="invite-result invite-result--error" role="alert" style="margin:0.75rem 0 0">' +
+          esc(campaignSendNotice.text) + '</div>'
+      : '';
+
     document.getElementById('campaignDetailBody').innerHTML =
       '<div class="conn__head">' + campStatusChip(c.status) +
         '<span class="chip chip--neutral">' + esc(splitLabel(c.senders)) + '</span>' +
@@ -5961,6 +5967,7 @@
         (c.status === 'scheduled' && c.scheduledStartAt ? '<span class="chip chip--neutral">Starts ' + esc(prettyDate(c.scheduledStartAt)) + '</span>' : '') +
         (c.zoomUserId ? '<span class="chip chip--neutral">Zoom host: ' + esc(zoomAccountLabel(c.zoomUserId)) + '</span>' : '') +
         (c.sendByAt ? '<span class="chip chip--neutral">Stop by ' + esc(prettyDate(c.sendByAt)) + '</span>' : '') + '</div>' +
+      sendNotice +
       tabBar +
       (campaignDetailTab === 'people'
         ? '<div data-crm-scope="tab" id="crmTabRoot">' + peopleContent + '</div>'
@@ -6852,16 +6859,77 @@
     });
   }
 
+  function campaignSendBlockReason(reason) {
+    var labels = {
+      'paused': 'sending account is paused',
+      'outside send window': 'outside its sending hours',
+      'daily cap reached': 'daily cap reached',
+      'cooling down': 'cooling down after errors',
+      'connection missing': 'Google account is missing',
+      'nothing queued': 'nothing is queued for it',
+      'inter-batch delay': 'waiting for the next batch',
+      'campaign sender disabled': 'sending account is off for this campaign',
+      'no enabled sending accounts': 'no sending account is enabled for this campaign',
+      'no invitations were sent': 'no invitations were sent'
+    };
+    return labels[reason] || String(reason || 'unknown reason');
+  }
+
+  function campaignSendBlockedText(result) {
+    var blocks = result && result.blocked;
+    if (!blocks || !blocks.length) {
+      blocks = (result && result.perSender ? result.perSender : [])
+        .filter(function (p) { return p.sent === 0 && p.failed === 0 && p.reason; })
+        .map(function (p) { return { connectionId: p.connectionId, reason: p.reason }; });
+    }
+    var seen = {};
+    var parts = [];
+    (blocks || []).forEach(function (block) {
+      var reason = campaignSendBlockReason(block.reason);
+      var key = String(block.connectionId || '') + '|' + reason;
+      if (seen[key]) return;
+      seen[key] = true;
+      parts.push((block.connectionId ? connName(block.connectionId) + ': ' : '') + reason);
+    });
+    return parts.join(' · ');
+  }
+
   $('#campSendNow').addEventListener('click', function () {
     if (!currentCampaignId) return;
     var id = currentCampaignId;
     withBusy(this, api('/api/campaigns/' + id + '/send', { method: 'POST' }))
       .then(function (r) {
-        toast('Sent ' + r.sent + (r.failed ? '. ' + r.failed + " didn't go through" : ''), r.failed ? 'error' : 'success');
+        var blocked = campaignSendBlockedText(r);
+        var failedText = r.failed ? r.failed + " didn't go through" : '';
+        if (r.sent === 0) {
+          var bits = [];
+          if (failedText) bits.push(failedText);
+          if (blocked) bits.push(blocked);
+          var message = 'Nothing sent' + (bits.length
+            ? ' — ' + bits.join(' · ')
+            : ' — no sending account was ready. Check its switch, sending hours and daily cap.');
+          campaignSendNotice = { id: id, text: message };
+          toast(message, 'error');
+        } else {
+          campaignSendNotice = null;
+          if (r.failed) {
+            toast('Sent ' + r.sent + '. ' + failedText + (blocked ? ' — ' + blocked : ''), 'error');
+          } else {
+            toast('Sent ' + r.sent, 'success');
+          }
+        }
         openCampaignDetail(id);
         loadCampaigns();
       })
-      .catch(function (e) { toast(e.message, 'error'); });
+      .catch(function (e) {
+        campaignSendNotice = { id: id, text: e.message };
+        toast(e.message, 'error');
+        if (currentCampaignId === id && currentCampaign) {
+          renderCampaignDetail(currentCampaign, currentCampaignPlan, currentCampaignStats);
+        } else {
+          openCampaignDetail(id);
+        }
+      });
   });
 
   document.getElementById('campaignDetailBody').addEventListener('click', function (e) {

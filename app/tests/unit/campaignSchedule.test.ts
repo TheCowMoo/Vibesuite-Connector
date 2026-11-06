@@ -1,10 +1,12 @@
 import { describe, it, expect } from 'vitest';
 import {
   allocateBatch,
+  blockedSendReasons,
   dueForNextBatch,
   isStranded,
   jitterDelay,
   orderClaims,
+  senderCanProgress,
   senderReadiness,
   type SenderClaim,
 } from '../../src/domain/campaignSchedule';
@@ -132,6 +134,29 @@ describe('isStranded', () => {
   it('leaves healthy mailboxes alone', () => {
     expect(isStranded({ enabled: true, cooling: false, queueLength: 5 })).toBe(false);
     expect(isStranded({ enabled: false, cooling: false, queueLength: 0 })).toBe(false);
+  });
+
+  it('treats a paused Sending accounts profile as stranded', () => {
+    expect(senderCanProgress({ enabled: true, profileEnabled: false, cooling: false })).toBe(false);
+    expect(isStranded({ enabled: true, profileEnabled: false, cooling: false, queueLength: 5 })).toBe(true);
+  });
+});
+
+describe('blockedSendReasons', () => {
+  it('returns only the senders that sent and failed nothing, with their reason', () => {
+    expect(blockedSendReasons([
+      { connectionId: 'a', sent: 0, failed: 0, reason: 'paused' },
+      { connectionId: 'b', sent: 2, failed: 0 },
+      { connectionId: 'c', sent: 0, failed: 0, reason: 'daily cap reached' },
+      { connectionId: 'd', sent: 0, failed: 1, reason: 'provider error' },
+    ])).toEqual([
+      { connectionId: 'a', reason: 'paused' },
+      { connectionId: 'c', reason: 'daily cap reached' },
+    ]);
+  });
+
+  it('returns nothing when a sender made progress', () => {
+    expect(blockedSendReasons([{ connectionId: 'a', sent: 1, failed: 0, reason: 'unused' }])).toEqual([]);
   });
 });
 

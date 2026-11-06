@@ -109,7 +109,12 @@ counter, the campaign counters and the list's invited set; failures mark the rec
 the sender `errorStreak`, and are re-queued at the front so another mailbox (or the next tick) can
 pick them up. Once `errorStreak` reaches `CAMPAIGN_COOLDOWN_ON_ERRORS` the mailbox enters a
 `CAMPAIGN_COOLDOWN_HOURS` cooldown and is skipped until it expires or an operator hits Resume.
-The campaign flips to `completed` when no mailbox has work left. `planSchedule()` powers the
+`redistributeStranded()` moves queued work off mailboxes that cannot progress. It treats the
+**Sending accounts profile switch** as well as the campaign row switch and a cooldown as stranded; a
+paused profile used to be misclassified as healthy, which could leave a queue stuck indefinitely. A
+manual `sendCampaignBatch()` now runs redistribution before its send pass, and returns per-sender
+`blocked` reasons when nothing could be sent, so the UI can explain a zero-send instead of showing
+only "Sent 0". The campaign flips to `completed` when no mailbox has work left. `planSchedule()` powers the
 capacity planner by walking day by day and summing each mailbox's cap for that date. When the
 campaign wizard supplies the percentage split, it also passes an `allocation` map: each mailbox can
 only send the people assigned to it, so a low-cap 90% mailbox is not mistakenly bailed out by a

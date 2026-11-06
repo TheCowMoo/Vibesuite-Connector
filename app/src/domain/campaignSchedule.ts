@@ -92,7 +92,35 @@ export function jitterDelay(minDelayMs: number | undefined, rand: () => number =
   return Math.min(base + extra, 15 * 60 * 1000);
 }
 
+export interface SenderProgressInput {
+  enabled: boolean;
+  /** The Sending accounts profile switch. It is separate from the campaign row switch. */
+  profileEnabled?: boolean;
+  cooling: boolean;
+}
+
+/** Can this mailbox make progress at all, ignoring temporary window/cap waits? */
+export function senderCanProgress(input: SenderProgressInput): boolean {
+  return input.enabled && input.profileEnabled !== false && !input.cooling;
+}
+
 /** A mailbox that cannot make progress right now, so its queued work should move. */
-export function isStranded(input: { enabled: boolean; cooling: boolean; queueLength: number }): boolean {
-  return input.queueLength > 0 && (!input.enabled || input.cooling);
+export function isStranded(input: SenderProgressInput & { queueLength: number }): boolean {
+  return input.queueLength > 0 && !senderCanProgress(input);
+}
+
+export interface SendSkip {
+  connectionId: string;
+  sent: number;
+  failed: number;
+  reason?: string;
+}
+
+/** Explain a batch that sent nothing, using the same per-sender reasons the UI shows. */
+export function blockedSendReasons(
+  outcomes: SendSkip[],
+): Array<{ connectionId: string; reason: string }> {
+  return outcomes
+    .filter((outcome) => outcome.sent === 0 && outcome.failed === 0 && outcome.reason)
+    .map((outcome) => ({ connectionId: outcome.connectionId, reason: outcome.reason as string }));
 }

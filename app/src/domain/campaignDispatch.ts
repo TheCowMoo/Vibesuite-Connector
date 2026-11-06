@@ -43,7 +43,7 @@ import {
 import { allocateEmails, type Campaign, type CampaignSender, type RecipientRecord } from './campaign';
 import { assignVariants, campaignVariants, groupEmailsByVariant } from './campaignVariants';
 import { startBlockedByDeadline } from './campaignLifecycle';
-import { dueForNextBatch, senderReadiness } from './campaignSchedule';
+import { blockedSendReasons, dueForNextBatch, senderCanProgress, senderReadiness } from './campaignSchedule';
 import { variantJoinUrl } from './joinLink';
 
 function describeError(err: unknown): string {
@@ -153,11 +153,18 @@ export interface SenderBatchResult {
   reason?: string;
 }
 
+export interface BatchBlock {
+  connectionId?: string;
+  reason: string;
+}
+
 export interface BatchResult {
   sent: number;
   failed: number;
   perSender: SenderBatchResult[];
   completed: boolean;
+  /** Per-sender reasons when the batch could not send anything. */
+  blocked: BatchBlock[];
 }
 
 export interface SendOptions {
@@ -377,13 +384,26 @@ export async function endCampaign(id: string, reason?: string): Promise<Campaign
 }
 
 export async function redistributeStranded(camp: Campaign): Promise<number> {
-  const gauges = await Promise.all(camp.senders.map((s) => getSenderGauge(s.connectionId)));
+  const [profiles, gauges] = await Promise.all([
+    Promise.all(camp.senders.map((s) => getSenderProfile(s.connectionId))),
+    Promise.all(camp.senders.map((s) => getSenderGauge(s.connectionId))),
+  ]);
   const healthy: CampaignSender[] = [];
   const stranded: string[] = [];
 
   camp.senders.forEach((s, i) => {
-    if (s.enabled && !gauges[i].cooling) healthy.push(s);
-    else stranded.push(s.connectionId);
+    // The campaign row switch and the Sending accounts profile switch are separate. A paused
+    // profile must count as stranded, otherwise its queue can sit there forever while the
+    // scheduler considers the mailbox healthy.
+    if (senderCanProgress({
+      enabled: s.enabled,
+      profileEnabled: profiles[i].enabled,
+      cooling: gauges[i].cooling,
+    })) {
+      healthy.push(s);
+    } else {
+      stranded.push(s.connectionId);
+    }
   });
   if (!healthy.length || !stranded.length) return 0;
 
@@ -446,8 +466,8 @@ export async function sendCampaignBatch(campaignId: string): Promise<BatchResult
 
   // A manual batch must respect the stop time too, otherwise it can slip invitations out between the
   // deadline passing and the next scheduler tick ending the campaign.
-  const blocked = startBlockedByDeadline(camp, Date.now());
-  if (blocked) throw new Error(blocked);
+  const deadlineError = startBlockedByDeadline(camp, Date.now());
+  if (deadlineError) throw new Error(deadlineError);
 
   if (camp.eventBatchSize) {
     if (camp.nextBatchAt && camp.nextBatchAt > Date.now()) {
@@ -459,6 +479,10 @@ export async function sendCampaignBatch(campaignId: string): Promise<BatchResult
     }
   }
 
+  // Move work off paused, cooling or campaign-disabled mailboxes before a manual pass. Without
+  // this, "Send next batch now" can return 0 while the only queued work sits on an unusable sender.
+  await redistributeStranded(camp);
+
   const perSender: SenderBatchResult[] = [];
   let sent = 0;
   let failed = 0;
@@ -467,7 +491,20 @@ export async function sendCampaignBatch(campaignId: string): Promise<BatchResult
   const limit = Number.MAX_SAFE_INTEGER;
 
   for (const ps of camp.senders) {
-    if (!ps.enabled) continue;
+    if (!ps.enabled) {
+      const remaining = await queueLength(campaignId, ps.connectionId);
+      if (remaining > 0) {
+        perSender.push({
+          connectionId: ps.connectionId,
+          sent: 0,
+          failed: 0,
+          remaining,
+          skipped: true,
+          reason: 'campaign sender disabled',
+        });
+      }
+      continue;
+    }
     const res = await sendFromSender(camp, ps, limit, { ignoreDelay: true });
     perSender.push(res);
     sent += res.sent;
@@ -477,7 +514,15 @@ export async function sendCampaignBatch(campaignId: string): Promise<BatchResult
   if (sent > 0) await markBatchRound(campaignId);
 
   const completed = await finalizeIfDone(campaignId);
-  return { sent, failed, perSender, completed };
+  let blocked: BatchBlock[] = [];
+  if (!camp.senders.some((sender) => sender.enabled)) {
+    blocked = [{ reason: 'no enabled sending accounts' }];
+  } else if (sent === 0 && failed === 0) {
+    blocked = blockedSendReasons(perSender);
+    if (!blocked.length) blocked = [{ reason: 'no invitations were sent' }];
+  }
+
+  return { sent, failed, perSender, completed, blocked };
 }
 
 /**
