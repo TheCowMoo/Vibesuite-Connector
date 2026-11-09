@@ -2,6 +2,7 @@ import { env } from './env';
 
 export const QUEUE_NAMES = {
   sync: env.SYNC_QUEUE_NAME,
+  listSegment: env.LIST_SEGMENT_QUEUE_NAME,
 } as const;
 
 export const JOB_NAMES = {
@@ -31,7 +32,10 @@ export const REDIS_KEYS = {
   knowledgeIndex: () => 'knowledge:index',
   knowledgeDoc: (id: string) => `knowledge:doc:${id}`,
   listsIndex: () => 'lists:index',
+  listsSummary: () => 'lists:summary',
   list: (id: string) => `list:${id}`,
+  listSegmentStatus: (id: string) => `list:${id}:segment`,
+  listSegmentBatches: (id: string, runId: string) => `list:${id}:segment:batches:${runId}`,
   invitesIndex: () => 'invites:index',
   invite: (id: string) => `invite:${id}`,
   listInvites: (listId: string) => `list:${listId}:invites`,

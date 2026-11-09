@@ -12,6 +12,13 @@
 export const SEGMENT_MAX_ROWS = 2000;
 export const SEGMENT_MAX_CHARS = 250_000;
 
+/** Hard cap for an uploaded list. Larger lists are split by the operator. */
+export const LIST_MAX_ROWS = 50_000;
+/** Matches the Fastify/Nginx request body limit. */
+export const LIST_MAX_CHARS = 25 * 1024 * 1024;
+/** Lists at or below this size use the immediate single-request path. */
+export const SEGMENT_SYNC_MAX_ROWS = SEGMENT_MAX_ROWS;
+
 export interface Segment {
   name: string;
   reason?: string;
@@ -20,6 +27,7 @@ export interface Segment {
 
 export interface SegmentationResult {
   segments: Segment[];
+  warnings?: string[];
 }
 
 export class SegmentationInputError extends Error {
@@ -88,21 +96,43 @@ export function listDataRows(content: string): string[] {
   return rows;
 }
 
-export function assertSegmentable(rows: string[], contentLength: number): void {
+export function assertSegmentable(
+  rows: string[],
+  contentLength: number,
+  maxRows = SEGMENT_MAX_ROWS,
+  maxChars = SEGMENT_MAX_CHARS,
+): void {
   if (!rows.length) {
     throw new SegmentationInputError('This list has no rows to sort.');
   }
   if (!rows.some((row) => /@/.test(row))) {
     throw new SegmentationInputError('This list has no email addresses to sort.');
   }
-  if (rows.length > SEGMENT_MAX_ROWS) {
+  if (rows.length > maxRows) {
     throw new SegmentationInputError(
-      `This list has ${rows.length} rows. AI sorting handles up to ${SEGMENT_MAX_ROWS} rows per list; split it into smaller lists and sort each one.`,
+      `This list has ${rows.length} rows. AI sorting handles up to ${maxRows} rows per list; split it into smaller lists and sort each one.`,
     );
   }
-  if (contentLength > SEGMENT_MAX_CHARS) {
+  if (contentLength > maxChars) {
     throw new SegmentationInputError(
-      `This list is too large for one AI sort (${contentLength} characters; limit ${SEGMENT_MAX_CHARS}). Split it into smaller lists and sort each one.`,
+      `This list is too large for one AI sort (${contentLength} characters; limit ${maxChars}). Split it into smaller lists and sort each one.`,
+    );
+  }
+}
+
+/** Upload validation only checks size; a list with no emails is rejected when sorting starts. */
+export function assertListSize(rows: string[], contentLength: number): void {
+  if (!rows.length) {
+    throw new SegmentationInputError('This list has no rows.');
+  }
+  if (rows.length > LIST_MAX_ROWS) {
+    throw new SegmentationInputError(
+      `This list has ${rows.length} rows. The maximum is ${LIST_MAX_ROWS} rows; split the file into smaller lists.`,
+    );
+  }
+  if (contentLength > LIST_MAX_CHARS) {
+    throw new SegmentationInputError(
+      `This list is too large (${contentLength} characters; limit ${LIST_MAX_CHARS}).`,
     );
   }
 }

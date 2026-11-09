@@ -101,10 +101,9 @@ one manual batch — caps and cooldowns still apply.
    the whole list.
 3. The list remembers everyone it has ever invited (`list:{id}:invited`). That memory is shared by every
    campaign and every one-off invite that uses the list.
-4. A single upload can be up to **25 MB**, but AI sorting handles up to **2,000 rows** and about
-   **250,000 characters** per list. Split a larger file into smaller lists before sorting; upload size
-   and AI sort size are separate limits. If a sort is interrupted, the panel says so instead of showing a
-   raw JSON error — try again, choose a model with a larger output limit, or split the list.
+4. A single upload can be up to **25 MB**. Lists of **2,000 rows or fewer** sort immediately; larger lists sort in the background with a progress bar, up to **50,000 rows**. A 50k list makes roughly 100 AI requests and can take several minutes. You can leave the page: the worker keeps going and the list card shows **Sorted X of Y**. Use **Cancel** to stop it or **Retry** after a failure.
+5. The result preview shows the first few rows of each group. The full result stays available to campaigns and invitations; opening the preview does not download all 50k rows into the browser.
+6. A 50k audience is still sent at each mailbox's daily cap. Sorting the list does not bypass the sending schedule; a large campaign may take several days.
 
 Deleting a list leaves campaigns that reference it unable to start — they lose their audience.
 
@@ -640,8 +639,10 @@ planner in each wizard already accounts for the caps, so trust *When it will fin
 | Campaigns tab says "No Google accounts linked yet" | No active account | Connect one under **Google accounts** |
 | Campaigns tab says "No contact lists ready yet" | No list has been sorted | Upload a list and run segmentation |
 | "list has no segmentation result" when starting | The list was never sorted (or the sort failed) | Sort the list, then start again |
-| "The AI returned an incomplete segmentation" | The model's answer was cut off or was not valid JSON | Try again; if it repeats, choose a model with a larger output limit or split the list into lists of 2,000 rows or fewer |
-| List is too large to sort | Above the AI sort limit (2,000 rows / 250,000 characters) | Split it into smaller lists, sort each, and use the groups you need |
+| "The AI returned an incomplete segmentation" | The model's answer was cut off or was not valid JSON | Try again; for a large list, Retry resumes completed batches. If it repeats, choose a model with a larger output limit or split the list |
+| List is too large to sort | Above the **50,000-row** limit, or the CSV is above **25 MB** | Split the file into smaller lists and sort each one |
+| Large list stays on "Sorting" | The background worker is processing AI batches, or the worker is not running | Wait and watch the row count; if it never moves, check `docker compose logs app-worker --tail 100` and that the worker was rebuilt |
+| Large list failed | An AI provider/rate-limit/format error occurred after retries | Press **Retry**; completed batches are reused. Check Settings → AI if it repeats |
 | Begin sending refuses: audience empty | Everyone was already invited, or the chosen groups are empty | Enable re-inviting, or pick a different list/groups |
 | Campaign is "Sending" but nothing goes out | Outside sending hours, caps already used by another campaign, or the mailbox is paused/cooling | Check **Sending accounts**; wait for the window or add a mailbox |
 | `N didn't go through` chip | Some recipients failed (bad address, provider refusal, expired Google authorization) | Open **See who failed and why**; reconnect the account if the error says `invalid_grant`; failures re-queue automatically |
@@ -662,6 +663,7 @@ Server-side failures (deploy, Redis, worker restarts) are covered in [`DEPLOYMEN
 | Area | File |
 |---|---|
 | Campaign schema, allocation, pace planner | `app/src/domain/campaign.ts` |
+| List parsing, indexed segmentation, 50k taxonomy/batches | `app/src/domain/listSegment.ts`, `listSegmentBatch.ts`, `app/src/workers/listSegment.ts` |
 | Zoom ID normalisation and call recovery | `app/src/video/zoomId.ts`, `app/src/video/zoom.ts` |
 | Attendance segments and call-report payloads | `app/src/domain/attendanceSegments.ts`, `attendanceRoster.ts` |
 | Status machine, start/stop validation | `app/src/domain/campaignLifecycle.ts` |

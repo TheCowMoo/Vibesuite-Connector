@@ -74,25 +74,43 @@ calendar id, location id, and optional webhook URLs. All runtime keys are namesp
 | `session:{id}:dispatch:seen:{fp}` | per-person attendance delivery guard (5-min TTL) |
 | `session:{id}:workflow:{email}` | the GHL workflow already applied to this person in this call (30-day TTL) |
 | `session:{id}:workflow:lock:{email}` | short lock around one workflow application (`SET NX EX 300`) |
+| `lists:index` | set of list ids |
+| `lists:summary` | hash `id -> JSON{name, criteria, rowCount, hasResult}` for the Lists page |
+| `list:{id}` | full uploaded list + segmentation result |
+| `list:{id}:segment` | background sort status/progress (`queued`, `running`, `done`, `failed`, `cancelled`) |
+| `list:{id}:segment:batches:{runId}` | checkpointed AI batch results for resume |
 
 ## List segmentation
 
-`POST /api/lists/:id/segment` (`domain/listSegment.ts`) does not ask the model to repeat the uploaded
-rows. The route sends numbered rows (`0: "Ada,..."`, `1: "Grace,..."`) and asks for an index-only
-response: `{"segments":[{"name":"...","reason":"...","rowIndexes":[0,4,9]}]}`. The AI sees the original
-knowledge-base context and the list criteria, but its answer stays small regardless of row length.
+Small lists (up to **2,000 rows** and 250,000 characters) use the immediate one-call path. The route
+sends numbered rows and asks for an index-only response:
+`{"segments":[{"name":"...","reason":"...","rowIndexes":[0,4,9]}]}`. `mergeIndexedSegments()` rejects
+out-of-range/duplicate indexes and puts skipped rows into **Unsorted**.
 
-`splitListRows()` parses TXT/CSV with quoted newlines and escaped quotes; the first row is treated as a
-header when it has no email and a later row does. `mergeIndexedSegments()` rejects out-of-range and
-duplicate indexes, keeps the first assignment, and puts any skipped rows into an explicit **Unsorted**
-group, so every row appears exactly once. Provider JSON modes are requested where supported
-(OpenAI/DeepSeek `response_format`, Gemini `responseMimeType`); Claude uses the strict prompt and an
-8,192-token ceiling.
+Lists above that threshold use the `list-segment` BullMQ queue and the `app-worker` process. A 50k list
+is never sent to the model in one request:
 
-One AI pass is capped at **2,000 rows / 250,000 characters** (`SEGMENT_MAX_ROWS`,
-`SEGMENT_MAX_CHARS`). Larger uploads are rejected with a 400 that tells the operator to split the list;
-upload size (25 MB) and AI sort size are deliberately separate limits. An invalid or truncated model
-answer becomes a 502 with an actionable message instead of the raw `JSON.parse` error.
+1. **Taxonomy** — a deterministic, evenly spread sample of `LIST_SEGMENT_TAXONOMY_SAMPLE` rows (default
+   500) produces 3–8 named groups. This call is made once and reused by every batch.
+2. **Assignment** — the list is split into `LIST_SEGMENT_BATCH_SIZE` batches (default 500). Each prompt
+   contains the fixed group indexes and only the rows in that batch; the model returns local
+   `rowIndexes`. Batches run with `LIST_SEGMENT_AI_CONCURRENCY` (default 4) and retry transient errors.
+3. **Merge** — `mergeBatchResults()` maps local indexes back to the original rows, de-duplicates global
+   assignments, and places every skipped row in **Unsorted**. Every row is present exactly once.
+
+Completed batches are stored in `list:{id}:segment:batches:{runId}`. A worker retry reuses them, so a
+rate-limit or provider failure does not re-spend the tokens from finished batches. The operator can
+cancel between batches; the job stops after in-flight requests finish and is marked `cancelled`.
+
+Progress is stored in `list:{id}:segment` and exposed on the list card/summary API. The list-management
+API returns segment names, counts, and a preview (25 rows per group) rather than the full result; the
+full result stays in Redis for campaign and invitation extraction. `lists:summary` avoids parsing every
+full list record on the Lists page.
+
+Uploads are capped at **50,000 rows** and the existing **25 MB** request body. Provider JSON modes are
+requested where supported (OpenAI/DeepSeek `response_format`, Gemini `responseMimeType`); Claude uses
+the strict prompt and an 8,192-token batch ceiling. A malformed batch is retried; the immediate path
+still returns an actionable 502 rather than the raw `JSON.parse` error.
 
 ## Senders & campaigns
 

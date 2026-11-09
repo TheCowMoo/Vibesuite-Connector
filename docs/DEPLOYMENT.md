@@ -272,6 +272,11 @@ Most likely causes, in order:
 - `OAUTH_BASE_URL` / `GOOGLE_WEBHOOK_URL` — public HTTPS origin + Google push endpoint.
 - AI provider keys (OpenAI / Claude / Gemini / DeepSeek / custom) — configured in the dashboard
   (**Settings → AI**), stored encrypted in Redis (not in `.env`).
+- Large-list segmentation — lists above 2,000 rows are processed by the `list-segment` queue in
+  `app-worker`. Rebuild/restart **both** `app-api` and `app-worker` after changing this code. Tune with
+  `LIST_SEGMENT_BATCH_SIZE` (default 500), `LIST_SEGMENT_TAXONOMY_SAMPLE` (500), and
+  `LIST_SEGMENT_AI_CONCURRENCY` (4). `LIST_SEGMENT_JOB_CONCURRENCY` defaults to 1 so concurrent 50k
+  sorts do not exhaust the AI rate limit.
 - Full variable list and defaults: [`.env.example`](../.env.example).
 
 ## 8. Auth & team (login system)

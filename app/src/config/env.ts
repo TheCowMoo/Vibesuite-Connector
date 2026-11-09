@@ -56,6 +56,15 @@ const EnvSchema = z.object({
   METRICS_PORT: z.coerce.number().int().min(0).default(9090),
   SYNC_RETRY_ATTEMPTS: z.coerce.number().int().positive().default(5),
   SYNC_BACKOFF_DELAY_MS: z.coerce.number().int().positive().default(2000),
+  // Large-list AI segmentation runs in the worker. Batches keep each request small enough for
+  // provider context/output limits; a 50k list is roughly 100 requests at the default size.
+  LIST_SEGMENT_QUEUE_NAME: z.string().default('list-segment-queue'),
+  LIST_SEGMENT_BATCH_SIZE: z.coerce.number().int().min(50).max(2000).default(500),
+  LIST_SEGMENT_TAXONOMY_SAMPLE: z.coerce.number().int().min(20).max(2000).default(500),
+  LIST_SEGMENT_AI_CONCURRENCY: z.coerce.number().int().min(1).max(10).default(4),
+  LIST_SEGMENT_JOB_CONCURRENCY: z.coerce.number().int().min(1).max(5).default(1),
+  LIST_SEGMENT_STATUS_TTL_HOURS: z.coerce.number().int().positive().default(168),
+  LIST_SEGMENT_CHECKPOINT_TTL_HOURS: z.coerce.number().int().positive().default(24),
   // Catch-up sweep so a dropped push notification cannot strand an RSVP. 0 disables it.
   SYNC_RECONCILE_INTERVAL_MS: z.coerce.number().int().min(0).default(900000),
   INVITE_DELAY_MS: z.coerce.number().int().min(0).default(300),

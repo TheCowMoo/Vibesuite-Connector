@@ -1139,7 +1139,7 @@
     all.innerHTML = '<input type="checkbox" id="inviteSegAll" checked /> <span class="seg-pick__name">All segments</span><span class="seg-pick__count">' + segs.length + ' groups</span>';
     box.appendChild(all);
     segs.forEach(function (s) {
-      var rows = Array.isArray(s.rows) ? s.rows.length : 0;
+      var rows = typeof s.count === 'number' ? s.count : (Array.isArray(s.rows) ? s.rows.length : 0);
       var lab = document.createElement('label');
       lab.className = 'seg-pick__row';
       lab.dataset.seg = s.name;
@@ -3292,9 +3292,22 @@
   }
 
   /* ---- Lists & Knowledge ---- */
-  function loadLists() {
-    $('#listsList').innerHTML = skeletonCards(3);
-    return api('/api/lists').then(function (d) { renderLists(d.lists || []); }).catch(function (e) { toast(e.message, 'error'); });
+  var listPollTimer = null;
+  var listStatuses = {};
+
+  function loadLists(options) {
+    if (!options || !options.quiet) $('#listsList').innerHTML = skeletonCards(3);
+    return api('/api/lists')
+      .then(function (d) { renderLists(d.lists || []); })
+      .catch(function (e) { toast(e.message, 'error'); });
+  }
+
+  function scheduleListPoll() {
+    if (listPollTimer) return;
+    listPollTimer = setTimeout(function () {
+      listPollTimer = null;
+      loadLists({ quiet: true });
+    }, 2000);
   }
 
   function renderLists(lists) {
@@ -3309,29 +3322,102 @@
       '<div class="summary__item"><span class="summary__value">' + lists.length + '</span><span class="summary__label">lists</span></div>' +
       '<div class="summary__item"><span class="summary__value">' + lists.filter(function (l) { return l.hasResult; }).length + '</span><span class="summary__label">sorted</span></div>' +
       '</div>';
+
+    var active = false;
     lists.forEach(function (l) {
+      var seg = l.segmentation || {};
+      var state = seg.status;
+      var running = state === 'queued' || state === 'running';
+      var failed = state === 'failed';
+      var cancelled = state === 'cancelled';
+      var total = seg.totalRows || l.rowCount || 0;
+      var processed = seg.processedRows || 0;
+      var pct = total > 0 ? Math.max(1, Math.min(100, Math.round((processed / total) * 100))) : 0;
+      var rowsLabel = l.rowCount ? l.rowCount.toLocaleString() + ' contacts' : 'contact count unknown';
+      var chip = running ? '<span class="chip chip--warning">Sorting</span>'
+        : failed ? '<span class="chip chip--danger">Sort failed</span>'
+        : cancelled ? '<span class="chip chip--neutral">Sort cancelled</span>'
+        : l.hasResult ? '<span class="chip chip--success">Sorted</span>'
+        : '<span class="chip chip--neutral">Not sorted yet</span>';
+      var progress = running
+        ? '<div class="gauge"><div class="gauge__bar"><span style="width:' + pct + '%"></span></div>' +
+          '<div class="gauge__label">Sorted <strong>' + processed.toLocaleString() + '</strong> of ' + total.toLocaleString() +
+          ' · ' + (seg.processedBatches || 0) + '/' + (seg.totalBatches || '?') + ' batches</div></div>'
+        : '';
+      var error = failed && seg.error ? '<div class="conn__meta"><span class="muted">' + esc(seg.error) + '</span></div>' : '';
       var box = document.createElement('div');
       box.className = 'conn';
       box.innerHTML =
         '<div class="conn__main">' +
-          '<div class="conn__head"><span class="conn__name">' + esc(l.name) + '</span>' + (l.hasResult ? '<span class="chip chip--success">Sorted</span>' : '<span class="chip chip--neutral">Not sorted yet</span>') + '</div>' +
-          '<div class="conn__meta"><span>' + esc(l.criteria || 'No criteria') + '</span></div>' +
+          '<div class="conn__head"><span class="conn__name">' + esc(l.name) + '</span>' + chip + '</div>' +
+          '<div class="conn__meta"><span>' + esc(l.criteria || 'No criteria') + '</span><span>' + esc(rowsLabel) + '</span></div>' +
+          progress + error +
         '</div>' +
         '<div class="conn__actions">' +
-          '<button class="btn btn--primary btn--sm" data-action="segment" data-id="' + esc(l.id) + '">Segment</button>' +
+          '<button class="btn btn--primary btn--sm" data-action="segment" data-id="' + esc(l.id) + '" data-rows="' + (l.rowCount || 0) + '"' + (running ? ' disabled' : '') + '>' +
+            (running ? 'Sorting…' : failed ? 'Retry' : 'Segment') + '</button>' +
+          (running ? '<button class="btn btn--ghost btn--sm" data-action="cancelSegment" data-id="' + esc(l.id) + '">Cancel</button>' : '') +
           (l.hasResult ? '<button class="btn btn--accent btn--sm" data-action="sendInvite" data-id="' + esc(l.id) + '">Send invite</button>' : '') +
           '<button class="btn btn--ghost btn--sm" data-action="viewResult" data-id="' + esc(l.id) + '">View</button>' +
           '<button class="btn btn--danger btn--sm" data-action="deleteList" data-id="' + esc(l.id) + '">Delete</button>' +
         '</div>';
       el.appendChild(box);
+
+      var previous = listStatuses[l.id];
+      if ((previous === 'queued' || previous === 'running') && state === 'done') {
+        toast('List sorted into groups', 'success');
+      } else if ((previous === 'queued' || previous === 'running') && state === 'failed') {
+        toast('List sort failed: ' + (seg.error || 'unknown error'), 'error');
+      }
+      listStatuses[l.id] = state;
+      if (running) active = true;
     });
+
+    if (active) scheduleListPoll();
   }
 
   function segmentList(id) {
     var btn = $('#listsList [data-action="segment"][data-id="' + id + '"]');
-    withBusy(btn, api('/api/lists/' + id + '/segment', { method: 'POST' }))
-      .then(function () { toast('Sorted into groups', 'success'); loadLists(); viewListResult(id); })
-      .catch(function (e) { toast('Could not sort list: ' + e.message, 'error'); });
+    var rows = btn ? parseInt(btn.dataset.rows || '0', 10) || 0 : 0;
+
+    function run() {
+      withBusy(btn, api('/api/lists/' + id + '/segment', { method: 'POST' }))
+        .then(function (r) {
+          if (r && r.result) {
+            toast('Sorted into groups', 'success');
+            loadLists();
+            viewListResult(id);
+            return;
+          }
+          if (r && r.segmentation) {
+            listStatuses[id] = r.segmentation.status;
+            toast('Sorting ' + (r.segmentation.totalRows || rows).toLocaleString() + ' contacts in the background', 'success');
+          }
+          loadLists({ quiet: true });
+        })
+        .catch(function (e) { toast('Could not sort list: ' + e.message, 'error'); });
+    }
+
+    if (rows > 2000) {
+      var batches = Math.max(1, Math.ceil(rows / 500));
+      confirmDialog(
+        'Sort ' + rows.toLocaleString() + ' contacts?',
+        'This will make about ' + batches + ' AI requests and can take several minutes. You can leave this page; progress is saved.',
+        'Start sorting'
+      ).then(function (ok) { if (ok) run(); });
+      return;
+    }
+    run();
+  }
+
+  function cancelListSort(id) {
+    api('/api/lists/' + id + '/segment/cancel', { method: 'POST' })
+      .then(function (r) {
+        if (r && r.segmentation) listStatuses[id] = r.segmentation.status;
+        toast('Sort cancelled', 'success');
+        loadLists({ quiet: true });
+      })
+      .catch(function (e) { toast(e.message, 'error'); });
   }
 
   var currentListResultId = null;
@@ -3352,6 +3438,10 @@
     }
     return segs.map(function (seg, i) {
       var rows = Array.isArray(seg.rows) ? seg.rows : [];
+      var count = typeof seg.count === 'number' ? seg.count : rows.length;
+      var previewNote = count > rows.length
+        ? '<p class="muted">Showing first ' + rows.length + ' of ' + count.toLocaleString() + ' rows.</p>'
+        : '';
       var objectRows = rows.length > 0 && rows[0] !== null && typeof rows[0] === 'object';
       var keys = objectRows ? Object.keys(rows[0]) : (rows.length ? ['Row'] : []);
       var table = '';
@@ -3367,9 +3457,9 @@
           }).join('') + '</tbody></table>';
       }
       return '<div class="seg" data-open="false">' +
-        '<div class="seg__head"><span class="seg__chev">' + icon('chevron') + '</span><span class="seg__name">' + esc(seg.name || ('Segment ' + (i + 1))) + '</span><span class="seg__count">' + rows.length + ' rows</span></div>' +
+        '<div class="seg__head"><span class="seg__chev">' + icon('chevron') + '</span><span class="seg__name">' + esc(seg.name || ('Segment ' + (i + 1))) + '</span><span class="seg__count">' + count.toLocaleString() + ' rows</span></div>' +
         '<div class="seg__reason">' + esc(seg.reason || '') + '</div>' +
-        '<div class="seg__rows">' + table + '</div>' +
+        '<div class="seg__rows">' + table + previewNote + '</div>' +
         '</div>';
     }).join('');
   }
@@ -3443,7 +3533,12 @@
     var body = { name: fd.get('name') || undefined, criteria: fd.get('criteria') || undefined, content: fd.get('content') };
     if (!body.content) { toast('List data is required', 'error'); return; }
     api('/api/lists', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
-      .then(function () { closeModal('newList'); toast('List created', 'success'); loadLists(); })
+      .then(function (r) {
+        closeModal('newList');
+        var rows = r && r.list && r.list.rowCount;
+        toast(typeof rows === 'number' ? rows.toLocaleString() + ' contacts added' : 'List created', 'success');
+        loadLists();
+      })
       .catch(function (e) { toast(e.message, 'error'); });
   });
 
@@ -3461,6 +3556,7 @@
     if (!btn) return;
     var id = btn.dataset.id;
     if (btn.dataset.action === 'segment') segmentList(id);
+    else if (btn.dataset.action === 'cancelSegment') cancelListSort(id);
     else if (btn.dataset.action === 'sendInvite') goToInvite(id);
     else if (btn.dataset.action === 'viewResult') viewListResult(id);
     else if (btn.dataset.action === 'deleteList') {
@@ -5184,7 +5280,7 @@
         var segs = (d.list && d.list.result && d.list.result.segments) || [];
         el.innerHTML = segs.length
           ? segs.map(function (s) {
-              var n = (s.rows || []).length;
+              var n = typeof s.count === 'number' ? s.count : (Array.isArray(s.rows) ? s.rows.length : 0);
               return '<label class="daychk"><input type="checkbox" data-seg="' + esc(s.name) + '" /><span>' + esc(s.name) + ' (' + n + ')</span></label>';
             }).join('')
           : '<span class="muted">This list has no segments yet — run Segment first.</span>';

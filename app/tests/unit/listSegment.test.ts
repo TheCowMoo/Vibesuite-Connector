@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
+  assertListSize,
   assertSegmentable,
   buildSegmentPrompt,
   listDataRows,
+  LIST_MAX_ROWS,
   mergeIndexedSegments,
   SegmentationFormatError,
   SegmentationInputError,
@@ -75,6 +77,19 @@ describe('assertSegmentable', () => {
     expect(() => assertSegmentable(['ada@example.com'], 16)).not.toThrow();
   });
 });
+describe('assertListSize', () => {
+  it('accepts exactly 50,000 rows', () => {
+    const rows = Array.from({ length: LIST_MAX_ROWS }, (_, i) => `person${i}@example.com`);
+    expect(() => assertListSize(rows, 1_000_000)).not.toThrow();
+  });
+
+  it('rejects 50,001 rows', () => {
+    const rows = Array.from({ length: LIST_MAX_ROWS + 1 }, (_, i) => `person${i}@example.com`);
+    expect(() => assertListSize(rows, 1_000_000)).toThrow('50000');
+  });
+});
+
+
 
 describe('buildSegmentPrompt', () => {
   it('numbers rows and instructs the model to return indexes only', () => {

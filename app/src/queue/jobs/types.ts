@@ -7,3 +7,8 @@ export interface SyncJobData {
   receivedAt: number;
 }
 
+export interface ListSegmentJobData {
+  listId: string;
+  runId: string;
+}
+
