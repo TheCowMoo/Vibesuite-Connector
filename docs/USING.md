@@ -101,8 +101,10 @@ one manual batch — caps and cooldowns still apply.
    the whole list.
 3. The list remembers everyone it has ever invited (`list:{id}:invited`). That memory is shared by every
    campaign and every one-off invite that uses the list.
-4. A single upload can be up to **25 MB**. Split a larger CSV into smaller lists, or remove columns you do
-   not need before uploading.
+4. A single upload can be up to **25 MB**, but AI sorting handles up to **2,000 rows** and about
+   **250,000 characters** per list. Split a larger file into smaller lists before sorting; upload size
+   and AI sort size are separate limits. If a sort is interrupted, the panel says so instead of showing a
+   raw JSON error — try again, choose a model with a larger output limit, or split the list.
 
 Deleting a list leaves campaigns that reference it unable to start — they lose their audience.
 
@@ -638,6 +640,8 @@ planner in each wizard already accounts for the caps, so trust *When it will fin
 | Campaigns tab says "No Google accounts linked yet" | No active account | Connect one under **Google accounts** |
 | Campaigns tab says "No contact lists ready yet" | No list has been sorted | Upload a list and run segmentation |
 | "list has no segmentation result" when starting | The list was never sorted (or the sort failed) | Sort the list, then start again |
+| "The AI returned an incomplete segmentation" | The model's answer was cut off or was not valid JSON | Try again; if it repeats, choose a model with a larger output limit or split the list into lists of 2,000 rows or fewer |
+| List is too large to sort | Above the AI sort limit (2,000 rows / 250,000 characters) | Split it into smaller lists, sort each, and use the groups you need |
 | Begin sending refuses: audience empty | Everyone was already invited, or the chosen groups are empty | Enable re-inviting, or pick a different list/groups |
 | Campaign is "Sending" but nothing goes out | Outside sending hours, caps already used by another campaign, or the mailbox is paused/cooling | Check **Sending accounts**; wait for the window or add a mailbox |
 | `N didn't go through` chip | Some recipients failed (bad address, provider refusal, expired Google authorization) | Open **See who failed and why**; reconnect the account if the error says `invalid_grant`; failures re-queue automatically |

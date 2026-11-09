@@ -3331,7 +3331,7 @@
     var btn = $('#listsList [data-action="segment"][data-id="' + id + '"]');
     withBusy(btn, api('/api/lists/' + id + '/segment', { method: 'POST' }))
       .then(function () { toast('Sorted into groups', 'success'); loadLists(); viewListResult(id); })
-      .catch(function (e) { toast(e.message, 'error'); });
+      .catch(function (e) { toast('Could not sort list: ' + e.message, 'error'); });
   }
 
   var currentListResultId = null;
@@ -3352,7 +3352,8 @@
     }
     return segs.map(function (seg, i) {
       var rows = Array.isArray(seg.rows) ? seg.rows : [];
-      var keys = (rows.length && typeof rows[0] === 'object') ? Object.keys(rows[0]) : [];
+      var objectRows = rows.length > 0 && rows[0] !== null && typeof rows[0] === 'object';
+      var keys = objectRows ? Object.keys(rows[0]) : (rows.length ? ['Row'] : []);
       var table = '';
       if (keys.length) {
         table = '<table class="map"><thead><tr>' +
@@ -3360,7 +3361,7 @@
           '</tr></thead><tbody>' +
           rows.map(function (row) {
             return '<tr>' + keys.map(function (k) {
-              var v = row[k];
+              var v = (row !== null && typeof row === 'object') ? row[k] : row;
               return '<td>' + esc(typeof v === 'object' ? JSON.stringify(v) : String(v == null ? '' : v)) + '</td>';
             }).join('') + '</tr>';
           }).join('') + '</tbody></table>';

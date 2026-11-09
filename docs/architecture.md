@@ -75,6 +75,25 @@ calendar id, location id, and optional webhook URLs. All runtime keys are namesp
 | `session:{id}:workflow:{email}` | the GHL workflow already applied to this person in this call (30-day TTL) |
 | `session:{id}:workflow:lock:{email}` | short lock around one workflow application (`SET NX EX 300`) |
 
+## List segmentation
+
+`POST /api/lists/:id/segment` (`domain/listSegment.ts`) does not ask the model to repeat the uploaded
+rows. The route sends numbered rows (`0: "Ada,..."`, `1: "Grace,..."`) and asks for an index-only
+response: `{"segments":[{"name":"...","reason":"...","rowIndexes":[0,4,9]}]}`. The AI sees the original
+knowledge-base context and the list criteria, but its answer stays small regardless of row length.
+
+`splitListRows()` parses TXT/CSV with quoted newlines and escaped quotes; the first row is treated as a
+header when it has no email and a later row does. `mergeIndexedSegments()` rejects out-of-range and
+duplicate indexes, keeps the first assignment, and puts any skipped rows into an explicit **Unsorted**
+group, so every row appears exactly once. Provider JSON modes are requested where supported
+(OpenAI/DeepSeek `response_format`, Gemini `responseMimeType`); Claude uses the strict prompt and an
+8,192-token ceiling.
+
+One AI pass is capped at **2,000 rows / 250,000 characters** (`SEGMENT_MAX_ROWS`,
+`SEGMENT_MAX_CHARS`). Larger uploads are rejected with a 400 that tells the operator to split the list;
+upload size (25 MB) and AI sort size are deliberately separate limits. An invalid or truncated model
+answer becomes a 502 with an actionable message instead of the raw `JSON.parse` error.
+
 ## Senders & campaigns
 
 A **Sender** is a connected Google account plus a load profile: `dailyCap`, `minDelayMs`, an

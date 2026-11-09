@@ -3,7 +3,17 @@ import { createList, listLists, getList, saveListResult, deleteList } from '../.
 import { getAiSettings } from '../../domain/aiSettings';
 import { getAllKnowledge } from '../../domain/knowledgeStore';
 import { retrieveContext } from '../../domain/retrieval';
-import { generateJson } from '../../lib/ai';
+import {
+  assertSegmentable,
+  buildSegmentPrompt,
+  listDataRows,
+  mergeIndexedSegments,
+  SegmentationFormatError,
+  SegmentationInputError,
+  SEGMENT_SYSTEM_PROMPT,
+} from '../../domain/listSegment';
+import { AiJsonError, generateJson } from '../../lib/ai';
+import { logger } from '../../lib/logger';
 
 export async function listRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/lists', async () => {
@@ -37,6 +47,17 @@ export async function listRoutes(app: FastifyInstance): Promise<void> {
       return;
     }
 
+    const rows = listDataRows(rec.content);
+    try {
+      assertSegmentable(rows, rec.content.length);
+    } catch (err) {
+      if (err instanceof SegmentationInputError) {
+        reply.code(400).send({ error: err.message });
+        return;
+      }
+      throw err;
+    }
+
     const settings = await getAiSettings();
     if (!settings || !settings.apiKey) {
       reply.code(400).send({ error: 'AI not configured. Set it in Settings → AI.' });
@@ -45,17 +66,28 @@ export async function listRoutes(app: FastifyInstance): Promise<void> {
 
     const kb = await getAllKnowledge();
     const context = retrieveContext(kb, `${rec.criteria} ${rec.name}`);
-
-    const system =
-      'You are a lead list segmentation engine. Segment the provided list into distinct, well-named groups. Return ONLY JSON in this shape: {"segments":[{"name":"...","reason":"...","rows":[...]}]}. Every row must appear in exactly one segment.';
-    const prompt = `Knowledge base context:\n${context || '(none)'}\n\nSegmentation criteria: ${rec.criteria || '(no criteria — use your best judgment)'}\n\nList data:\n${rec.content}`;
+    const prompt = buildSegmentPrompt({ rows, criteria: rec.criteria, context });
 
     try {
-      const result = await generateJson(settings, system, prompt);
+      const raw = await generateJson<unknown>(settings, SEGMENT_SYSTEM_PROMPT, prompt, {
+        maxTokens: 8192,
+        jsonMode: true,
+      });
+      const result = mergeIndexedSegments(raw, rows);
       await saveListResult(id, result);
       return { ok: true, result };
     } catch (err) {
-      reply.code(502).send({ error: (err as Error).message });
+      if (err instanceof AiJsonError || err instanceof SegmentationFormatError) {
+        logger.warn({ err, listId: id }, 'list segmentation returned an unusable AI response');
+        reply.code(502).send({
+          error:
+            'The AI returned an incomplete segmentation. Try again, choose a model with a larger output limit, or split the list into smaller lists.',
+        });
+        return;
+      }
+      logger.error({ err, listId: id }, 'list segmentation failed');
+      const detail = ((err as Error).message || 'unknown error').replace(/([?&](?:key|api_key)=)[^&\s]+/gi, '$1***');
+      reply.code(502).send({ error: `The AI could not sort this list: ${detail}` });
     }
   });
 
