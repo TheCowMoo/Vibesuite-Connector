@@ -11,6 +11,7 @@ import { labelPreviousInvite } from '../../domain/reinvite';
 import { planInviteSplit } from '../../domain/invitePlan';
 import { accountAllowances } from '../../domain/inviteCapacity';
 import { sendInviteRound } from '../../domain/inviteSend';
+import { sanitizeDescription } from '../../lib/richText';
 import {
   createScheduledInvite,
   getScheduledInvite,
@@ -209,6 +210,7 @@ export async function inviteRoutes(app: FastifyInstance): Promise<void> {
       reply.code(400).send({ error: 'at least one Google account, a listId, event.summary, event.start and event.end are required' });
       return;
     }
+    ev.description = sanitizeDescription(ev.description);
     if (Date.parse(ev.end) <= Date.parse(ev.start)) {
       reply.code(400).send({ error: 'event end must be after start' });
       return;

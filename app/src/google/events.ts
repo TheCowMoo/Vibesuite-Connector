@@ -1,6 +1,7 @@
 import { createCalendarClient } from './auth';
 import type { StoredConnection } from '../domain/connection';
 import { resolveEventTime } from '../domain/invite';
+import { sanitizeDescription } from '../lib/richText';
 
 export interface InviteEventInput {
   summary: string;
@@ -32,7 +33,7 @@ export async function createInviteEvent(conn: StoredConnection, input: InviteEve
     sendUpdates: 'all',
     requestBody: {
       summary: input.summary,
-      description: input.description,
+      description: sanitizeDescription(input.description),
       location: input.location,
       start,
       end,

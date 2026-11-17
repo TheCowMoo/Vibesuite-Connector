@@ -718,6 +718,23 @@ a round is up to three events (one per variant per account) and `3 × eventBatch
 **Shared semantics:** delay from the end of the previous round; remainder carried forward; a failed event is
 retried for those recipients in the next round; no round begins at or after the event start.
 
+### Rich event descriptions
+
+The Calendar API's Event `description` field allows HTML. The panel's description editors are
+contenteditable fields with a small toolbar: bold, italic, underline, bulleted/numbered lists, links,
+clear formatting and undo/redo. The hidden textarea remains the submitted value, so campaigns,
+invitations, variants and the AI-draft path all keep using one string field.
+
+`lib/richText.ts` is the server-side boundary. It allows only
+`b, strong, i, em, u, s, br, p, div, ul, ol, li, a`; strips unknown/drop tags (script, style, iframe,
+object, embed, template, svg, math, img), attributes, event handlers and unsafe link schemes; and accepts
+only `http(s)`, `mailto:` and `tel:` links. Legacy plain text is escaped and wrapped in `<div>` with
+`<br>` line breaks. The final `createInviteEvent()` sanitizes again, so old stored campaigns cannot send
+unsafe HTML. The UI also uses an allowlist sanitizer when loading stored values.
+
+Formatting is rendered by Google Calendar/Gmail; Apple Calendar, Outlook and some other clients can show
+raw tags. Event titles and locations remain plain text.
+
 ### Copy variants (unlimited) and test copies
 
 A campaign can carry any number of copy variants (`copyVariants: [{ id: 'A', summary, description? }]`).

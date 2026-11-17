@@ -38,6 +38,27 @@ import { defaultCampaignCrmNote, normalizeFollowUp, normalizeNote } from '../../
 import { deleteCampaignCrmNote, saveCampaignCrmNote } from '../../domain/campaignNotesStore';
 import { toCsv } from '../../domain/statsExport';
 import { getAuthUser, requireRole } from '../middleware/requireAuth';
+import { sanitizeDescription } from '../../lib/richText';
+
+function sanitizeCampaignCopy<
+  T extends { event: { description?: string }; copyVariants?: Array<{ description?: string }> },
+>(camp: T): T {
+  return {
+    ...camp,
+    event: {
+      ...camp.event,
+      description: sanitizeDescription(camp.event.description),
+    },
+    ...(camp.copyVariants
+      ? {
+          copyVariants: camp.copyVariants.map((variant) => ({
+            ...variant,
+            description: sanitizeDescription(variant.description),
+          })),
+        }
+      : {}),
+  } as T;
+}
 
 async function withStats(camp: Campaign): Promise<Record<string, unknown>> {
   const [counts, queues, counters] = await Promise.all([
@@ -389,7 +410,7 @@ export async function campaignRoutes(app: FastifyInstance): Promise<void> {
 
     // Variant A is the base copy; keep the legacy event fields in step with it so cards, attendance
     // labels and older clients all read the same subject.
-    const data = mirrorPrimaryVariant(parsed.data);
+    const data = sanitizeCampaignCopy(mirrorPrimaryVariant(parsed.data));
     // The stored mode is a summary of the split; the percentages are the source of truth.
     data.distribution = { mode: distributionMode(data.senders) };
     const stopProblem = sendByError(data, Date.now());
@@ -441,7 +462,7 @@ export async function campaignRoutes(app: FastifyInstance): Promise<void> {
       }
     }
 
-    const next = mirrorPrimaryVariant(parsed.data);
+    const next = sanitizeCampaignCopy(mirrorPrimaryVariant(parsed.data));
     next.distribution = { mode: distributionMode(next.senders) };
     await saveCampaign(next);
     if ('zoomUserId' in body) {

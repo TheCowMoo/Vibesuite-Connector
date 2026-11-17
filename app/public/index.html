@@ -156,7 +156,7 @@
           <label class="field"><span class="field__label">Event title</span><input id="inviteSummary" placeholder="e.g. Product webinar" /></label>
           <div class="field">
             <div class="field__label-row"><span class="field__label">Description</span><button class="btn btn--ghost btn--sm" id="inviteDraftAi" type="button">Draft with AI</button></div>
-            <textarea id="inviteDescription" rows="4" placeholder="What's this event about?"></textarea>
+            <textarea class="rich-text" id="inviteDescription" rows="4" placeholder="What's this event about?"></textarea>
           </div>
           <div class="invite-row">
             <label class="field"><span class="field__label">Start</span><input type="datetime-local" id="inviteStart" /><span class="field__hint" data-hint-for="inviteStart"></span></label>
@@ -917,7 +917,7 @@
       <label class="field"><span class="field__label">Event ends</span><input type="datetime-local" id="campEnd" /><span class="field__hint" data-hint-for="campEnd"></span></label>
     </div>
     <p class="field__hint" id="campTzHint"></p>
-    <label class="field"><span class="field__label">Description</span><textarea id="campDesc" rows="2" placeholder="Agenda, speaker, what to expect..."></textarea></label>
+    <label class="field"><span class="field__label">Description</span><textarea class="rich-text" id="campDesc" rows="2" placeholder="Agenda, speaker, what to expect..."></textarea></label>
     <div class="field">
       <label class="daychk"><input type="checkbox" id="campVariantsOn" /><span>Test different copy (unlimited variants)</span></label>
       <span class="field__hint">A is the subject and description above. Add as many alternates as you like (B, C, D, E…). Each active variant creates its own calendar event per sending account, and can carry its own Zoom registration link.</span>
@@ -1101,7 +1101,7 @@
       <button class="icon-btn" data-close="editCopyModal" aria-label="Close">&times;</button>
     </div>
     <label class="field"><span class="field__label">Subject A (base)</span><input id="editCopySummary" /></label>
-    <label class="field"><span class="field__label">Description A</span><textarea id="editCopyDesc" rows="3"></textarea></label>
+    <label class="field"><span class="field__label">Description A</span><textarea class="rich-text" id="editCopyDesc" rows="3"></textarea></label>
     <label class="field"><span class="field__label">Variant A Zoom registration link (optional)</span><input id="editCopyLinkA" placeholder="Leave blank to use the linked call" /></label>
     <div class="field">
       <span class="field__label">Alternate variants</span>

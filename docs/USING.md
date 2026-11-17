@@ -244,7 +244,10 @@ mailbox, not by feature.
    **Wait between rounds** (hours). The first round goes out immediately; the worker sends the later rounds.
 6. **Preview**, then **Send invitations**.
 
+The event **title** and **location** are plain text. The **description** has a formatting toolbar for bold, italic, underline, bulleted/numbered lists, links and clearing formatting. Formatting is stored as HTML in the Google Calendar description, which Google Calendar/Gmail render; Apple Calendar, Outlook and some other clients may show raw tags. Links accept `http(s)`, `mailto:` and `tel:`.
+
 The result tells you what went out and what could not be placed today. Nothing is recalled once sent.
+
 Each account sends one event with its share, so a guest receives a single, unnumbered invitation. The
 only numbered split is Google's guest-list ceiling.
 
@@ -286,7 +289,7 @@ open the tabs and read the numbers. (With auth disabled everyone is effectively 
 | Test different copy (unlimited variants) | Optional: A is the subject/description above; add B, C, D, E… to split the audience evenly |
 | Who this will reach | Live count, already minus anyone invited before |
 | When it will finish | Live estimate from the selected mailboxes and their caps |
-| Email subject / Description | What the invitation says |
+| Email subject / Description | What the invitation says. The description supports the same formatting toolbar (bold, italic, underline, lists, links) |
 | Event starts / Event ends | The actual event, not the send window |
 | Which accounts send, and how much | One or more mailboxes. Each checked account gets a percentage of the audience; the checked rows add up to 100%. |
 | Max (optional) | Caps that account for the whole campaign. People above the cap flow to the other checked accounts. |
@@ -664,6 +667,7 @@ Server-side failures (deploy, Redis, worker restarts) are covered in [`DEPLOYMEN
 |---|---|
 | Campaign schema, allocation, pace planner | `app/src/domain/campaign.ts` |
 | List parsing, indexed segmentation, 50k taxonomy/batches | `app/src/domain/listSegment.ts`, `listSegmentBatch.ts`, `app/src/workers/listSegment.ts` |
+| Rich-text calendar descriptions and sanitization | `app/src/lib/richText.ts`, `app/public/app.js` (`rich*` helpers) |
 | Zoom ID normalisation and call recovery | `app/src/video/zoomId.ts`, `app/src/video/zoom.ts` |
 | Attendance segments and call-report payloads | `app/src/domain/attendanceSegments.ts`, `attendanceRoster.ts` |
 | Status machine, start/stop validation | `app/src/domain/campaignLifecycle.ts` |

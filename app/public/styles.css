@@ -418,6 +418,40 @@ input:disabled, select:disabled, textarea:disabled {
 }
 input[readonly], textarea[readonly] { background-color: var(--surface); }
 input[type="checkbox"], input[type="radio"] { accent-color: var(--royal); }
+.rich-wrap { display: flex; flex-direction: column; min-width: 0; }
+.rich-toolbar {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 0.2rem;
+  padding: 0.28rem 0.35rem; border: 1px solid var(--line); border-bottom: 0;
+  border-radius: var(--radius) var(--radius) 0 0; background: var(--surface);
+}
+.rich-btn {
+  min-width: 30px; min-height: 26px; padding: 0.2rem 0.4rem;
+  border: 1px solid transparent; border-radius: var(--radius-sm);
+  background: transparent; color: var(--ink); font: inherit; font-size: 0.8rem;
+  line-height: 1; cursor: pointer;
+}
+.rich-btn:hover { background: var(--white); border-color: var(--line-strong); }
+.rich-btn:focus-visible { outline: 2px solid var(--royal); outline-offset: 1px; }
+.rich-separator { width: 1px; height: 20px; margin: 0 0.15rem; background: var(--line); }
+.rich-editor {
+  width: 100%; max-height: 260px; overflow: auto;
+  padding: 0.55rem 0.75rem; border: 1px solid var(--line);
+  border-radius: 0 0 var(--radius) var(--radius); background: #fff; color: var(--ink);
+  font: inherit; line-height: 1.45; outline: none;
+}
+.rich-editor:focus { border-color: var(--royal); box-shadow: 0 0 0 3px var(--yellow-300); }
+.rich-editor.is-empty::before {
+  content: attr(data-placeholder); color: var(--ink-muted); opacity: 0.8; pointer-events: none;
+}
+.rich-editor p { margin: 0.35em 0; }
+.rich-editor ul, .rich-editor ol { margin: 0.35em 0; padding-left: 1.5em; }
+.rich-editor a { color: var(--royal); text-decoration: underline; }
+.rich-preview { font-size: 0.9rem; line-height: 1.45; }
+.rich-preview p { margin: 0.3em 0; }
+.rich-preview ul, .rich-preview ol { margin: 0.3em 0; padding-left: 1.4em; }
+.rich-preview a { color: var(--royal); text-decoration: underline; }
+.camp-variant .rich-wrap { margin-top: 0.35rem; }
+
 .radio input, .daychk input { width: 16px; height: 16px; flex: none; margin: 0; }
 fieldset.field { border: none; padding: 0; margin-bottom: 0.9rem; }
 fieldset.field legend { margin-bottom: 0.4rem; }

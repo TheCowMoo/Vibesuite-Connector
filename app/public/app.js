@@ -11,9 +11,259 @@
       return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[m];
     });
   }
+  /* ---- Rich text editors ---- */
+  var RICH_TAG_MAP = {
+    B: 'b', STRONG: 'strong', I: 'i', EM: 'em', U: 'u',
+    S: 's', STRIKE: 's', DEL: 's', BR: 'br', P: 'p', DIV: 'div',
+    UL: 'ul', OL: 'ol', LI: 'li', A: 'a'
+  };
+  var RICH_DROP_TAGS = { SCRIPT: 1, STYLE: 1, IFRAME: 1, OBJECT: 1, EMBED: 1, TEMPLATE: 1, SVG: 1, MATH: 1 };
+  var RICH_KNOWN_TAG_RE = /<\/?(?:b|strong|i|em|u|s|strike|del|br|p|div|ul|ol|li|a|span|script|style|iframe|object|embed|template|svg|math|img|h[1-6]|blockquote|hr)\b[^>]*>/i;
+  var RICH_ENTITY_RE = /&(?:amp|lt|gt|quot|nbsp|#\d+|#x[0-9a-f]+);/i;
+
+  function richHref(raw) {
+    var href = String(raw || '').trim();
+    if (/^(https?:\/\/|mailto:|tel:)/i.test(href)) return href;
+    if (/^[a-z][a-z0-9+.-]*:/i.test(href)) return '';
+    if (/^\/\/[\w.-]+\.[a-z]{2,}(?:[/:?#]|$)/i.test(href)) return 'https:' + href;
+    if (/^[\w.-]+\.[a-z]{2,}(?:[/:?#]|$)/i.test(href)) return 'https://' + href;
+    return '';
+  }
+
+  function richSanitizeNode(node) {
+    var out = document.createDocumentFragment();
+    Array.prototype.slice.call(node.childNodes).forEach(function (child) {
+      if (child.nodeType === 3) {
+        out.appendChild(document.createTextNode(child.nodeValue));
+        return;
+      }
+      if (child.nodeType !== 1) return;
+      var tag = RICH_TAG_MAP[child.tagName];
+      if (!tag) {
+        if (!RICH_DROP_TAGS[child.tagName]) out.appendChild(richSanitizeNode(child));
+        return;
+      }
+      if (tag === 'br') {
+        out.appendChild(document.createElement('br'));
+        return;
+      }
+      var clean = document.createElement(tag);
+      if (tag === 'a') {
+        var href = richHref(child.getAttribute('href'));
+        if (!href) {
+          out.appendChild(richSanitizeNode(child));
+          return;
+        }
+        clean.setAttribute('href', href);
+        clean.setAttribute('rel', 'noopener noreferrer');
+      }
+      clean.appendChild(richSanitizeNode(child));
+      out.appendChild(clean);
+    });
+    return out;
+  }
+
+  function richSanitizeHtml(value) {
+    var template = document.createElement('template');
+    template.innerHTML = String(value || '');
+    var wrap = document.createElement('div');
+    wrap.appendChild(richSanitizeNode(template.content));
+    return wrap.innerHTML;
+  }
+
+  function richPlainToHtml(value) {
+    return String(value == null ? '' : value)
+      .replace(/\r\n?/g, '\n')
+      .split('\n')
+      .map(function (line) { return esc(line); })
+      .join('<br>');
+  }
+
+  function richValueToHtml(value) {
+    var text = String(value == null ? '' : value);
+    if (!text) return '';
+    if (!RICH_KNOWN_TAG_RE.test(text) && !RICH_ENTITY_RE.test(text)) {
+      return richPlainToHtml(text);
+    }
+    return richSanitizeHtml(text);
+  }
+
+  function richSetEmpty(editor) {
+    editor.classList.toggle('is-empty', !editor.textContent.trim());
+  }
+
+
+  function richButton(command, label, title) {
+    var button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'rich-btn';
+    button.dataset.richCmd = command;
+    button.title = title;
+    button.setAttribute('aria-label', title);
+    button.innerHTML = label;
+    return button;
+  }
+
+  function richToolbar() {
+    var bar = document.createElement('div');
+    bar.className = 'rich-toolbar';
+    bar.setAttribute('role', 'toolbar');
+    bar.setAttribute('aria-label', 'Text formatting');
+    bar.appendChild(richButton('bold', '<strong>B</strong>', 'Bold'));
+    bar.appendChild(richButton('italic', '<em>I</em>', 'Italic'));
+    bar.appendChild(richButton('underline', '<u>U</u>', 'Underline'));
+    bar.appendChild(richSeparator());
+    bar.appendChild(richButton('insertUnorderedList', '• List', 'Bulleted list'));
+    bar.appendChild(richButton('insertOrderedList', '1. List', 'Numbered list'));
+    bar.appendChild(richSeparator());
+    bar.appendChild(richButton('link', 'Link', 'Insert or edit link'));
+    bar.appendChild(richButton('clear', 'Clear', 'Clear formatting'));
+    bar.appendChild(richSeparator());
+    bar.appendChild(richButton('undo', '↶', 'Undo'));
+    bar.appendChild(richButton('redo', '↷', 'Redo'));
+    return bar;
+  }
+
+  function richSeparator() {
+    var separator = document.createElement('span');
+    separator.className = 'rich-separator';
+    separator.setAttribute('aria-hidden', 'true');
+    return separator;
+  }
+
+  function richSync(textarea, editor, notify) {
+    var html = editor.innerHTML;
+    if (!editor.textContent.trim()) html = '';
+    textarea.value = html;
+    richSetEmpty(editor);
+    if (notify) textarea.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+
+  function richSelection(editor) {
+    var selection = window.getSelection();
+    if (!selection || !selection.rangeCount) return null;
+    var range = selection.getRangeAt(0);
+    if (!editor.contains(range.commonAncestorContainer)) return null;
+    return range.cloneRange();
+  }
+
+  function richRestoreSelection(editor, range) {
+    editor.focus();
+    if (!range) return;
+    var selection = window.getSelection();
+    if (!selection) return;
+    selection.removeAllRanges();
+    selection.addRange(range);
+  }
+
+  function richInsertLink(editor) {
+    var range = richSelection(editor);
+    var raw = window.prompt('Link URL (https://, mailto:, or tel:)', 'https://');
+    if (raw == null) return;
+    var href = richHref(raw);
+    if (!href) {
+      toast('Use an http(s), mailto:, or tel: link', 'error');
+      return;
+    }
+    richRestoreSelection(editor, range);
+    if (!range || range.collapsed) {
+      document.execCommand('insertHTML', false, '<a href="' + esc(href) + '">' + esc(href) + '</a>');
+    } else {
+      document.execCommand('createLink', false, href);
+    }
+    richSync(editor._richTextarea, editor, true);
+  }
+
+  function richApplyCommand(editor, command) {
+    editor.focus();
+    if (command === 'link') {
+      richInsertLink(editor);
+      return;
+    }
+    if (command === 'clear') {
+      document.execCommand('removeFormat', false, null);
+      document.execCommand('unlink', false, null);
+    } else {
+      document.execCommand(command, false, null);
+    }
+    richSync(editor._richTextarea, editor, true);
+  }
+
+  function enhanceRichTextarea(textarea) {
+    if (!textarea || textarea.dataset.richReady === '1') return;
+    var parent = textarea.parentNode;
+    if (!parent) return;
+    textarea.dataset.richReady = '1';
+
+    var wrap = document.createElement('div');
+    wrap.className = 'rich-wrap';
+    var toolbar = richToolbar();
+    var editor = document.createElement('div');
+    editor.className = 'rich-editor';
+    editor.contentEditable = 'true';
+    editor.setAttribute('role', 'textbox');
+    editor.setAttribute('aria-multiline', 'true');
+    editor.setAttribute('aria-label', textarea.placeholder || 'Description');
+    editor.dataset.placeholder = textarea.placeholder || '';
+    var rows = Number(textarea.rows) || 3;
+    editor.style.minHeight = Math.max(70, rows * 22) + 'px';
+    editor._richTextarea = textarea;
+    textarea._richEditor = editor;
+
+    parent.insertBefore(wrap, textarea);
+    wrap.appendChild(toolbar);
+    wrap.appendChild(editor);
+    wrap.appendChild(textarea);
+    textarea.hidden = true;
+
+    editor.innerHTML = richValueToHtml(textarea.value);
+    textarea.value = editor.innerHTML;
+    richSetEmpty(editor);
+
+    editor.addEventListener('input', function () { richSync(textarea, editor, true); });
+    editor.addEventListener('blur', function () { richSync(textarea, editor, true); });
+    editor.addEventListener('paste', function (event) {
+      event.preventDefault();
+      var clipboard = event.clipboardData || window.clipboardData;
+      var text = clipboard ? clipboard.getData('text/plain') : '';
+      if (!text) return;
+      if (!document.execCommand('insertText', false, text)) {
+        document.execCommand('insertHTML', false, richPlainToHtml(text));
+      }
+      richSync(textarea, editor, true);
+    });
+
+    toolbar.addEventListener('mousedown', function (event) {
+      if (event.target.closest('[data-rich-cmd]')) event.preventDefault();
+    });
+    toolbar.addEventListener('click', function (event) {
+      var button = event.target.closest('[data-rich-cmd]');
+      if (!button) return;
+      richApplyCommand(editor, button.dataset.richCmd);
+    });
+  }
+
+  function enhanceRichTextareas(root) {
+    $$('textarea.rich-text:not([data-rich-ready])', root || document).forEach(enhanceRichTextarea);
+  }
+
+  function setRichTextareaValue(target, value, plain) {
+    var textarea = typeof target === 'string' ? document.getElementById(target) : target;
+    if (!textarea) return;
+    var text = String(value == null ? '' : value);
+    var html = plain ? richPlainToHtml(text) : richValueToHtml(text);
+    if (textarea._richEditor) {
+      textarea._richEditor.innerHTML = html;
+      richSync(textarea, textarea._richEditor, true);
+    } else {
+      textarea.value = text;
+    }
+  }
+
 
   function api(path, opts) {
     return fetch(path, opts).then(function (res) {
+
       if (res.status === 413) {
         throw new Error('That upload is too large. The server accepts up to 25 MB; split the file or remove unused columns.');
       }
@@ -1569,7 +1819,7 @@
     withBusy(this, api('/api/invites/copy', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ listId: listId }) }))
       .then(function (d) {
         if (d.summary) document.getElementById('inviteSummary').value = d.summary;
-        if (d.description) document.getElementById('inviteDescription').value = d.description;
+        if (d.description) setRichTextareaValue('inviteDescription', d.description, true);
         toast('Draft ready', 'success');
       })
       .catch(function (e) { toast(e.message, 'error'); });
@@ -5505,11 +5755,18 @@
         '<div class="field__label-row"><span class="field__label">Variant ' + esc(v.id) + ' subject</span>' +
         '<button type="button" class="btn btn--ghost btn--sm" data-remove-variant="' + esc(v.id) + '">Remove</button></div>' +
         '<input data-variant-summary="' + esc(v.id) + '" value="' + esc(v.summary || '') + '" placeholder="Subject for variant ' + esc(v.id) + '" />' +
-        '<textarea data-variant-desc="' + esc(v.id) + '" rows="2" placeholder="Description for variant ' + esc(v.id) + '">' + esc(v.description || '') + '</textarea>' +
+        '<textarea class="rich-text" data-variant-desc="' + esc(v.id) + '" rows="2" placeholder="Description for variant ' + esc(v.id) + '"></textarea>' +
         '<label class="field"><span class="field__label">Variant ' + esc(v.id) + ' Zoom registration link (optional)</span>' +
         '<input data-variant-link="' + esc(v.id) + '" value="' + esc(v.registrationUrl || '') + '" placeholder="Leave blank to use the linked call" /></label>' +
         '</div>';
     }).join('') : '';
+    if (on) {
+      campCopyVariants.forEach(function (v) {
+        var textarea = box.querySelector('[data-variant-desc="' + v.id + '"]');
+        if (textarea) textarea.value = v.description || '';
+      });
+    }
+    enhanceRichTextareas(box);
     var next = nextCampVariantId();
     add.hidden = !on;
     add.textContent = next ? 'Add variant ' + next : 'Add another variant';
@@ -5569,7 +5826,7 @@
 
     document.getElementById('campName').value = '';
     document.getElementById('campSummary').value = '';
-    document.getElementById('campDesc').value = '';
+    setRichTextareaValue('campDesc', '', true);
     document.getElementById('campTz').value = (Intl.DateTimeFormat().resolvedOptions().timeZone) || 'UTC';
 
     var start = new Date(Date.now() + 86400000);
@@ -5918,7 +6175,7 @@
         (testable ? '<button class="btn btn--ghost btn--sm" data-test-variant="' + esc(v.id) + '">Send test copy</button>' : '') +
         '</div>' +
         '<div><strong>' + esc(v.summary) + '</strong></div>' +
-        (v.description ? '<div class="muted">' + esc(v.description) + '</div>' : '') +
+        (v.description ? '<div class="muted rich-preview">' + richValueToHtml(v.description) + '</div>' : '') +
         (v.registrationUrl
           ? '<div class="muted" title="' + esc(v.registrationUrl) + '">Registration link: ' + esc(linkLabel(v.registrationUrl)) + '</div>'
           : '') +
@@ -6827,11 +7084,16 @@
         '<div class="field__label-row"><span class="field__label">Variant ' + esc(v.id) + ' subject</span>' +
         '<button type="button" class="btn btn--ghost btn--sm" data-remove-edit-variant="' + esc(v.id) + '">Remove</button></div>' +
         '<input data-edit-summary="' + esc(v.id) + '" value="' + esc(v.summary || '') + '" />' +
-        '<textarea data-edit-desc="' + esc(v.id) + '" rows="2">' + esc(v.description || '') + '</textarea>' +
+        '<textarea class="rich-text" data-edit-desc="' + esc(v.id) + '" rows="2"></textarea>' +
         '<label class="field"><span class="field__label">Variant ' + esc(v.id) + ' Zoom registration link (optional)</span>' +
         '<input data-edit-link="' + esc(v.id) + '" value="' + esc(v.registrationUrl || '') + '" placeholder="Leave blank to use the linked call" /></label>' +
         '</div>';
     }).join('');
+    editCopyVariants.forEach(function (v) {
+      var textarea = list.querySelector('[data-edit-desc="' + v.id + '"]');
+      if (textarea) textarea.value = v.description || '';
+    });
+    enhanceRichTextareas(list);
     var next = nextEditVariantId();
     var add = document.getElementById('editCopyAdd');
     add.hidden = false;
@@ -6865,7 +7127,7 @@
     var variants = campaignVariantsFor(c);
     var primary = variants.filter(function (v) { return v.id === 'A'; })[0] || variants[0];
     document.getElementById('editCopySummary').value = primary.summary || '';
-    document.getElementById('editCopyDesc').value = primary.description || '';
+    setRichTextareaValue('editCopyDesc', primary.description || '', false);
     document.getElementById('editCopyLinkA').value = primary.registrationUrl || '';
     editCopyVariants = variants.filter(function (v) { return v.id !== primary.id; }).map(function (v) {
       return {
@@ -8002,6 +8264,7 @@
   }
 
   /* ---- Init ---- */
+  enhanceRichTextareas(document);
   refreshTourCta();
   $('#newConnectionBtn').addEventListener('click', openWizard);
   $('#emptyCta').addEventListener('click', openWizard);
