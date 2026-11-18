@@ -68,6 +68,9 @@ calendar id, location id, and optional webhook URLs. All runtime keys are namesp
 | `list:{id}:verify:results` | hash `email -> JSON{result, risk, reasons, checkedAt}` for the list |
 | `campaign:{id}:verification` | frozen verification snapshot for the campaign audience |
 | `campaign:{id}:verification:audience` | JSON list of the frozen audience, including excluded addresses |
+| `campaign:{id}:copy-suggestion-lock` | one AI Copy Coach request per campaign at a time (60-second TTL) |
+| `copy:patterns` | cached observational copy-feature patterns across started campaigns (60-minute TTL) |
+| `copy:web-research:{hash}` | cached cited web-research sources for a Copy Coach objective (7-day TTL) |
 | `domain:health:{domain}` | cached DNS snapshot for one sending domain (6-hour TTL by default) |
 | `domain:health:index` | set of domains that have a cached snapshot |
 | `domain:health:lock:{domain}` | refresh lock, so two operators cannot fire the same DNS burst (`SET NX EX 90`) |
@@ -839,6 +842,61 @@ recipient rows, queues, caps, stats or invited-set entries. The event ID is stor
 `campaign:test-event:{connectionId}:{eventId}` for 30 days, and `dispatchChange()` skips those IDs so a test
 RSVP cannot create/update a GHL contact or fire attendance/webhook rules. The test event remains on the sender's
 calendar, marked `[TEST]`.
+
+### Copy Coach (AI suggestions, human-applied)
+
+`POST /api/campaigns/:id/copy-suggestions` (owner/admin) is a read-only copy coach. It returns
+suggestions; it never saves. The operator chooses a suggestion, edits it in the existing **Edit copy**
+modal and presses **Save copy**, which uses the normal `PATCH /api/campaigns/:id` path and its existing
+validation/freeze rules. Copy is available only before `startedAt`; active/paused/completed campaigns are
+refused.
+
+`buildCopyEvidence()` joins `campaignVariants(camp)` with `CampaignStats.variants` and gives the model:
+
+- The current subject/description per variant (markup/URLs stripped)
+- Sent, failed, accepted, maybe, declined and no-reply counts
+- Acceptance rate (`accepted ÷ sent`) and Yes rate (`accepted ÷ (accepted + tentative)`)
+- Zoom attended/no-show and show-up rate (`attended ÷ (accepted + tentative)`)
+- Attended per sent and a descriptive sample label (none / small / directional / larger)
+- Data-quality notes: missing attendance, small samples, failed sends, multiple changed elements
+
+Two attendance rules are explicit in the prompt and UI: **missing attendance is not zero**, and brief
+Zoom visits currently count as attended because the stats reducer treats any attendance-row person as
+attended. Attendance is a secondary signal; it is confounded by timing, reminders, audience and the Zoom
+link.
+
+The prompt includes `CURATED_COPY_BEST_PRACTICES` (copy guidance and experiment-design cautions) plus
+retrieved knowledge-base context. The model is told to say when evidence is weak and that returning no
+suggestions is valid.
+
+Optional **live web research** is a third layer, disabled by default (`COPY_RESEARCH_ENABLED=false`).
+When the operator ticks the web-research box and a provider key is configured, `copyWebResearch.ts`
+sends generic topic/objective queries (never the copy, list name or recipient data) to the first adapter,
+Tavily. Results are cached for `COPY_RESEARCH_CACHE_HOURS` (7 days), deduped and supplied as numbered
+sources; the model may cite only those IDs. Web sources are supplementary: they may conflict with the
+campaign's own evidence, and the prompt says current-campaign data takes priority. Research failure is
+non-fatal — Copy Coach falls back to current and historical evidence.
+
+A second evidence layer aggregates **historical copy-feature patterns** across started campaigns:
+`copyFeatures.ts` extracts deterministic features (question/number/“you”/urgency/social proof/CTA/emoji/
+all-caps/spam words, description bullets/links/claims/personalization) and `copyPatterns.ts` compares
+outcomes when each feature is present vs absent. The result includes sample counts and is explicitly
+**observational, not causal**; different audiences/events/timing can explain the difference. Current
+campaign evidence outranks it. `copyPatternsCollect.ts` caches the aggregate for
+`COPY_PATTERNS_CACHE_MINUTES` (default 60) because it reads stats for every started campaign.
+
+`copySuggestions.ts` sanitizes the output before it reaches the browser: strips links/markup, enforces
+technical subject/description caps, removes duplicates/current copy, caps the suggestion count and turns
+style concerns (long subject, all-caps, emoji, spam words, claims, personalization tokens) into warnings.
+There is deliberately **no automatic winner**: the AI can cite acceptance, Yes and show-up trade-offs, but
+the operator decides. A 60-second Redis lock prevents a double-click from spending twice.
+
+**Privacy.** Copy Coach is a separate opt-in action from the Advisor. It sends the current copy, aggregate
+stats, list criteria/name and retrieved knowledge notes to the configured AI provider. It never sends
+recipient emails, names, individual replies, raw list rows, account/domain identity or credentials. Web
+research is off unless ticked; its queries contain only generic topic/objective words, not the copy, list
+name or recipient data. The Advisor snapshot's “your own wording is never sent” promise remains true
+because Copy Coach is not the Advisor.
 
 ## Domain reputation
 

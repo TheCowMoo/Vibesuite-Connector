@@ -105,6 +105,28 @@ Verification is warning-only: `undeliverable` and `do_not_send` are skipped, whi
 and unchecked addresses still send with a warning. The cache means re-running a list only pays for
 new addresses.
 
+### Copy Coach research (optional)
+
+Copy Coach works with current-campaign evidence and a cached historical feature analysis without any
+extra provider. Live web research is **off by default** and uses a search API only when the operator
+ticks the box. The first adapter is Tavily.
+
+```bash
+COPY_PATTERNS_CACHE_MINUTES=60
+COPY_RESEARCH_ENABLED=false
+COPY_RESEARCH_PROVIDER=tavily
+# COPY_RESEARCH_API_KEY=
+COPY_RESEARCH_MAX_SOURCES=5
+COPY_RESEARCH_CACHE_HOURS=168
+```
+
+- Set `COPY_RESEARCH_ENABLED=true` and `COPY_RESEARCH_API_KEY` to enable live research.
+- The queries are generic topic/objective phrases. They do not include the campaign copy, list name,
+  recipient data or account identity.
+- Results are cached and cited; they are supplementary to the campaign's own evidence.
+- No new worker is required; the API performs the search and caches the sources.
+- Historical feature patterns are observational, not causal, and refresh from cached stats.
+
 ---
 
 ## 2. SSL / TLS

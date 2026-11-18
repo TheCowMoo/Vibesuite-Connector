@@ -56,6 +56,15 @@ const EnvSchema = z.object({
   /** Display-only estimate; GHL bills the location wallet at its own rate. */
   EMAIL_VERIFY_COST_PER_1000: z.coerce.number().min(0).default(2.5),
 
+  /** Historical Copy Coach feature-pattern cache. Patterns are observational and refreshed hourly. */
+  COPY_PATTERNS_CACHE_MINUTES: z.coerce.number().int().min(1).default(60),
+  /** Optional live copy research. Off by default so a click cannot create surprise API spend. */
+  COPY_RESEARCH_ENABLED: z.enum(['true', 'false']).default('false').transform((v) => v === 'true'),
+  COPY_RESEARCH_PROVIDER: z.enum(['tavily']).default('tavily'),
+  COPY_RESEARCH_API_KEY: z.string().optional(),
+  COPY_RESEARCH_MAX_SOURCES: z.coerce.number().int().min(1).max(10).default(5),
+  COPY_RESEARCH_CACHE_HOURS: z.coerce.number().int().min(1).default(168),
+
   WATCH_TTL_SECONDS: z.coerce.number().int().positive().default(2592000),
   WATCH_RENEWAL_THRESHOLD_DAYS: z.coerce.number().int().positive().default(5),
   WATCH_RENEWAL_CHECK_INTERVAL_MS: z.coerce.number().int().positive().default(86400000),

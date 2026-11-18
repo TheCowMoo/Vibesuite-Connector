@@ -1146,6 +1146,31 @@
     <label class="field"><span class="field__label">Subject A (base)</span><input id="editCopySummary" /></label>
     <label class="field"><span class="field__label">Description A</span><textarea class="rich-text" id="editCopyDesc" rows="3"></textarea></label>
     <label class="field"><span class="field__label">Variant A Zoom registration link (optional)</span><input id="editCopyLinkA" placeholder="Leave blank to use the linked call" /></label>
+
+    <div class="copy-coach">
+      <div class="copy-coach__head">
+        <div>
+          <h3 class="detail__sub" style="margin:0">AI copy coach</h3>
+          <p class="muted">Uses the saved copy, aggregate campaign and variant stats, list criteria and retrieved knowledge notes. It never sends recipient data. Suggestions are previews — review and edit before saving.</p>
+        </div>
+        <span class="chip chip--neutral">Preview only</span>
+      </div>
+      <div class="copy-coach__controls">
+        <label class="field"><span class="field__label">Goal</span>
+          <select id="copyCoachObjective">
+            <option value="balanced">Balanced — qualified replies + show-up</option>
+            <option value="replies">More qualified replies</option>
+            <option value="show_up">Better Zoom show-up</option>
+          </select>
+        </label>
+        <button type="button" class="btn btn--outline btn--sm" id="copyCoachSuggest">Suggest improvements</button>
+        <button type="button" class="btn btn--ghost btn--sm" id="copyCoachChallenger">Add challenger variant</button>
+      </div>
+      <label class="daychk copy-coach__web"><input type="checkbox" id="copyCoachWebResearch" /><span>Research current best practices on the web (optional; sources are cited)</span></label>
+      <p class="muted copy-coach__privacy">AI receives the current copy, aggregate stats, list criteria and knowledge notes — never recipient emails, names or individual replies. Web research is off unless you tick it.</p>
+      <div id="copyCoachResults" hidden></div>
+    </div>
+
     <div class="field">
       <span class="field__label">Alternate variants</span>
       <div id="editCopyVariantsList"></div>

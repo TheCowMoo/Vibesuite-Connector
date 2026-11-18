@@ -5143,6 +5143,10 @@
   var campCopyVariants = [];
   var editCopyVariants = [];
   var testCopyVariantId = null;
+  var copyCoachSuggestions = [];
+  var copyCoachEvidence = null;
+  var copyCoachPatterns = null;
+  var copyCoachWebResearch = null;
 
   /* ---- Campaign CRM ---- */
   var CRM_TAB_LIMIT = 10;
@@ -7417,6 +7421,17 @@
   function openEditCopy() {
     var c = currentCampaign;
     if (!c || c.startedAt || (c.status !== 'draft' && c.status !== 'scheduled')) return;
+    copyCoachSuggestions = [];
+    copyCoachEvidence = null;
+    copyCoachPatterns = null;
+    copyCoachWebResearch = null;
+    var webToggle = document.getElementById('copyCoachWebResearch');
+    if (webToggle) webToggle.checked = false;
+    var coachResults = document.getElementById('copyCoachResults');
+    if (coachResults) {
+      coachResults.hidden = true;
+      coachResults.innerHTML = '';
+    }
     var variants = campaignVariantsFor(c);
     var primary = variants.filter(function (v) { return v.id === 'A'; })[0] || variants[0];
     document.getElementById('editCopySummary').value = primary.summary || '';
@@ -7501,6 +7516,195 @@
       })
       .catch(function (err) { toast(err.message, 'error'); });
   }
+
+  function copyCoachConfidenceChip(confidence) {
+    var value = confidence === 'high' || confidence === 'medium' ? confidence : 'low';
+    var tone = value === 'high' ? 'success' : value === 'medium' ? 'warning' : 'neutral';
+    return '<span class="chip chip--' + tone + '">' + value + ' confidence</span>';
+  }
+
+  function copyCoachSampleLabel(label) {
+    if (label === 'none') return 'no sends';
+    if (label === 'small') return 'small sample';
+    if (label === 'directional') return 'directional';
+    return 'larger sample';
+  }
+
+  function copyCoachWebSourceItems(ids) {
+    var sources = (copyCoachWebResearch && copyCoachWebResearch.sources) || [];
+    var byId = {};
+    sources.forEach(function (source) { byId[source.id] = source; });
+    return (ids || []).map(function (id) {
+      var source = byId[id];
+      if (!source) return '';
+      return '<li><a href="' + esc(source.url) + '" target="_blank" rel="noopener noreferrer">' +
+        esc(source.title || source.url) + '</a></li>';
+    }).filter(Boolean).join('');
+  }
+
+  function renderCopyCoachResults(data) {
+    var el = document.getElementById('copyCoachResults');
+    copyCoachSuggestions = (data && data.suggestions) || [];
+    copyCoachEvidence = (data && data.evidence) || null;
+    copyCoachPatterns = (data && data.patterns) || null;
+    copyCoachWebResearch = (data && data.webResearch) || null;
+    el.hidden = false;
+
+    var evidence = copyCoachEvidence || {};
+    var variants = evidence.variants || [];
+    var rows = variants.map(function (v) {
+      return '<tr><td><strong>' + esc(v.id) + '</strong></td>' +
+        '<td>' + (v.sent || 0).toLocaleString() + '</td>' +
+        '<td>' + (v.accepted || 0).toLocaleString() + '</td>' +
+        '<td>' + (v.acceptanceRate || 0) + '%</td>' +
+        '<td>' + (v.yesRate || 0) + '%</td>' +
+        '<td>' + (evidence.hasAttendance ? (v.showUpRate || 0) + '%' : '—') + '</td>' +
+        '<td>' + (evidence.hasAttendance ? (v.attended || 0) + ' / ' + (v.sent || 0) : '—') + '</td>' +
+        '<td>' + esc(copyCoachSampleLabel(v.sampleLabel)) + '</td></tr>';
+    }).join('');
+    var quality = (evidence.dataQuality || []).map(function (note) {
+      return '<li>' + esc(note) + '</li>';
+    }).join('');
+
+    var evidenceHtml = '<div class="copy-evidence"><h4>What the AI saw</h4>' +
+      (rows
+        ? '<div class="table-scroll"><table><thead><tr><th>Variant</th><th>Sent</th><th>Accepted</th><th>Accept %</th><th>Yes %</th><th>Show-up %</th><th>Attended / sent</th><th>Sample</th></tr></thead><tbody>' + rows + '</tbody></table></div>'
+        : '<p class="muted">No variant performance yet.</p>') +
+      (quality ? '<div class="copy-suggestion__meta"><strong>Data quality</strong><ul>' + quality + '</ul></div>' : '') +
+      '<p class="muted" style="margin-top:0.6rem">Current-campaign evidence outranks general guidance. Missing attendance is not zero.</p></div>';
+
+    var patterns = (copyCoachPatterns && copyCoachPatterns.patterns) || [];
+    var patternRows = patterns.map(function (p) {
+      function side(s) {
+        return (s.variants || 0).toLocaleString() + ' variants · ' +
+          (s.sent || 0).toLocaleString() + ' sent · ' +
+          (s.acceptanceRate || 0) + '% accept · ' +
+          (s.showUpRate === null || s.showUpRate === undefined ? '—' : s.showUpRate + '%') + ' show-up';
+      }
+      return '<tr><td>' + esc(p.label) + '</td><td>' + side(p.present) + '</td><td>' + side(p.absent) + '</td></tr>';
+    }).join('');
+    var patternsHtml = '<div class="copy-evidence"><h4>What has worked before</h4>' +
+      (patternRows
+        ? '<div class="table-scroll"><table><thead><tr><th>Pattern</th><th>When present</th><th>When absent</th></tr></thead><tbody>' + patternRows + '</tbody></table></div>' +
+          '<p class="muted" style="margin-top:0.5rem">' + esc((copyCoachPatterns && copyCoachPatterns.note) || 'Observational only.') + '</p>'
+        : '<p class="muted">Not enough historical variant data yet. Current-campaign evidence is used instead.</p>') +
+      '</div>';
+
+    var webHtml = '';
+    if (copyCoachWebResearch) {
+      var webSources = (copyCoachWebResearch.sources || []).map(function (source) {
+        return '<li><a href="' + esc(source.url) + '" target="_blank" rel="noopener noreferrer">' +
+          esc(source.title || source.url) + '</a>' + (source.snippet ? ' — ' + esc(source.snippet) : '') + '</li>';
+      }).join('');
+      webHtml = '<div class="copy-evidence"><h4>Web research</h4>' +
+        (webSources
+          ? '<ul>' + webSources + '</ul><p class="muted">Sources are supplementary and may conflict with your own evidence. Current-campaign data takes priority.</p>'
+          : '<p class="muted">' + esc(copyCoachWebResearch.error || 'No web sources were returned.') + '</p>') +
+        '</div>';
+    }
+
+    if (!copyCoachSuggestions.length) {
+      el.innerHTML = evidenceHtml + patternsHtml + webHtml +
+        '<p class="muted">The AI did not find a change worth making from this evidence. That is a valid result — keep the current copy and collect more data.</p>';
+      return;
+    }
+
+    var cards = copyCoachSuggestions.map(function (s) {
+      var warnings = (s.warnings || []).map(function (w) { return '<li>' + esc(w) + '</li>'; }).join('');
+      var evidenceItems = (s.evidence || []).map(function (e) { return '<li>' + esc(e) + '</li>'; }).join('');
+      var tradeoffs = (s.tradeoffs || []).map(function (t) { return '<li>' + esc(t) + '</li>'; }).join('');
+      var sources = copyCoachWebSourceItems(s.sourceIds || []);
+      var label = s.mode === 'challenger' ? 'New variant' : 'Rewrite';
+      return '<div class="copy-suggestion" data-suggestion-card="' + esc(s.id) + '">' +
+        '<div class="copy-suggestion__head"><strong>' + label + '</strong>' + copyCoachConfidenceChip(s.confidence) + '</div>' +
+        '<div class="copy-suggestion__subject">' + esc(s.summary) + ' <span class="muted">(' + (s.subjectChars || 0) + ' chars)</span></div>' +
+        '<p class="copy-suggestion__desc">' + esc(s.description).replace(/\n/g, '<br>') + '</p>' +
+        '<div class="copy-suggestion__meta"><strong>Why</strong><div>' + esc(s.rationale) + '</div>' +
+          (evidenceItems ? '<strong>Evidence</strong><ul>' + evidenceItems + '</ul>' : '') +
+          (tradeoffs ? '<strong>Trade-offs</strong><ul>' + tradeoffs + '</ul>' : '') +
+          (sources ? '<strong>Sources</strong><ul>' + sources + '</ul>' : '') +
+        '</div>' +
+        (warnings ? '<ul class="copy-suggestion__warnings">' + warnings + '</ul>' : '') +
+        '<div class="copy-suggestion__actions">' +
+          '<button type="button" class="btn btn--primary btn--sm" data-copy-use="' + esc(s.id) + '">Use as A</button>' +
+          '<button type="button" class="btn btn--outline btn--sm" data-copy-add="' + esc(s.id) + '">Add as variant</button>' +
+          '<button type="button" class="btn btn--ghost btn--sm" data-copy-discard="' + esc(s.id) + '">Discard</button>' +
+        '</div>' +
+      '</div>';
+    }).join('');
+
+    el.innerHTML = evidenceHtml + patternsHtml + webHtml + cards;
+  }
+
+  function requestCopySuggestions(mode, btn) {
+    if (!currentCampaignId || !currentCampaign) return;
+    var objective = document.getElementById('copyCoachObjective').value || 'balanced';
+    var researchWeb = !!document.getElementById('copyCoachWebResearch').checked;
+    var results = document.getElementById('copyCoachResults');
+    results.hidden = false;
+    results.innerHTML = '<div class="copy-evidence"><p class="muted">Reading the saved copy and latest campaign evidence…</p></div>';
+    withBusy(btn, api('/api/campaigns/' + currentCampaignId + '/copy-suggestions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode: mode, objective: objective, count: 3, researchWeb: researchWeb })
+    }))
+      .then(function (data) { renderCopyCoachResults(data); })
+      .catch(function (err) {
+        results.innerHTML = '<div class="invite-result invite-result--error copy-coach__error">' + esc(err.message) + '</div>';
+      });
+  }
+
+  function findCopyCoachSuggestion(id) {
+    return copyCoachSuggestions.filter(function (s) { return s.id === id; })[0] || null;
+  }
+
+  function useCopyCoachSuggestion(id) {
+    var s = findCopyCoachSuggestion(id);
+    if (!s) return;
+    document.getElementById('editCopySummary').value = s.summary;
+    setRichTextareaValue('editCopyDesc', s.description, true);
+    $$('.copy-suggestion').forEach(function (card) { card.classList.remove('is-used'); });
+    var card = document.querySelector('[data-suggestion-card="' + id + '"]');
+    if (card) card.classList.add('is-used');
+    toast('Suggestion copied into Variant A — review it, then Save copy.', 'success');
+  }
+
+  function addCopyCoachVariant(id) {
+    var s = findCopyCoachSuggestion(id);
+    if (!s) return;
+    syncEditCopyVariants();
+    var next = nextEditVariantId();
+    if (!next) {
+      toast('No free variant id is available', 'error');
+      return;
+    }
+    editCopyVariants.push({ id: next, summary: s.summary, description: s.description, registrationUrl: '' });
+    renderEditCopyVariants();
+    var box = document.querySelector('[data-edit-box="' + next + '"]');
+    if (box) box.scrollIntoView({ block: 'nearest' });
+    toast('Added as Variant ' + next + ' — review it, then Save copy.', 'success');
+  }
+
+  function discardCopyCoachSuggestion(id) {
+    copyCoachSuggestions = copyCoachSuggestions.filter(function (s) { return s.id !== id; });
+    renderCopyCoachResults({
+      suggestions: copyCoachSuggestions,
+      evidence: copyCoachEvidence,
+      patterns: copyCoachPatterns,
+      webResearch: copyCoachWebResearch
+    });
+  }
+
+  $('#copyCoachSuggest').addEventListener('click', function () { requestCopySuggestions('improve', this); });
+  $('#copyCoachChallenger').addEventListener('click', function () { requestCopySuggestions('challenger', this); });
+  $('#copyCoachResults').addEventListener('click', function (e) {
+    var use = e.target.closest('[data-copy-use]');
+    if (use) { useCopyCoachSuggestion(use.dataset.copyUse); return; }
+    var add = e.target.closest('[data-copy-add]');
+    if (add) { addCopyCoachVariant(add.dataset.copyAdd); return; }
+    var discard = e.target.closest('[data-copy-discard]');
+    if (discard) discardCopyCoachSuggestion(discard.dataset.copyDiscard);
+  });
 
   $('#campaignNew').addEventListener('click', openCampaignWizard);
   $('#campList').addEventListener('change', loadCampaignSegments);

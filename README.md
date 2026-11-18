@@ -186,6 +186,7 @@ Key counters: `webhook_received_total`, `webhook_rejected_total`, `jobs_enqueued
 | GET | `/api/lists/:id/verify` | verification status and counts |
 | POST | `/api/lists/:id/verify/cancel` | cancel a running verification |
 | GET | `/api/campaigns/:id/verification` | verification summary for a campaign audience |
+| POST | `/api/campaigns/:id/copy-suggestions` | AI copy suggestions from saved copy, stats and historical patterns (read-only) |
 | GET | `/api/stats/overview?days=30` | cross-campaign statistics (1–365 days) |
 | GET | `/api/stats/export?scope=campaigns&period=all` | download one statistics table as CSV or JSON |
 | GET | `/api/campaigns/:id/crm` | per-person campaign CRM (filters + pagination) |
@@ -197,6 +198,12 @@ Key counters: `webhook_received_total`, `webhook_rejected_total`, `jobs_enqueued
 
 ## Notes & caveats
 
+- **Copy Coach is human-in-the-loop.** AI suggestions are previews only; the operator must edit and press
+  **Save copy**. It sends the current campaign copy, aggregate variant stats, list criteria and retrieved
+  knowledge notes to the configured AI provider — never recipient emails, names or individual replies.
+  Historical feature patterns are observational; optional web research is off unless the operator ticks
+  it and a provider key is configured. It is available only before sending starts, and it never picks a
+  winner automatically.
 - **Email verification is pre-send, not bounce data.** `POST /email/verify` asks GHL whether a mailbox
   looks deliverable, catch-all, unknown or do-not-send. It requires `lc-email.readonly` and a location
   on LC Email/Mailgun, is billed to the GHL wallet (about $2.50 per 1,000 checks) and is cached for

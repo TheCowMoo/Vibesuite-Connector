@@ -780,6 +780,35 @@ fieldset.field legend { margin-bottom: 0.4rem; }
 .invite-result--success { background: var(--success-tint); border-color: #B9DFC7; color: var(--success); }
 .invite-result--warning { background: var(--warning-tint); border-color: #EFD6AC; color: var(--warning); }
 .invite-result--error { background: #FBEDEB; border-color: #E8B8B4; color: var(--danger); }
+
+/* Copy Coach */
+.copy-coach {
+  margin: 1rem 0;
+  padding: 1rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+.copy-coach__head { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; }
+.copy-coach__head p { margin: 0.35rem 0 0; max-width: 62rem; }
+.copy-coach__controls { display: flex; align-items: flex-end; gap: 0.6rem; flex-wrap: wrap; margin-top: 0.9rem; }
+.copy-coach__controls .field { margin: 0; min-width: 250px; }
+.copy-coach__web { margin-top: 0.85rem; font-size: 0.9rem; }
+.copy-coach__privacy { margin: 0.75rem 0 0; font-size: 0.82rem; }
+.copy-coach__error { margin: 0.8rem 0 0; }
+.copy-evidence { margin-top: 1rem; padding: 0.85rem; border: 1px solid var(--line); border-radius: var(--radius); background: var(--white); }
+.copy-evidence h4 { margin: 0 0 0.5rem; font-size: 0.95rem; }
+.copy-evidence table { width: 100%; border-collapse: collapse; font-size: 0.84rem; }
+.copy-evidence th, .copy-evidence td { padding: 0.35rem 0.45rem; border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap; }
+.copy-suggestion { margin-top: 0.85rem; padding: 0.9rem; border: 1px solid var(--line); border-left: 3px solid var(--royal); border-radius: var(--radius); background: var(--white); }
+.copy-suggestion.is-used { border-left-color: var(--success); background: var(--success-tint); }
+.copy-suggestion__head { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; }
+.copy-suggestion__subject { margin: 0.65rem 0 0.25rem; font-weight: 700; color: var(--navy); }
+.copy-suggestion__desc { margin: 0; white-space: pre-wrap; }
+.copy-suggestion__meta { margin-top: 0.55rem; font-size: 0.82rem; }
+.copy-suggestion__meta ul { margin: 0.3rem 0 0; padding-left: 1.1rem; }
+.copy-suggestion__warnings { margin: 0.55rem 0 0; padding-left: 1.1rem; color: var(--warning); font-size: 0.82rem; }
+.copy-suggestion__actions { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.75rem; }
 .invite-result a { color: var(--royal); font-weight: 600; }
 .section-title { margin: 1.5rem 0 0.6rem; font-size: 1.1rem; }
 

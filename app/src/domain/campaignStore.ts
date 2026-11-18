@@ -209,3 +209,13 @@ export async function acquireCampaignTestCopyLock(id: string, ttlSeconds = 5): P
   const res = await redis.set(REDIS_KEYS.campaignTestCopyLock(id), '1', 'EX', ttlSeconds, 'NX');
   return res === 'OK';
 }
+
+/** One AI copy request per campaign at a time, so a double-click cannot spend twice. */
+export async function acquireCampaignCopySuggestionLock(id: string, ttlSeconds = 60): Promise<boolean> {
+  const res = await redis.set(REDIS_KEYS.campaignCopySuggestionLock(id), '1', 'EX', ttlSeconds, 'NX');
+  return res === 'OK';
+}
+
+export async function releaseCampaignCopySuggestionLock(id: string): Promise<void> {
+  await redis.del(REDIS_KEYS.campaignCopySuggestionLock(id));
+}

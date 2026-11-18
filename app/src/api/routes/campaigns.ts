@@ -13,6 +13,7 @@ import { resolveSendPlan, stopTimeError } from '../../domain/campaignLifecycle';
 import { applyCampaignZoomHost } from '../../domain/campaignZoom';
 import { getZoomAccount } from '../../domain/zoomStore';
 import {
+  acquireCampaignCopySuggestionLock,
   acquireCampaignTestCopyLock,
   countRecipients,
   createCampaign,
@@ -22,10 +23,11 @@ import {
   getRecipients,
   listCampaigns,
   queueLength,
+  releaseCampaignCopySuggestionLock,
   saveCampaign,
 } from '../../domain/campaignStore';
 import { sendCampaignBatch, sendCampaignTestCopy, startCampaign, endCampaign } from '../../domain/campaignDispatch';
-import { mirrorPrimaryVariant } from '../../domain/campaignVariants';
+import { campaignVariants, mirrorPrimaryVariant } from '../../domain/campaignVariants';
 import { getSenderProfile } from '../../domain/senderStore';
 import { getList } from '../../domain/listStore';
 import { getInvitedEmails } from '../../domain/inviteStore';
@@ -41,6 +43,24 @@ import { deleteCampaignCrmNote, saveCampaignCrmNote } from '../../domain/campaig
 import { toCsv } from '../../domain/statsExport';
 import { getAuthUser, requireRole } from '../middleware/requireAuth';
 import { sanitizeDescription } from '../../lib/richText';
+import { getAiSettings } from '../../domain/aiSettings';
+import { getAllKnowledge } from '../../domain/knowledgeStore';
+import { retrieveContext } from '../../domain/retrieval';
+import { AiJsonError, generateJson } from '../../lib/ai';
+import { logger } from '../../lib/logger';
+import {
+  buildCopyEvidence,
+  type CopyObjective,
+  type CopySuggestionMode,
+} from '../../domain/copyEvidence';
+import { COPY_COACH_PRIVACY } from '../../domain/copyResearch';
+import { collectCopyPatterns } from '../../domain/copyPatternsCollect';
+import { researchCopyBestPractices } from '../../domain/copyWebResearch';
+import {
+  buildCopySuggestionPrompt,
+  COPY_SUGGESTION_SYSTEM,
+  sanitizeCopySuggestions,
+} from '../../domain/copySuggestions';
 
 function sanitizeCampaignCopy<
   T extends { event: { description?: string }; copyVariants?: Array<{ description?: string }> },
@@ -528,6 +548,116 @@ export async function campaignRoutes(app: FastifyInstance): Promise<void> {
       return { ok: true, ...result };
     } catch (err) {
       reply.code(400).send({ error: (err as Error).message });
+    }
+  });
+
+  /**
+   * AI copy suggestions for a campaign that has not started sending.
+   *
+   * Read-only: this never saves. The operator chooses a suggestion, edits it in the existing Edit
+   * copy modal and presses Save copy. That keeps the human in the loop and reuses the PATCH guard.
+   */
+  app.post('/api/campaigns/:id/copy-suggestions', guard, async (req, reply) => {
+    const id = (req.params as { id: string }).id;
+    const camp = await getCampaign(id);
+    if (!camp) {
+      reply.code(404).send({ error: 'campaign not found' });
+      return;
+    }
+    if (camp.startedAt || (camp.status !== 'draft' && camp.status !== 'scheduled')) {
+      reply.code(400).send({ error: 'campaign copy is frozen once sending has started' });
+      return;
+    }
+
+    const body = (req.body || {}) as {
+      mode?: unknown;
+      objective?: unknown;
+      count?: unknown;
+      researchWeb?: unknown;
+    };
+    const mode: CopySuggestionMode =
+      body.mode === 'challenger' || body.mode === 'both' ? body.mode : 'improve';
+    const objective: CopyObjective =
+      body.objective === 'replies' || body.objective === 'show_up' ? body.objective : 'balanced';
+    const requestedCount = Number(body.count);
+    const count = Number.isFinite(requestedCount)
+      ? Math.max(1, Math.min(3, Math.floor(requestedCount)))
+      : 3;
+
+    const settings = await getAiSettings();
+    if (!settings || !settings.apiKey) {
+      reply.code(400).send({ error: 'AI not configured. Set it in Settings → AI.' });
+      return;
+    }
+
+    if (!(await acquireCampaignCopySuggestionLock(id))) {
+      reply.code(429).send({ error: 'copy suggestions are already being generated for this campaign — wait a moment' });
+      return;
+    }
+
+    try {
+      const [stats, list, kb, patterns] = await Promise.all([
+        collectCampaignStats(camp),
+        getList(camp.listId),
+        getAllKnowledge(),
+        collectCopyPatterns().catch((err) => {
+          logger.warn({ err, campaignId: id }, 'copy pattern analysis unavailable');
+          return null;
+        }),
+      ]);
+      const evidence = buildCopyEvidence(camp, stats, objective);
+      const context = retrieveContext(kb, `${list?.criteria ?? ''} ${list?.name ?? ''}`);
+      const webResearch = body.researchWeb === true ? await researchCopyBestPractices(objective) : null;
+      const prompt = buildCopySuggestionPrompt({
+        evidence,
+        knowledgeContext: context,
+        mode,
+        objective,
+        count,
+        ...(patterns ? { historicalPatterns: patterns } : {}),
+        ...(webResearch ? { webResearch } : {}),
+      });
+
+      const raw = await generateJson<unknown>(settings, COPY_SUGGESTION_SYSTEM, prompt, {
+        maxTokens: 2600,
+        jsonMode: true,
+      });
+      const suggestions = sanitizeCopySuggestions(
+        raw,
+        campaignVariants(camp).map((variant) => ({
+          summary: variant.summary,
+          description: variant.description,
+        })),
+        mode,
+        count,
+        webResearch?.sources.map((source) => source.id),
+      );
+
+      return {
+        suggestions,
+        evidence,
+        patterns,
+        webResearch,
+        research: {
+          curated: true,
+          historical: !!(patterns && patterns.patterns.length),
+          web: !!webResearch?.available,
+        },
+        privacy: COPY_COACH_PRIVACY,
+        generatedAt: Date.now(),
+      };
+    } catch (err) {
+      await releaseCampaignCopySuggestionLock(id).catch(() => undefined);
+      if (err instanceof AiJsonError) {
+        reply.code(502).send({ error: 'The AI returned unusable copy suggestions. Try again or use a model with JSON mode.' });
+        return;
+      }
+      logger.warn({ err, campaignId: id }, 'copy suggestions failed');
+      const detail = ((err as Error).message || 'unknown error').replace(
+        /([?&](?:key|api_key)=)[^&\s]+/gi,
+        '$1***',
+      );
+      reply.code(502).send({ error: `The AI could not draft copy: ${detail}` });
     }
   });
 

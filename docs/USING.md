@@ -390,6 +390,61 @@ the call is synced), RSVP rate, **failed-send rate**, acceptance rate and the **
 Variants are fixed when sending starts. While a campaign is a draft or scheduled, **Details → Edit copy** lets
 you add, remove or change any variant; once the audience is frozen, the copy is locked.
 
+### AI copy coach (human review required)
+
+**Details → Edit copy → AI copy coach** can suggest a rewrite of Variant A or new challenger variants.
+It uses the **saved** copy, aggregate campaign/variant stats, list criteria and retrieved knowledge notes.
+Save any manual edits first; the coach reads the saved campaign.
+
+Choose a goal:
+
+- **Balanced** — qualified replies plus show-up
+- **More qualified replies** — acceptance and Yes quality
+- **Better Zoom show-up** — attendance among the people who said yes/maybe
+
+The evidence panel shows sent, accepted, acceptance rate, Yes rate, show-up rate, attended/sent and a
+sample label per variant. Current-campaign evidence outranks general guidance.
+
+A **What has worked before** panel compares deterministic copy features across past campaigns — for
+example question-style subjects vs statements, urgency, social proof, CTA wording, description bullets
+and length. It is **observational, not causal**: different audiences, events and timing can explain the
+difference, and the sample sizes are shown. Your current campaign's evidence takes priority.
+
+**Web research** is optional and off by default. If your administrator configured a search provider,
+tick **Research current best practices on the web** before generating. Only generic topic/objective
+queries are sent — not your copy, list name or recipient data. Results appear as cited sources; they are
+supplementary and may conflict with your own evidence. If the provider is not configured or unavailable,
+Copy Coach still works with current and historical evidence.
+
+Important attendance caveats:
+
+- **Missing attendance is not zero.** If the linked call has not synced, show-up is shown as `—`.
+- Brief Zoom visits currently count as attended; full and partial attendance are not separated.
+- Attendance is influenced by event time, reminders, calendar conflicts, audience and the Zoom link,
+  not copy alone.
+- If variants differ in more than one element, the result is directional, not a controlled test.
+
+Suggestions are **previews**:
+
+- **Use as A** copies the subject/description into the form.
+- **Add as variant** creates the next variant with that copy.
+- Then review/edit and press **Save copy**. Nothing is saved or sent automatically.
+- **Discard** removes a suggestion.
+- The AI can return no suggestions — that means “keep the current copy and collect more data.”
+
+There is **no hard copy rulebook and no automatic winner.** Subject length, emoji, urgency, claims and
+personalization tokens produce warnings, not blocks. Technical/safety checks still apply: AI-created links
+are stripped, markup is sanitized, and only subject/description can change. The coach never selects a
+winner; acceptance, Yes quality and show-up can point in different directions, and the operator decides.
+
+**Privacy.** Copy Coach sends only the current copy, aggregate stats, list criteria/name and retrieved
+knowledge notes to the configured AI provider. It never sends recipient emails, names, individual replies,
+raw list rows or credentials. This is a separate opt-in action from the Advisor, which still omits copy.
+
+The current version uses curated copy/experiment guidance, current-campaign stats, historical
+cross-campaign feature patterns and optional cited web research. All research layers remain
+supplementary to your own campaign evidence.
+
 **Create campaign** saves it as a draft — or as **Scheduled** when you chose a later start. Nothing is frozen
 yet either way, and every field can still be changed.
 

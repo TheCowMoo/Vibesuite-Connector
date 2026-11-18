@@ -44,6 +44,9 @@ export const REDIS_KEYS = {
   /** Frozen verification snapshot for a campaign audience. */
   campaignVerifyResults: (id: string) => `campaign:${id}:verification`,
   campaignVerifyAudience: (id: string) => `campaign:${id}:verification:audience`,
+  /** Cached observational copy-feature patterns across started campaigns. */
+  copyPatterns: () => 'copy:patterns',
+  copyWebResearch: (hash: string) => `copy:web-research:${hash}`,
   invitesIndex: () => 'invites:index',
   invite: (id: string) => `invite:${id}`,
   listInvites: (listId: string) => `list:${listId}:invites`,
@@ -86,6 +89,7 @@ export const REDIS_KEYS = {
   campaignVariantMap: (id: string) => `campaign:${id}:variants`,
   campaignTestEvent: (connectionId: string, eventId: string) => `campaign:test-event:${connectionId}:${eventId}`,
   campaignTestCopyLock: (id: string) => `campaign:${id}:test-copy-lock`,
+  campaignCopySuggestionLock: (id: string) => `campaign:${id}:copy-suggestion-lock`,
   campaignQueue: (id: string, connectionId: string) => `campaign:${id}:queue:${connectionId}`,
   campaignSender: (id: string, connectionId: string) => `campaign:${id}:sender:${connectionId}`,
   campaignDispatched: (id: string, email: string) => `campaign:${id}:dispatch:${email.toLowerCase()}`,
