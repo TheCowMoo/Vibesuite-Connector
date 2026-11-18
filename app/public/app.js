@@ -8178,28 +8178,42 @@
         esc(daily[daily.length - 1].date) + '</span></div>'
       : '<p class="muted">Nothing to chart yet.</p>';
 
-    var replies = r.accepted + r.declined + r.tentative + r.noResponse;
-    function rsvpSegment(n, color) {
-      if (!replies || !n) return '';
-      return '<span style="width:' + (n / replies * 100).toFixed(2) + '%;background:' + color + '"></span>';
+    var chart = window.RsvpChart.segments({
+      accepted: r.accepted,
+      tentative: r.tentative,
+      declined: r.declined,
+      noResponse: r.noResponse
+    });
+    var rsvpColors = {
+      accepted: 'var(--success)',
+      tentative: 'var(--warning)',
+      declined: 'var(--danger)',
+      noResponse: '#A9B1C2'
+    };
+    function rsvpLegend(item) {
+      var pct = chart.total ? Math.round(item.percent) : 0;
+      return '<span><i class="rsvp-dot" style="background:' + rsvpColors[item.key] + '"></i>' +
+        esc(item.label) + ' <strong>' + item.count.toLocaleString() + '</strong> (' + pct + '%)</span>';
     }
-    function rsvpLegend(n, label, color) {
-      var pct = replies ? Math.round((n / replies) * 100) : 0;
-      return '<span><i class="rsvp-dot" style="background:' + color + '"></i>' + esc(label) +
-        ' <strong>' + n + '</strong> (' + pct + '%)</span>';
-    }
-    document.getElementById('statsRsvp').innerHTML = replies
-      ? '<div class="rsvp-bar">' +
-          rsvpSegment(r.accepted, 'var(--success)') +
-          rsvpSegment(r.tentative, 'var(--warning)') +
-          rsvpSegment(r.declined, 'var(--danger)') +
-          rsvpSegment(r.noResponse, '#A9B1C2') +
-        '</div>' +
-        '<div class="rsvp-legend">' +
-          rsvpLegend(r.accepted, 'Accepted', 'var(--success)') +
-          rsvpLegend(r.tentative, 'Maybe', 'var(--warning)') +
-          rsvpLegend(r.declined, 'Declined', 'var(--danger)') +
-          rsvpLegend(r.noResponse, 'No reply', '#A9B1C2') +
+    var rsvpAria = chart.items.map(function (item) { return item.label + ': ' + item.count; }).join(', ');
+    var rsvpSegments = chart.items.filter(function (item) { return item.count > 0; }).map(function (item) {
+      var pct = chart.total ? Math.round(item.percent) : 0;
+      var dash = item.percent.toFixed(3) + ' ' + (100 - item.percent).toFixed(3);
+      return '<circle class="rsvp-ring rsvp-ring--' + item.key + '" cx="60" cy="60" r="42" pathLength="100" ' +
+        'stroke-dasharray="' + dash + '" stroke-dashoffset="' + (-item.startPercent).toFixed(3) + '" ' +
+        'transform="rotate(-90 60 60)"><title>' + esc(item.label + ': ' + item.count + ' (' + pct + '%)') + '</title></circle>';
+    }).join('');
+    document.getElementById('statsRsvp').innerHTML = chart.total
+      ? '<div class="rsvp-chart">' +
+          '<div class="rsvp-chart__donut">' +
+            '<svg viewBox="0 0 120 120" role="img" aria-label="' + esc(rsvpAria) + '">' +
+              '<circle class="rsvp-ring-track" cx="60" cy="60" r="42" pathLength="100"></circle>' +
+              rsvpSegments +
+              '<text x="60" y="57" text-anchor="middle" class="rsvp-chart__total">' + chart.total.toLocaleString() + '</text>' +
+              '<text x="60" y="72" text-anchor="middle" class="rsvp-chart__caption">invitations</text>' +
+            '</svg>' +
+          '</div>' +
+          '<div class="rsvp-legend">' + chart.items.map(rsvpLegend).join('') + '</div>' +
         '</div>' +
         '<p class="muted stats-note">Answers only — opens and bounces are not tracked yet.</p>'
       : '<p class="muted">No replies yet. RSVP answers appear here as soon as people respond.</p>';

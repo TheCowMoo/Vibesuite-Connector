@@ -269,22 +269,23 @@ input[type="datetime-local"], input[type="date"] { font-variant-numeric: tabular
   font-size: 0.72rem;
   margin-top: 0.35rem;
 }
-.rsvp-bar {
-  display: flex;
-  height: 22px;
-  border-radius: 6px;
-  overflow: hidden;
-  background: var(--neutral-tint);
-}
-.rsvp-bar span { display: block; height: 100%; }
+.rsvp-chart { display: flex; align-items: center; gap: 1.25rem; }
+.rsvp-chart__donut { flex: 0 0 150px; width: 150px; max-width: 45%; }
+.rsvp-chart__donut svg { display: block; width: 100%; height: auto; overflow: visible; }
+.rsvp-ring-track { fill: none; stroke: var(--neutral-tint); stroke-width: 14; }
+.rsvp-ring { fill: none; stroke-width: 14; stroke-linecap: butt; transition: opacity 0.12s ease; }
+.rsvp-ring:hover { opacity: 0.82; }
+.rsvp-ring--accepted { stroke: var(--success); }
+.rsvp-ring--tentative { stroke: var(--warning); }
+.rsvp-ring--declined { stroke: var(--danger); }
+.rsvp-ring--noResponse { stroke: #A9B1C2; }
+.rsvp-chart__total { font-size: 22px; font-weight: 700; fill: var(--ink); }
+.rsvp-chart__caption { font-size: 9px; fill: var(--ink-muted); }
 .rsvp-legend {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.9rem;
-  margin-top: 0.7rem;
-  font-size: 0.8rem;
-  color: var(--ink-muted);
+  display: flex; flex: 1; flex-wrap: wrap; flex-direction: column;
+  gap: 0.4rem; font-size: 0.8rem; color: var(--ink-muted);
 }
+.rsvp-legend > span { white-space: nowrap; }
 .rsvp-dot {
   display: inline-block;
   width: 9px;
@@ -1014,6 +1015,9 @@ fieldset.field legend { margin-bottom: 0.4rem; }
   .invite-row { grid-template-columns: 1fr; }
   .stats-range { width: 100%; }
   .chart { height: 110px; }
+  .rsvp-chart { flex-direction: column; align-items: flex-start; }
+  .rsvp-chart__donut { flex: none; width: 150px; max-width: none; margin: 0 auto; }
+  .rsvp-legend { width: 100%; }
   .modal { --modal-pad: 1rem; }
   .modal__foot { justify-content: stretch; }
   .modal__foot .spacer { display: none; }

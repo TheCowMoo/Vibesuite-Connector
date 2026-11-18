@@ -648,6 +648,12 @@ included campaigns; attendance rate is `attended / (attended + noShow)`. Both ar
 when the denominator is empty. Opens and bounces are absent because nothing tracks them, and the card
 says "answers only" instead of implying a delivery funnel.
 
+The Replies card is a small SVG donut. `public/rsvpChart.js` (shared with the unit test) turns the four
+counts into percentages and start offsets; the browser renders one `<circle>` per non-zero response and
+keeps the exact counts/percentages in the legend. The centre total is labelled **invitations**, not
+people, matching the recipient-row semantics above. The SVG has an accessible text label, and the card
+stacks the chart above the legend below 560 px.
+
 When an account has never sent an invitation and has no sessions at all, the client renders a labelled
 `SAMPLE_OVERVIEW` ("Sample data — nothing here is real") instead of a wall of zeros. It is built in
 the browser for the requested period, never persisted, and disappears automatically once real

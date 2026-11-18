@@ -518,6 +518,11 @@ attachment and opens in Excel, Numbers or Sheets.
 Statistics rolls **every campaign and video call** into one view for the last **7, 30 or 90 days**:
 invitations per day, the reply mix, results per sending account, and the top campaigns.
 
+The **Replies** card is a donut chart of Accepted / Maybe / Declined / No reply. Its centre shows the
+invitations represented, and the legend keeps the exact count and percentage for each response. “No reply”
+is included because it is part of the invitation funnel; it is not a fourth answer choice. The same
+counts and percentages are available to screen readers and in the Statistics exports.
+
 Two deliberate details:
 
 - **Invitations are windowed by when they were sent; replies and attendance are not re-windowed.** A campaign
