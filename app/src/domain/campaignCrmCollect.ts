@@ -19,6 +19,9 @@ import { ensureRsvpBaseline, getRsvpHistory } from './rsvpHistoryStore';
 import type { RsvpHistoryEntry } from './rsvpHistory';
 import { getSession, type SessionRecord } from './sessionStore';
 import { stateStore } from './stateStore';
+import { collectCampaignVerification, type CampaignVerificationSummary } from './campaignVerification';
+import { loadCampaignVerificationResults } from './emailVerificationLookup';
+import type { CampaignCrmVerification } from './campaignCrm';
 
 export interface CampaignCrmSession {
   id: string;
@@ -44,6 +47,8 @@ export interface CampaignCrmResponse {
   };
   session: CampaignCrmSession | null;
   summary: CampaignCrmSummary;
+  /** Pre-send GHL verification for the campaign's frozen audience. */
+  verification: CampaignVerificationSummary;
   filters: CampaignCrmFilterOptions;
   rows: CampaignCrmRow[];
   total: number;
@@ -112,6 +117,20 @@ export async function collectCampaignCrm(
   const profiles = list ? profilesFromList(list.result, camp.segments) : {};
   const now = options.now ?? Date.now();
 
+  const [verificationSummary, verificationResults] = await Promise.all([
+    collectCampaignVerification(camp),
+    loadCampaignVerificationResults(camp.id, camp.listId, recipients.map((recipient) => recipient.email)),
+  ]);
+  const verificationByEmail: Record<string, CampaignCrmVerification> = {};
+  for (const [email, result] of verificationResults) {
+    verificationByEmail[email] = {
+      result: result.result,
+      risk: result.risk,
+      reasons: result.reasons,
+      checkedAt: result.checkedAt,
+    };
+  }
+
   // Start a baseline for existing campaigns the first time the CRM is opened. This is the only
   // place that writes from a read route, and it only fills missing entries.
   await Promise.all(
@@ -150,6 +169,7 @@ export async function collectCampaignCrm(
     notes,
     history,
     connectionNames,
+    verificationByEmail,
   });
 
   const page = options.paginate === false
@@ -182,6 +202,7 @@ export async function collectCampaignCrm(
     },
     session: sessionMeta,
     summary: built.summary,
+    verification: verificationSummary,
     filters: built.filters,
     rows: page.rows,
     total: page.total,

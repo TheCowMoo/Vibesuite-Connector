@@ -423,6 +423,7 @@
         items += '<a class="menu__item" href="/oauth/ghl/start?connectionId=' + encodeURIComponent(c.id) + '">' + icon('link') + '<span>Connect GHL</span></a>';
       }
       items += menuBtn('attendanceAutomations', 'After-call actions', 'sliders', c.id);
+      items += menuBtn('verifyEmailTest', 'Test email verification', 'check', c.id);
       items += menuBtn('delete', 'Delete', 'trash', c.id, true);
 
       var card = document.createElement('div');
@@ -549,6 +550,64 @@
       '<h3 class="detail__sub">What a reply does in GoHighLevel</h3>' + mappingTable();
     openModal('detail');
   }
+
+  /* ---- GHL email verification probe ---- */
+  var verifyEmailTestId = null;
+
+  function openVerifyEmailTest(id) {
+    var c = state.connections.filter(function (x) { return x.id === id; })[0];
+    if (!c) return;
+    verifyEmailTestId = id;
+    document.getElementById('verifyEmailTestIntro').textContent =
+      'Checks one address through GHL before a list-wide run. It uses the GHL location on this account' +
+      (c.ghlLocationId ? ' (' + c.ghlLocationId + ')' : ' — no location id is set') + '.';
+    document.getElementById('verifyEmailTestAddress').value = '';
+    var out = document.getElementById('verifyEmailTestResult');
+    out.hidden = true;
+    out.className = 'invite-result';
+    out.innerHTML = '';
+    openModal('verifyEmailTest');
+  }
+
+  function renderVerifyEmailResult(v) {
+    var out = document.getElementById('verifyEmailTestResult');
+    out.hidden = false;
+    var tone = v.result === 'deliverable'
+      ? 'success'
+      : v.result === 'catch_all' || v.result === 'unknown'
+        ? 'warning'
+        : 'error';
+    out.className = 'invite-result invite-result--' + tone;
+    var reasons = (v.reasons || []).join(', ');
+    out.innerHTML =
+      '<strong>' + esc(v.address) + ' — ' + esc(v.result) + '</strong>' +
+      '<div>Risk: ' + esc(v.risk) + (reasons ? ' · ' + esc(reasons) : '') + '</div>' +
+      '<div class="muted">' +
+        (v.isEmailValid ? 'GHL says this address is valid.' : 'GHL does not consider this address valid.') +
+      '</div>';
+  }
+
+  document.getElementById('verifyEmailTestRun').addEventListener('click', function () {
+    if (!verifyEmailTestId) return;
+    var email = document.getElementById('verifyEmailTestAddress').value.trim();
+    if (!email) {
+      toast('Enter an email address', 'error');
+      return;
+    }
+    var btn = this;
+    withBusy(btn, api('/api/connections/' + verifyEmailTestId + '/email-verification/test', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: email }),
+    }))
+      .then(function (r) { renderVerifyEmailResult(r.verification || {}); })
+      .catch(function (err) {
+        var out = document.getElementById('verifyEmailTestResult');
+        out.hidden = false;
+        out.className = 'invite-result invite-result--error';
+        out.textContent = err.message;
+      });
+  });
 
   /* ---- Edit ---- */
   var editId = null;
@@ -1186,6 +1245,8 @@
       openAutomations(id);
     } else if (action === 'attendanceAutomations') {
       openAttendanceAutomations(id);
+    } else if (action === 'verifyEmailTest') {
+      openVerifyEmailTest(id);
     } else if (action === 'delete') {
       confirmDialog('Delete connection?', 'This connection and its watch channel will be removed. Its Google watch channel expires on its own.', 'Delete').then(function (ok) {
         if (!ok) return;
@@ -1641,20 +1702,30 @@
       return b.htmlLink ? '<a href="' + esc(b.htmlLink) + '" target="_blank" rel="noopener">open event</a>' : '';
     }).filter(Boolean).join(', ');
     var unplaced = (r.skipped && r.skipped.unplaced) || 0;
+    var verifyNote = '';
+    if (r.excludedByVerification) {
+      verifyNote += r.excludedByVerification + ' address' + (r.excludedByVerification === 1 ? '' : 'es') +
+        ' skipped by email verification. ';
+    }
+    if (r.verificationWarnings && r.verificationWarnings.length) {
+      verifyNote += esc(r.verificationWarnings.join(' ')) + ' ';
+    }
+    var verifyWarn = !!(r.excludedByVerification || (r.verificationWarnings && r.verificationWarnings.length));
 
     if (r.schedule) {
-      el.className = 'invite-result invite-result--success';
+      el.className = 'invite-result ' + (verifyWarn ? 'invite-result--warning' : 'invite-result--success');
       var scheduled = 'Sent to ' + r.sent + ' now. ' + r.schedule.remainingCount +
         ' more will be invited in rounds of up to ' + r.schedule.batchSize + ' per account; next round ' +
         prettyDate(r.schedule.nextAt) + '.';
       if (r.batchWarning) scheduled += ' ' + esc(r.batchWarning) + '.';
-      el.innerHTML = scheduled + (links ? ' — ' + links : '');
+      el.innerHTML = scheduled + ' ' + verifyNote + (links ? ' — ' + links : '');
       return;
     }
 
     if (r.ok && !unplaced) {
-      el.className = 'invite-result invite-result--success';
-      el.innerHTML = 'Sent to ' + r.sent + ' recipient' + (r.sent === 1 ? '' : 's') + (links ? ' — ' + links : '') + '.';
+      el.className = 'invite-result ' + (verifyWarn ? 'invite-result--warning' : 'invite-result--success');
+      el.innerHTML = 'Sent to ' + r.sent + ' recipient' + (r.sent === 1 ? '' : 's') + (links ? ' — ' + links : '') +
+        '. ' + verifyNote;
       return;
     }
 
@@ -1667,7 +1738,7 @@
     if (unplaced) bits.push(unplaced + ' not sent — no room left today, try again later');
     var why = (r.invite && r.invite.error) ? esc(r.invite.error) + '. ' : '';
     var warning = r.batchWarning ? esc(r.batchWarning) + '. ' : '';
-    el.innerHTML = warning + why + (bits.join(', ') || 'nothing went through') + (links ? ' — ' + links : '') + '.';
+    el.innerHTML = warning + why + verifyNote + (bits.join(', ') || 'nothing went through') + (links ? ' — ' + links : '') + '.';
   }
 
   function renderInvitePrereqs() {
@@ -3544,11 +3615,17 @@
   /* ---- Lists & Knowledge ---- */
   var listPollTimer = null;
   var listStatuses = {};
+  var listVerifyStatuses = {};
+  var listVerifyConfig = { costPer1000: 2.5, maxPerRun: 10000 };
+  var currentLists = [];
 
   function loadLists(options) {
     if (!options || !options.quiet) $('#listsList').innerHTML = skeletonCards(3);
     return api('/api/lists')
-      .then(function (d) { renderLists(d.lists || []); })
+      .then(function (d) {
+        if (d.verificationConfig) listVerifyConfig = d.verificationConfig;
+        renderLists(d.lists || []);
+      })
       .catch(function (e) { toast(e.message, 'error'); });
   }
 
@@ -3560,7 +3637,47 @@
     }, 2000);
   }
 
+  function listVerificationChip(v) {
+    if (!v) return '<span class="chip chip--neutral">Not verified</span>';
+    if (v.status === 'queued' || v.status === 'running') {
+      var pct = v.total ? Math.max(1, Math.min(100, Math.round(((v.checked || 0) / v.total) * 100))) : 0;
+      return '<span class="chip chip--warning">Verifying ' + pct + '%</span>';
+    }
+    if (v.status === 'failed') return '<span class="chip chip--danger">Verification failed</span>';
+    if (v.status === 'cancelled') return '<span class="chip chip--neutral">Verification cancelled</span>';
+    var bad = (v.undeliverable || 0) + (v.doNotSend || 0);
+    if (bad > 0) return '<span class="chip chip--danger">' + bad + ' not deliverable</span>';
+    var uncertain = (v.catchAll || 0) + (v.unknown || 0);
+    if (uncertain > 0) return '<span class="chip chip--warning">' + uncertain + ' uncertain</span>';
+    if ((v.checked || 0) > 0 && !v.unchecked) return '<span class="chip chip--success">Verified</span>';
+    if ((v.checked || 0) > 0) return '<span class="chip chip--warning">' + v.unchecked + ' unchecked</span>';
+    return '<span class="chip chip--neutral">Not verified</span>';
+  }
+
+  function listVerificationProgress(v) {
+    if (!v || (v.status !== 'queued' && v.status !== 'running')) return '';
+    var total = v.total || 0;
+    var checked = v.checked || 0;
+    var pct = total ? Math.max(1, Math.min(100, Math.round((checked / total) * 100))) : 0;
+    return '<div class="gauge"><div class="gauge__bar"><span style="width:' + pct + '%"></span></div>' +
+      '<div class="gauge__label">Verified <strong>' + checked.toLocaleString() + '</strong> of ' +
+      total.toLocaleString() + ' · ' + (v.billableChecks || 0).toLocaleString() + ' GHL checks · ~$' +
+      Number(v.estimatedCostUsd || 0).toFixed(2) + '</div></div>';
+  }
+
+  function listVerificationSummary(v) {
+    if (!v || !(v.checked || 0)) return '';
+    var bits = [(v.deliverable || 0).toLocaleString() + ' deliverable'];
+    if (v.undeliverable) bits.push(v.undeliverable.toLocaleString() + ' undeliverable');
+    if (v.doNotSend) bits.push(v.doNotSend.toLocaleString() + ' do-not-send');
+    if (v.catchAll) bits.push(v.catchAll.toLocaleString() + ' catch-all');
+    if (v.unknown) bits.push(v.unknown.toLocaleString() + ' unknown');
+    if (v.unchecked) bits.push(v.unchecked.toLocaleString() + ' unchecked');
+    return '<div class="conn__meta"><span class="muted">' + esc(bits.join(' · ')) + '</span></div>';
+  }
+
   function renderLists(lists) {
+    currentLists = lists;
     var el = $('#listsList');
     el.innerHTML = '';
     if (!lists.length) {
@@ -3576,6 +3693,7 @@
     var active = false;
     lists.forEach(function (l) {
       var seg = l.segmentation || {};
+      var v = l.verification || null;
       var state = seg.status;
       var running = state === 'queued' || state === 'running';
       var failed = state === 'failed';
@@ -3589,6 +3707,16 @@
         : cancelled ? '<span class="chip chip--neutral">Sort cancelled</span>'
         : l.hasResult ? '<span class="chip chip--success">Sorted</span>'
         : '<span class="chip chip--neutral">Not sorted yet</span>';
+      var verifyRunning = !!(v && (v.status === 'queued' || v.status === 'running'));
+      var verifyChip = listVerificationChip(v);
+      var verifyProgress = listVerificationProgress(v);
+      var verifySummary = listVerificationSummary(v);
+      var verifyError = v && v.error
+        ? '<div class="conn__meta"><span class="muted" style="color:var(--danger)">' + esc(v.error) + '</span></div>'
+        : '';
+      var verifyWarning = v && v.warnings && v.warnings.length
+        ? '<div class="conn__meta"><span class="muted">' + esc(v.warnings.join(' ')) + '</span></div>'
+        : '';
       var progress = running
         ? '<div class="gauge"><div class="gauge__bar"><span style="width:' + pct + '%"></span></div>' +
           '<div class="gauge__label">Sorted <strong>' + processed.toLocaleString() + '</strong> of ' + total.toLocaleString() +
@@ -3599,14 +3727,20 @@
       box.className = 'conn';
       box.innerHTML =
         '<div class="conn__main">' +
-          '<div class="conn__head"><span class="conn__name">' + esc(l.name) + '</span>' + chip + '</div>' +
+          '<div class="conn__head"><span class="conn__name">' + esc(l.name) + '</span>' + chip + verifyChip + '</div>' +
           '<div class="conn__meta"><span>' + esc(l.criteria || 'No criteria') + '</span><span>' + esc(rowsLabel) + '</span></div>' +
-          progress + error +
+          progress + error + verifyProgress + verifySummary + verifyError + verifyWarning +
         '</div>' +
         '<div class="conn__actions">' +
           '<button class="btn btn--primary btn--sm" data-action="segment" data-id="' + esc(l.id) + '" data-rows="' + (l.rowCount || 0) + '"' + (running ? ' disabled' : '') + '>' +
             (running ? 'Sorting…' : failed ? 'Retry' : 'Segment') + '</button>' +
           (running ? '<button class="btn btn--ghost btn--sm" data-action="cancelSegment" data-id="' + esc(l.id) + '">Cancel</button>' : '') +
+          (l.hasResult
+            ? (verifyRunning
+                ? '<button class="btn btn--ghost btn--sm" data-action="cancelVerify" data-id="' + esc(l.id) + '">Cancel verify</button>'
+                : '<button class="btn btn--outline btn--sm" data-action="verifyList" data-id="' + esc(l.id) + '">' +
+                  (v && v.checked ? 'Verify again' : 'Verify emails') + '</button>')
+            : '') +
           (l.hasResult ? '<button class="btn btn--accent btn--sm" data-action="sendInvite" data-id="' + esc(l.id) + '">Send invite</button>' : '') +
           '<button class="btn btn--ghost btn--sm" data-action="viewResult" data-id="' + esc(l.id) + '">View</button>' +
           '<button class="btn btn--danger btn--sm" data-action="deleteList" data-id="' + esc(l.id) + '">Delete</button>' +
@@ -3620,7 +3754,21 @@
         toast('List sort failed: ' + (seg.error || 'unknown error'), 'error');
       }
       listStatuses[l.id] = state;
-      if (running) active = true;
+
+      var previousVerify = listVerifyStatuses[l.id];
+      if ((previousVerify === 'queued' || previousVerify === 'running') && v && v.status === 'done') {
+        var bad = (v.undeliverable || 0) + (v.doNotSend || 0);
+        toast(
+          'Email verification finished: ' + (v.checked || 0).toLocaleString() + ' checked' +
+            (bad ? ', ' + bad + ' excluded' : ''),
+          bad ? 'error' : 'success'
+        );
+      } else if ((previousVerify === 'queued' || previousVerify === 'running') && v && v.status === 'failed') {
+        toast('Email verification failed: ' + (v.error || 'unknown error'), 'error');
+      }
+      listVerifyStatuses[l.id] = v ? v.status : null;
+
+      if (running || verifyRunning) active = true;
     });
 
     if (active) scheduleListPoll();
@@ -3669,6 +3817,86 @@
       })
       .catch(function (e) { toast(e.message, 'error'); });
   }
+
+  /* ---- List email verification ---- */
+  var verifyListId = null;
+
+  function openVerifyList(id) {
+    var l = currentLists.filter(function (x) { return x.id === id; })[0];
+    if (!l) return;
+    verifyListId = id;
+
+    var v = l.verification || {};
+    var total = v.total || l.rowCount || 0;
+    var unchecked = v.status ? (v.unchecked || 0) : total;
+    var conns = (state.connections || []).filter(function (c) { return !!c.ghlLocationId; });
+    var sel = document.getElementById('verifyListConnection');
+    sel.innerHTML = conns.length
+      ? conns.map(function (c) {
+          return '<option value="' + esc(c.id) + '">' + esc(c.name) + ' — ' + esc(c.ghlLocationId) + '</option>';
+        }).join('')
+      : '<option value="">No GHL connection with a location id</option>';
+    if (v.connectionId && conns.some(function (c) { return c.id === v.connectionId; })) {
+      sel.value = v.connectionId;
+    }
+
+    document.getElementById('verifyListIntro').textContent =
+      'Checks this list’s email addresses through GHL before sending. This is a pre-send check, not a bounce.';
+    var cap = Number(listVerifyConfig.maxPerRun || 10000);
+    var costPer1000 = Number(listVerifyConfig.costPer1000 || 2.5);
+    var checks = Math.min(unchecked, cap);
+    document.getElementById('verifyListEstimate').textContent =
+      unchecked.toLocaleString() + ' unverified addresses. Up to ' + checks.toLocaleString() +
+      ' checks will run now (per-run cap ' + cap.toLocaleString() + '), estimated $' +
+      ((checks * costPer1000) / 1000).toFixed(2) + ' at $' + costPer1000 +
+      '/1,000. Cached results are free.';
+    var out = document.getElementById('verifyListResult');
+    out.hidden = true;
+    out.className = 'invite-result';
+    out.innerHTML = '';
+    document.getElementById('verifyListStart').disabled = !conns.length || !unchecked;
+    openModal('verifyList');
+  }
+
+  function startVerifyList() {
+    if (!verifyListId) return;
+    var connectionId = document.getElementById('verifyListConnection').value;
+    if (!connectionId) {
+      toast('No GHL connection with a location id', 'error');
+      return;
+    }
+    var btn = document.getElementById('verifyListStart');
+    withBusy(btn, api('/api/lists/' + verifyListId + '/verify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ connectionId: connectionId }),
+    }))
+      .then(function (r) {
+        var v = r.verification || {};
+        listVerifyStatuses[verifyListId] = v.status;
+        closeModal('verifyList');
+        toast('Verification queued for ' + (v.total || 0).toLocaleString() + ' addresses', 'success');
+        loadLists({ quiet: true });
+      })
+      .catch(function (e) {
+        var out = document.getElementById('verifyListResult');
+        out.hidden = false;
+        out.className = 'invite-result invite-result--error';
+        out.textContent = e.message;
+      });
+  }
+
+  function cancelEmailVerification(id) {
+    api('/api/lists/' + id + '/verify/cancel', { method: 'POST' })
+      .then(function (r) {
+        if (r && r.verification) listVerifyStatuses[id] = r.verification.status;
+        toast('Verification cancelled', 'success');
+        loadLists({ quiet: true });
+      })
+      .catch(function (e) { toast(e.message, 'error'); });
+  }
+
+  document.getElementById('verifyListStart').addEventListener('click', startVerifyList);
 
   var currentListResultId = null;
   function viewListResult(id) {
@@ -3807,6 +4035,8 @@
     var id = btn.dataset.id;
     if (btn.dataset.action === 'segment') segmentList(id);
     else if (btn.dataset.action === 'cancelSegment') cancelListSort(id);
+    else if (btn.dataset.action === 'verifyList') openVerifyList(id);
+    else if (btn.dataset.action === 'cancelVerify') cancelEmailVerification(id);
     else if (btn.dataset.action === 'sendInvite') goToInvite(id);
     else if (btn.dataset.action === 'viewResult') viewListResult(id);
     else if (btn.dataset.action === 'deleteList') {
@@ -4907,6 +5137,7 @@
   var currentCampaign = null;
   var currentCampaignPlan = null;
   var currentCampaignStats = null;
+  var currentCampaignVerification = null;
   var campaignDetailTab = 'overview';
   var campaignSendNotice = null;
   var campCopyVariants = [];
@@ -6140,6 +6371,7 @@
     currentCampaign = null;
     currentCampaignPlan = null;
     currentCampaignStats = null;
+    currentCampaignVerification = null;
     campaignDetailTab = tab === 'people' ? 'people' : 'overview';
     if (crmTabState.campaignId !== id) crmTabState = newCrmState(id, CRM_TAB_LIMIT);
     document.getElementById('campaignDetailBody').innerHTML = skeletonCards(1);
@@ -6153,6 +6385,7 @@
         currentCampaign = r[0].campaign;
         currentCampaignPlan = r[1];
         currentCampaignStats = r[2] && r[2].stats;
+        currentCampaignVerification = r[2] && r[2].verification;
         renderCampaignDetail(currentCampaign, currentCampaignPlan, currentCampaignStats);
         if (campaignDetailTab === 'people') loadCampaignCrmTab();
       })
@@ -6300,7 +6533,8 @@
       '<h3 class="detail__sub">Progress by account</h3>' +
       '<table class="map"><thead><tr><th>Account</th><th>Share</th><th>Sent</th><th>Waiting</th><th>Couldn\'t send</th><th>On</th></tr></thead><tbody>' +
         (rows || '<tr><td colspan="6" class="muted">Nothing sent yet.</td></tr>') + '</tbody></table>' +
-      campaignStatsHtml(stats);
+      campaignStatsHtml(stats) +
+      campaignVerificationHtml(currentCampaignVerification);
 
     var peopleContent;
     if (crmTabState.error) {
@@ -6386,6 +6620,29 @@
     if (row.rsvp === 'tentative') return crmChip('Maybe', 'warning');
     if (row.rsvp === 'needsAction') return crmChip('No reply', 'neutral');
     return crmChip('Not sent', 'neutral');
+  }
+
+  function crmVerificationChip(row) {
+    var v = row.verification;
+    if (!v) return crmChip('Not checked', 'neutral');
+    var title = (v.reasons || []).join(', ');
+    var label = v.result === 'deliverable'
+      ? 'Deliverable'
+      : v.result === 'undeliverable'
+        ? 'Undeliverable'
+        : v.result === 'do_not_send'
+          ? 'Do not send'
+          : v.result === 'catch_all'
+            ? 'Catch-all'
+            : 'Unknown';
+    var tone = v.result === 'deliverable'
+      ? 'success'
+      : v.result === 'undeliverable' || v.result === 'do_not_send'
+        ? 'danger'
+        : v.result === 'catch_all'
+          ? 'warning'
+          : 'neutral';
+    return '<span class="chip chip--' + tone + '"' + (title ? ' title="' + esc(title) + '"' : '') + '>' + esc(label) + '</span>';
   }
 
   function crmZoomChip(row) {
@@ -6678,6 +6935,7 @@
           (meta.length ? '<span class="crm-person__meta">' + esc(meta.join(' · ')) + '</span>' : '') +
         '</button></td>' +
         '<td>' + crmRsvpChip(row) + '</td>' +
+        '<td>' + crmVerificationChip(row) + '</td>' +
         '<td>' + crmZoomChip(row) + '</td>' +
         '<td>' + crmFollowUpChip(row) + '</td>' +
         '<td>' + esc(row.senderName || '—') + '</td>' +
@@ -6685,12 +6943,12 @@
         '<td>' + crmSendChip(row) + sent + '</td>' +
         '<td class="crm-activity">' + esc(activity) + '</td>' +
         '</tr>';
-      if (open) html += '<tr class="crm-detail"><td colspan="8">' + crmRowDetailHtml(row) + '</td></tr>';
+      if (open) html += '<tr class="crm-detail"><td colspan="9">' + crmRowDetailHtml(row) + '</td></tr>';
       return html;
     }).join('');
 
     return '<div class="table-scroll"><table class="map crm-table"><thead><tr>' +
-      '<th>Person</th><th>Reply</th><th>Zoom</th><th>Follow-up</th><th>Sender</th><th>Copy</th><th>Sent</th><th>Activity</th>' +
+      '<th>Person</th><th>Reply</th><th>Verified</th><th>Zoom</th><th>Follow-up</th><th>Sender</th><th>Copy</th><th>Sent</th><th>Activity</th>' +
       '</tr></thead><tbody>' + rows + '</tbody></table></div>';
   }
 
@@ -7000,14 +7258,17 @@
     if (!stats || !stats.funnel) return '';
     var f = stats.funnel;
     var withAtt = !!stats.hasAttendance;
+    var yes = yesRateVerdict(f.responseRate, f.accepted + f.tentative);
 
     var html = '<h3 class="detail__sub">What happened</h3>' +
       '<div class="summary">' +
         '<div class="summary__item"><span class="summary__value">' + f.sent + '</span><span class="summary__label">invited (' + f.rsvpRate + '% replied)</span></div>' +
         '<div class="summary__item"><span class="summary__value">' + f.accepted + '</span><span class="summary__label">said yes (' + f.acceptanceRate + '% of sent)</span></div>' +
+        '<div class="summary__item"><span class="summary__value summary__value--' + (f.failedRate ? 'danger' : 'neutral') + '">' + (f.failedRate || 0) + '%</span><span class="summary__label">failed to send (' + f.failed + ' of ' + (f.sent + f.failed) + ' attempted)</span></div>' +
         '<div class="summary__item"><span class="summary__value">' + f.declined + '</span><span class="summary__label">said no</span></div>' +
         '<div class="summary__item"><span class="summary__value">' + f.tentative + '</span><span class="summary__label">maybe</span></div>' +
         '<div class="summary__item"><span class="summary__value">' + f.noResponse + '</span><span class="summary__label">no reply</span></div>' +
+        '<div class="summary__item"><span class="summary__value summary__value--' + yes.tone + '">' + esc(yes.text) + '</span><span class="summary__label">yes rate (yes ÷ yes + maybe) · KPI >70% · ' + esc(yes.label) + '</span></div>' +
       '</div>';
 
     if (withAtt) {
@@ -7019,29 +7280,61 @@
       html += '<p class="muted">Who showed up appears once the linked video call has been synced in the <strong>Calls</strong> tab.</p>';
     }
 
-    var head = '<tr><th>Account</th><th>Sent</th><th>Yes</th><th>No</th><th>Maybe</th><th>No reply</th>' + (withAtt ? '<th>Showed up</th>' : '') + '</tr>';
+    var head = '<tr><th>Account</th><th>Sent</th><th>Failed %</th><th>Yes</th><th>No</th><th>Maybe</th><th>No reply</th>' + (withAtt ? '<th>Showed up</th>' : '') + '</tr>';
     var body = (stats.perSender || []).map(function (x) {
-      return '<tr><td>' + esc(connName(x.connectionId)) + '</td><td>' + x.sent + '</td><td>' + x.accepted +
+      var attempted = x.sent + x.failed;
+      var failedRate = attempted ? Math.round((x.failed / attempted) * 1000) / 10 : 0;
+      return '<tr><td>' + esc(connName(x.connectionId)) + '</td><td>' + x.sent + '</td><td>' + failedRate + '</td><td>' + x.accepted +
         '</td><td>' + x.declined + '</td><td>' + x.tentative + '</td><td>' + x.noResponse + '</td>' +
         (withAtt ? '<td>' + x.attended + '</td>' : '') + '</tr>';
     }).join('');
 
     return html + '<h3 class="detail__sub">What happened, per sending account</h3>' +
       '<table class="map"><thead>' + head + '</thead><tbody>' +
-      (body || '<tr><td colspan="' + (withAtt ? 7 : 6) + '" class="muted">Nothing sent yet.</td></tr>') + '</tbody></table>' +
+      (body || '<tr><td colspan="' + (withAtt ? 8 : 7) + '" class="muted">Nothing sent yet.</td></tr>') + '</tbody></table>' +
       campaignVariantStatsHtml(stats);
+  }
+
+  function campaignVerificationHtml(v) {
+    if (!v || !v.total) return '';
+    var bad = (v.undeliverable || 0) + (v.doNotSend || 0);
+    var uncertain = (v.catchAll || 0) + (v.unknown || 0);
+    var tone = bad ? 'danger' : uncertain || v.unchecked ? 'warning' : 'success';
+    var label = bad
+      ? bad.toLocaleString() + ' excluded'
+      : v.checked
+        ? 'checked'
+        : 'not verified yet';
+    var rates = v.rates || {};
+    return '<h3 class="detail__sub">Email verification <span class="chip chip--' + tone + '">' + esc(label) + '</span></h3>' +
+      '<div class="summary">' +
+        '<div class="summary__item"><span class="summary__value">' + (v.checked || 0).toLocaleString() + '</span><span class="summary__label">checked of ' + (v.total || 0).toLocaleString() + '</span></div>' +
+        '<div class="summary__item"><span class="summary__value">' + (v.deliverable || 0).toLocaleString() + '</span><span class="summary__label">deliverable</span></div>' +
+        '<div class="summary__item"><span class="summary__value summary__value--' + (bad ? 'danger' : 'neutral') + '">' + bad.toLocaleString() + '</span><span class="summary__label">undeliverable / do-not-send</span></div>' +
+        '<div class="summary__item"><span class="summary__value summary__value--' + (uncertain ? 'warning' : 'neutral') + '">' + uncertain.toLocaleString() + '</span><span class="summary__label">catch-all / unknown</span></div>' +
+        '<div class="summary__item"><span class="summary__value summary__value--' + (v.unchecked ? 'warning' : 'neutral') + '">' + (v.unchecked || 0).toLocaleString() + '</span><span class="summary__label">unchecked</span></div>' +
+      '</div>' +
+      '<p class="muted">Pre-send GHL mailbox check, not a bounce. ' +
+        (rates.undeliverable !== undefined ? rates.undeliverable + '% undeliverable · ' : '') +
+        (rates.catchAll !== undefined ? rates.catchAll + '% catch-all · ' : '') +
+        (rates.unknown !== undefined ? rates.unknown + '% unknown · ' : '') +
+        (rates.unchecked !== undefined ? rates.unchecked + '% unchecked.' : '') +
+      '</p>';
   }
 
   function campaignVariantStatsHtml(stats) {
     if (!stats || !stats.variants || stats.variants.length < 2) return '';
     var withAtt = !!stats.hasAttendance;
     var head = '<tr><th>Copy</th><th>Sent</th><th>Yes</th><th>No</th><th>Maybe</th><th>No reply</th>' +
-      (withAtt ? '<th>Showed up</th>' : '') + '<th>RSVP %</th><th>Accept %</th></tr>';
+      (withAtt ? '<th>Showed up</th>' : '') +
+      '<th>RSVP %</th><th>Accept %</th><th>Fail %</th><th title="Yes ÷ (Yes + Maybe); target >70%">Yes %</th></tr>';
     var body = stats.variants.map(function (v) {
       return '<tr><td><strong>' + esc(v.variant) + '</strong></td><td>' + v.sent + '</td><td>' + v.accepted +
         '</td><td>' + v.declined + '</td><td>' + v.tentative + '</td><td>' + v.noResponse + '</td>' +
         (withAtt ? '<td>' + v.attended + '</td>' : '') +
-        '<td>' + v.rsvpRate + '</td><td>' + v.acceptanceRate + '</td></tr>';
+        '<td>' + v.rsvpRate + '</td><td>' + v.acceptanceRate + '</td>' +
+        '<td>' + (v.failedRate || 0) + '</td>' +
+        '<td>' + yesRateChip(v.responseRate, v.accepted + v.tentative) + '</td></tr>';
     }).join('');
     return '<h3 class="detail__sub">What happened, per copy variant</h3>' +
       '<table class="map"><thead>' + head + '</thead><tbody>' + body + '</tbody></table>';
@@ -7486,8 +7779,17 @@
           extra = ' — ' + r.recipients + ' people added to the queue';
           if (r.reInviting) extra += ' (' + r.reInviting + ' are repeat invitations)';
           else if (r.alreadyInvited) extra += ' (' + r.alreadyInvited + ' were skipped as already invited)';
+          if (r.excludedByVerification) {
+            extra += ' · ' + r.excludedByVerification + ' skipped by email verification';
+          }
+          if (r.verificationWarnings && r.verificationWarnings.length) {
+            extra += ' · ' + r.verificationWarnings[0];
+          }
         }
-        toast(route.msg + extra, 'success');
+        var tone = r && (r.excludedByVerification || (r.verificationWarnings && r.verificationWarnings.length))
+          ? 'info'
+          : 'success';
+        toast(route.msg + extra, tone);
         loadCampaigns();
       })
       .catch(function (err) { toast(err.message, 'error'); });
@@ -7899,6 +8201,25 @@
     return out;
   }
 
+  function sampleVerification(total) {
+    var checked = Math.round(total * 0.9);
+    var deliverable = Math.round(checked * 0.86);
+    var undeliverable = Math.round(checked * 0.02);
+    var doNotSend = Math.round(checked * 0.005);
+    var catchAll = Math.round(checked * 0.07);
+    var unknown = Math.max(0, checked - deliverable - undeliverable - doNotSend - catchAll);
+    return {
+      total: total,
+      checked: checked,
+      deliverable: deliverable,
+      undeliverable: undeliverable,
+      doNotSend: doNotSend,
+      catchAll: catchAll,
+      unknown: unknown,
+      unchecked: Math.max(0, total - checked)
+    };
+  }
+
   function sampleOverview(days) {
     var daily = sampleDaily(days);
     var invitations = daily.reduce(function (a, d) { return a + d.sent; }, 0);
@@ -7939,6 +8260,9 @@
         attendances: attendances,
         noShows: noShows,
         acceptanceRate: 38,
+        responseRate: accepted + tentative
+          ? Math.round((accepted / (accepted + tentative)) * 1000) / 10
+          : 0,
         attendanceRate: Math.round((attendances / (attendances + noShows)) * 1000) / 10
       },
       rsvp: {
@@ -7947,31 +8271,57 @@
         tentative: tentative,
         noResponse: invitations - accepted - declined - tentative
       },
+      verification: sampleVerification(invitations),
       daily: daily,
       byMailbox: mailboxes,
       topCampaigns: (function () {
         var specs = [
-          { id: 'sample-1', name: 'October product webinar', status: 'active', share: 0.42, rate: 0.41, show: 0.76 },
-          { id: 'sample-2', name: 'Partner briefing', status: 'completed', share: 0.26, rate: 0.33, show: 0.72 },
-          { id: 'sample-3', name: 'Customer roundtable', status: 'completed', share: 0.18, rate: 0.36, show: 0.7 },
-          { id: 'sample-4', name: 'Beta invitations', status: 'paused', share: 0.09, rate: 0.28, show: 0.65 },
-          { id: 'sample-5', name: 'Re-engagement', status: 'draft', share: 0.05, rate: 0.2, show: 0.5 }
+          { id: 'sample-1', name: 'October product webinar', status: 'active', share: 0.42, rate: 0.41, maybe: 0.08, fail: 0.02, show: 0.76 },
+          { id: 'sample-2', name: 'Partner briefing', status: 'completed', share: 0.26, rate: 0.33, maybe: 0.17, fail: 0.04, show: 0.72 },
+          { id: 'sample-3', name: 'Customer roundtable', status: 'completed', share: 0.18, rate: 0.36, maybe: 0.12, fail: 0.01, show: 0.7 },
+          { id: 'sample-4', name: 'Beta invitations', status: 'paused', share: 0.09, rate: 0.28, maybe: 0.3, fail: 0.06, show: 0.65 },
+          { id: 'sample-5', name: 'Re-engagement', status: 'draft', share: 0.05, rate: 0.2, maybe: 0.35, fail: 0.03, show: 0.5 }
         ];
         return specs.map(function (s) {
           var sent = Math.round(invitations * s.share);
           var accepted = Math.round(sent * s.rate);
+          var tentative = Math.round(sent * s.maybe);
+          var failed = Math.round(sent * s.fail);
           return {
             id: s.id, name: s.name, status: s.status,
-            sent: sent, accepted: accepted, attended: Math.round(accepted * s.show)
+            sent: sent, failed: failed,
+            failedRate: sent + failed ? Math.round((failed / (sent + failed)) * 1000) / 10 : 0,
+            accepted: accepted, tentative: tentative,
+            responseRate: accepted + tentative
+              ? Math.round((accepted / (accepted + tentative)) * 1000) / 10
+              : 0,
+            verification: sampleVerification(sent),
+            attended: Math.round(accepted * s.show)
           };
         });
       })()
     };
   }
 
-  function statCard(label, value, note, tone) {
+  /** One shared verdict for the Yes ÷ (Yes + Maybe) KPI. */
+  function yesRateVerdict(rate, positive) {
+    var api = window.RateTone;
+    if (!api) return { tone: 'neutral', label: 'No replies', text: '—' };
+    var hasData = Number(positive) > 0;
+    var verdict = api.classify(rate, hasData);
+    return { tone: verdict.tone, label: verdict.label, text: api.format(rate, hasData) };
+  }
+
+  function yesRateChip(rate, positive) {
+    var verdict = yesRateVerdict(rate, positive);
+    var detail = 'Yes rate ' + verdict.text + ' — ' + verdict.label;
+    return '<span class="chip chip--' + verdict.tone + '" title="' + esc(detail) +
+      '" aria-label="' + esc(detail) + '">' + esc(verdict.text) + '</span>';
+  }
+
+  function statCard(label, value, note, tone, valueTone) {
     return '<div class="stat' + (tone ? ' stat--' + tone : '') + '">' +
-      '<div class="stat__value">' + esc(value) + '</div>' +
+      '<div class="stat__value' + (valueTone ? ' stat__value--' + valueTone : '') + '">' + esc(value) + '</div>' +
       '<div class="stat__label">' + esc(label) + '</div>' +
       (note ? '<div class="stat__label">' + esc(note) + '</div>' : '') +
       '</div>';
@@ -8131,7 +8481,7 @@
     var statSkeleton = '<div class="skeleton skel-stat"></div>';
     kpis.innerHTML = statSkeleton + statSkeleton + statSkeleton + statSkeleton;
     document.getElementById('statsBanner').innerHTML = '';
-    ['statsDaily', 'statsRsvp', 'statsMailboxes', 'statsCampaigns'].forEach(function (id) {
+    ['statsDaily', 'statsRsvp', 'statsMailboxes', 'statsCampaigns', 'statsVerification'].forEach(function (id) {
       document.getElementById(id).innerHTML = '<div class="skeleton skel-card"></div>';
     });
 
@@ -8151,6 +8501,10 @@
   function renderStatsOverview(data, sample) {
     var t = data.totals;
     var r = data.rsvp;
+    var yes = yesRateVerdict(t.responseRate, r.accepted + r.tentative);
+    var yesNote = (r.accepted + r.tentative)
+      ? r.accepted + ' yes · ' + r.tentative + ' maybe · KPI >70% · ' + yes.label
+      : 'No yes or maybe replies yet';
 
     document.getElementById('statsBanner').innerHTML = sample
       ? '<div class="sample-banner"><div><strong>Sample data — nothing here is real.</strong> ' +
@@ -8160,7 +8514,7 @@
 
     document.getElementById('statsKpis').innerHTML =
       statCard('Invitations sent', t.invitations, t.campaigns + ' in period · ' + t.activeCampaigns + ' active now') +
-      statCard('Accepted', r.accepted, t.acceptanceRate + '% acceptance', 'success') +
+      statCard('Yes rate', yes.text, yesNote, yes.tone, yes.tone) +
       statCard('Attendances', t.attendances, t.sessions + ' session' + (t.sessions === 1 ? '' : 's') + ' · ' + t.noShows + ' no-shows', 'success') +
       statCard('Still waiting', t.pending, t.failed + ' failed to send', 'warning');
 
@@ -8219,6 +8573,49 @@
       : '<p class="muted">No replies yet. RSVP answers appear here as soon as people respond.</p>';
 
     renderStatsTables(data);
+    renderStatsVerification(data);
+  }
+
+  function renderStatsVerification(data) {
+    var el = document.getElementById('statsVerification');
+    var v = data.verification;
+    if (!v || !v.total) {
+      el.innerHTML = '<p class="muted">No email verification has run for this period. Verify a list first.</p>';
+      return;
+    }
+
+    function rate(part, whole) {
+      return whole ? Math.round((part / whole) * 1000) / 10 : 0;
+    }
+
+    var bad = (v.undeliverable || 0) + (v.doNotSend || 0);
+    var uncertain = (v.catchAll || 0) + (v.unknown || 0);
+    var rows = (data.topCampaigns || []).filter(function (c) {
+      return c.verification && c.verification.total;
+    }).map(function (c) {
+      var x = c.verification;
+      var xBad = (x.undeliverable || 0) + (x.doNotSend || 0);
+      var xUncertain = (x.catchAll || 0) + (x.unknown || 0);
+      return '<tr><td>' + esc(c.name) + '</td>' +
+        '<td>' + (x.checked || 0).toLocaleString() + ' / ' + (x.total || 0).toLocaleString() + '</td>' +
+        '<td>' + (x.deliverable || 0).toLocaleString() + '</td>' +
+        '<td>' + xBad.toLocaleString() + '</td>' +
+        '<td>' + xUncertain.toLocaleString() + '</td>' +
+        '<td>' + (x.unchecked || 0).toLocaleString() + '</td></tr>';
+    }).join('');
+
+    el.innerHTML =
+      '<div class="summary">' +
+        '<div class="summary__item"><span class="summary__value">' + (v.checked || 0).toLocaleString() + '</span><span class="summary__label">checked of ' + (v.total || 0).toLocaleString() + '</span></div>' +
+        '<div class="summary__item"><span class="summary__value">' + (v.deliverable || 0).toLocaleString() + '</span><span class="summary__label">deliverable</span></div>' +
+        '<div class="summary__item"><span class="summary__value summary__value--' + (bad ? 'danger' : 'neutral') + '">' + bad.toLocaleString() + '</span><span class="summary__label">excluded (' + rate(bad, v.checked) + '%)</span></div>' +
+        '<div class="summary__item"><span class="summary__value summary__value--' + (uncertain ? 'warning' : 'neutral') + '">' + uncertain.toLocaleString() + '</span><span class="summary__label">catch-all / unknown</span></div>' +
+        '<div class="summary__item"><span class="summary__value summary__value--' + (v.unchecked ? 'warning' : 'neutral') + '">' + (v.unchecked || 0).toLocaleString() + '</span><span class="summary__label">unchecked (' + rate(v.unchecked, v.total) + '%)</span></div>' +
+      '</div>' +
+      '<p class="muted">Pre-send GHL mailbox checks, not bounces. Undeliverable rate includes do-not-send; unchecked uses the total audience.</p>' +
+      (rows
+        ? '<div class="table-scroll"><table class="map"><thead><tr><th>Campaign</th><th>Checked</th><th>Deliverable</th><th>Excluded</th><th>Catch-all / unknown</th><th>Unchecked</th></tr></thead><tbody>' + rows + '</tbody></table></div>'
+        : '');
   }
 
   function renderStatsTables(data) {
@@ -8240,12 +8637,15 @@
       : '<p class="muted">No invitations went out in this period.</p>';
 
     var topRows = (data.topCampaigns || []).map(function (c) {
+      var positive = Number(c.accepted || 0) + Number(c.tentative || 0);
       return '<tr><td>' + esc(c.name) + '</td><td>' + campStatusChip(c.status) + '</td>' +
-        '<td>' + c.sent + '</td><td>' + c.accepted + '</td><td>' + c.attended + '</td></tr>';
+        '<td>' + c.sent + '</td><td>' + (c.failed || 0) + ' (' + (c.failedRate || 0) + '%)</td><td>' + c.accepted + '</td>' +
+        '<td>' + yesRateChip(c.responseRate, positive) + '</td><td>' + c.attended + '</td></tr>';
     }).join('');
     document.getElementById('statsCampaigns').innerHTML = topRows
       ? '<div class="table-scroll"><table class="map"><thead><tr>' +
-        '<th>Campaign</th><th>Status</th><th>Sent</th><th>Accepted</th><th>Attended</th>' +
+        '<th>Campaign</th><th>Status</th><th>Sent</th><th>Failed</th><th>Accepted</th>' +
+        '<th title="Yes ÷ (Yes + Maybe); target >70%">Yes rate</th><th>Attended</th>' +
         '</tr></thead><tbody>' + topRows + '</tbody></table></div>'
       : '<p class="muted">No campaigns sent invitations in this period.</p>';
   }

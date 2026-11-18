@@ -63,6 +63,11 @@ calendar id, location id, and optional webhook URLs. All runtime keys are namesp
 | `campaign:{id}:sender:{conn}` | hash `sent` / `failed` for that mailbox inside the campaign |
 | `campaign:{id}:dispatch:{email}` | idempotency guard: a recipient is invited once per campaign (30-day TTL) |
 | `campaign:{id}:crm:notes` | hash `personKey -> JSON{followUp, note, updatedAt, updatedBy}` (campaign-scoped CRM notes) |
+| `email:verify:{email}` | cached GHL pre-send verification result (30-day TTL by default) |
+| `list:{id}:verify` | verification run status, progress and counts |
+| `list:{id}:verify:results` | hash `email -> JSON{result, risk, reasons, checkedAt}` for the list |
+| `campaign:{id}:verification` | frozen verification snapshot for the campaign audience |
+| `campaign:{id}:verification:audience` | JSON list of the frozen audience, including excluded addresses |
 | `domain:health:{domain}` | cached DNS snapshot for one sending domain (6-hour TTL by default) |
 | `domain:health:index` | set of domains that have a cached snapshot |
 | `domain:health:lock:{domain}` | refresh lock, so two operators cannot fire the same DNS burst (`SET NX EX 90`) |
@@ -233,9 +238,64 @@ attendance into one funnel — invited → sent/failed/queued → accepted/decli
 attended/no-show — and emits the same numbers broken down **per sending mailbox**. Every figure is
 attributable to the mailbox that actually created the calendar event, because each recipient row
 keeps its `connectionId` and `eventId`. Rates are real percentages of real denominators
-(`rsvpRate = (accepted + declined + tentative) / sent`, `attendanceRate = attended / (accepted +
-tentative)`), never estimates. Bounce/open metrics are intentionally absent until the GHL reminder
-layer exists.
+(`rsvpRate = (accepted + declined + tentative) / sent`, `failedRate = failed / (sent + failed)`,
+`acceptanceRate = accepted / sent`, `responseRate = accepted / (accepted + tentative)`,
+`attendanceRate = attended / (accepted + tentative)`), never estimates. `failedRate` is the
+attempted-send failure rate; it is Google API/event-creation failure, not an email bounce. `responseRate` is the campaign KPI: it deliberately excludes declines
+and silence, so it answers “when someone gave us a positive or possible answer, how often was it a
+definite yes?”. Delivery/bounce/open metrics are still absent for Calendar invitations; the separate
+pre-send GHL mailbox verification below is not a bounce signal.
+
+## Email verification (pre-send)
+
+Google sends the Calendar invitation, and the Calendar API exposes only attendee `responseStatus`
+(`accepted` / `declined` / `tentative` / `needsAction`) — no delivered or bounced field. The optional
+GHL Email Verification check is therefore a **pre-send mailbox check**, never a bounce number.
+
+`ghl/emailVerification.ts` calls:
+
+```
+POST /email/verify?locationId=<locationId>
+Version: v3
+Scope: lc-email.readonly
+
+{ "type": "email", "verify": "person@example.com" }
+```
+
+The response is normalized to `result` (`deliverable`, `undeliverable`, `do_not_send`, `unknown`,
+`catch_all`), `risk`, `reasons` (for example `mailbox_does_not_exist`) and `isEmailValid`. The endpoint
+requires a location on **LC Email or Mailgun**, and GHL bills the check to that location/company wallet
+(approximately $2.50 per 1,000 checks). Existing GHL OAuth connections must reconnect after
+`lc-email.readonly` is added to the app; private tokens need the scope added.
+
+**Run.** `POST /api/lists/:id/verify` queues `email-verify-queue`. The worker
+(`workers/emailVerification.ts`) extracts the selected audience, reuses `email:verify:{email}` cache
+entries for free, checks only uncached addresses, and caps new checks at `EMAIL_VERIFY_MAX_PER_RUN`
+(10,000 by default). Progress and counts live in `list:{id}:verify`, results in
+`list:{id}:verify:results`. A fatal scope/provider/wallet/rate-limit response stops the run with an
+actionable message; ordinary per-address failures are counted and can be retried. The Lists page shows
+the estimate before spending and supports cancellation between chunks.
+
+**Policy.** `applyVerificationPolicy()` is deliberately warning-only:
+
+| Result | Send? | Why |
+|---|---|---|
+| `deliverable` | yes | GHL believes the mailbox exists |
+| `undeliverable` | **no** | GHL says it does not |
+| `do_not_send` | **no** | GHL suppression / unsafe to send |
+| `catch_all` | yes, warning | the domain accepts everything, so existence cannot be confirmed |
+| `unknown` | yes, warning | no verdict |
+| unchecked | yes, warning | no verification result exists |
+
+`startCampaign()`, one-off invite sends and scheduled invite rounds all apply the same policy. The
+frozen audience and its results are copied to `campaign:{id}:verification` and
+`campaign:{id}:verification:audience`, so campaign detail, the CRM, Statistics and exports can show
+what was excluded even after the list changes.
+
+**What it is not.** This is not delivery, bounce, complaint or inbox-placement data for the Calendar
+invitation. Gmail DSN parsing was deliberately not adopted; Google Calendar does not expose a reliable
+per-invite bounce signal. GHL reminder delivery status (if/when the reminder layer exists) would be a
+separate metric for reminders, not for the invite.
 
 ## Campaign CRM
 
@@ -644,9 +704,16 @@ live in one payload on purpose:
 Wording is deliberate. **Invitations** counts recipient rows across campaigns, so someone invited to
 three campaigns is three invitations — which is why the UI never says "people". **Attendances** counts
 check-ins rather than unique humans, for the same reason. Acceptance rate is `accepted / sent` over the
-included campaigns; attendance rate is `attended / (attended + noShow)`. Both are `0`, never `NaN`,
-when the denominator is empty. Opens and bounces are absent because nothing tracks them, and the card
-says "answers only" instead of implying a delivery funnel.
+included campaigns; failed-send rate is `failed / (sent + failed)` (Google API/event-creation failure,
+not a bounce); the campaign KPI is the **Yes rate**, `accepted / (accepted + tentative)`, and
+attendance rate is `attended / (attended + noShow)`. The KPI target is **>70%**: `public/rateTone.js`
+(shared with `rateTone.test.ts`) returns green above 70, yellow from 50 through 70 inclusive, and red
+below 50. All rates are `0`, never `NaN`, when the denominator is empty; the UI renders an empty
+Yes-rate denominator as a grey `—` rather than a misleading red `0%`. Opens and bounces are absent
+because nothing tracks them, and the card says "answers only" instead of implying a delivery funnel.
+Pre-send GHL verification is reported separately below the overview: checked / deliverable /
+undeliverable / do-not-send / catch-all / unknown / unchecked and its own rates. It is never mixed
+into the RSVP funnel or called a bounce.
 
 The Replies card is a small SVG donut. `public/rsvpChart.js` (shared with the unit test) turns the four
 counts into percentages and start offsets; the browser renders one `<circle>` per non-zero response and
@@ -670,8 +737,12 @@ a 404 when it does not exist. `period` is 1–365 or `all`; campaign exports use
 campaign belongs to the period when it sent inside it), call exports window on `startTime`, and the
 three overview scopes clamp `all` to 365 because a daily series needs a length.
 
-Rows are built by `statsExport.ts` (pure) from `collectCampaignStats()` and `collectStatsOverview()`
-output, so funnel and RSVP arithmetic is shared with the detail pages rather than reimplemented. CSV is
+Rows are built by `statsExport.ts` (pure) from `collectCampaignStats()`, `collectCampaignVerification()`
+and `collectStatsOverview()` output, so funnel, RSVP and verification arithmetic is shared with the
+detail pages rather than reimplemented. The campaign table includes `failedRate` (failed send rate,
+not a bounce), and the summary and campaign tables include the verification counts plus
+`verifiedUndeliverableRate` (`undeliverable + doNotSend ÷ checked`) and
+`verifiedUncheckedRate` (`unchecked ÷ total`), labelled as pre-send checks, not bounces. CSV is
 RFC 4180 with a UTF-8 BOM and CRLF rows (`toCsv()`); `format=json` returns the same rows keyed by column
 key. Percentages are numbers (0–100, one decimal), timestamps are ISO 8601, and attendance cells stay
 blank when the campaign or call has no attendance data. The call scope is the **latest sync only**:
@@ -807,7 +878,9 @@ selected sender's domain is critical or warning.
 **What it deliberately does not claim.** Google sends calendar invitations from shared infrastructure, so IP
 blacklists and Postmaster data would describe Google, not the customer. Bounces and complaints are not exposed
 by the Calendar API. The page says so, and the DKIM check is labelled as "the key is published", not "Google
-signs with it".
+signs with it". This DNS page is separate from the **pre-send GHL mailbox verification** above: GHL
+verification can say `undeliverable` or `catch_all` before an invite goes out, but it still cannot report
+whether Google's invitation email was delivered or bounced.
 
 ## Security model
 
@@ -830,7 +903,9 @@ signs with it".
   (Zoom meetings/webinars), attendance automations dispatched to GHL. ✅
 - **Phase 5**: auth/team login (scrypt, Redis sessions, roles), audit log, sender load profiles,
   campaigns + distribution engine, capacity planner, per-mailbox attribution, AI Advisor. 🚧
-- **Phase 6 (next)**: GHL reminder layer → real delivered/bounced/opened stats.
+- **Phase 6 (next)**: GHL reminder layer → delivered/bounced/opened stats for the reminders (still not
+  for the Calendar invitation itself).
+- **Phase 6a**: pre-send GHL mailbox verification (warning-only, cached, billed to the GHL wallet). ✅
 ## Reliability & idempotency
 
 - **Burst dedupe**: per-connection `SET NX EX 5` lock prevents concurrent delta fetches.
@@ -894,8 +969,10 @@ Invitations tab, **a person is invited once per contact list, not once per campa
 campaign on the same list legitimately has nothing to send.
 
 Three call sites go through it — the invite preview, the invite send, and `startCampaign()` — so the
-numbers an operator is shown before starting are exactly the numbers that get frozen.
-`describeEmptyAudience()` turns an empty result into whichever of the three causes actually applies,
+numbers an operator is shown before starting are exactly the numbers that get frozen. The invite send,
+scheduled invite rounds and `startCampaign()` then apply the warning-only email-verification policy:
+`undeliverable` and `do_not_send` are removed, while catch-all, unknown and unchecked addresses remain
+with a warning. `describeEmptyAudience()` turns an empty result into whichever of the three causes actually applies,
 and the campaign wizard shows the split live (`refreshCampAudience()`) before the campaign is even
 created. `POST /api/campaigns/:id/start` returns the counts so the UI can say how many were skipped.
 

@@ -22,6 +22,8 @@ import { parseWorkflowSettings } from '../../domain/workflowSettings';
 import { normalizeRosterShape } from '../../domain/attendanceRoster';
 import { bootstrapConnection } from '../../domain/bootstrap';
 import { getSnapshot } from '../../domain/snapshotStore';
+import { describeGhlVerificationError, verifyEmailWithGhl } from '../../ghl/emailVerification';
+import { env } from '../../config/env';
 
 interface CreateConnectionBody {
   name?: string;
@@ -195,6 +197,45 @@ export async function connectionRoutes(app: FastifyInstance): Promise<void> {
       return { ok: true };
     } catch (err) {
       reply.code(500).send({ error: (err as Error).message });
+    }
+  });
+
+  /**
+   * One-address readiness probe for GHL Email Verification.
+   *
+   * This is intentionally explicit: it proves the location's LC Email/Mailgun setup, the token's
+   * `lc-email.readonly` scope and the wallet charge before any list-wide run can spend money.
+   */
+  app.post('/api/connections/:id/email-verification/test', async (req, reply) => {
+    const conn = await getConnection((req.params as { id: string }).id);
+    if (!conn) {
+      reply.code(404).send({ error: 'not found' });
+      return;
+    }
+    if (!conn.ghlLocationId) {
+      reply.code(400).send({ error: 'GHL location id is missing on this connection' });
+      return;
+    }
+
+    const b = (req.body || {}) as { email?: string };
+    const email = typeof b.email === 'string' ? b.email.trim() : '';
+    if (!email) {
+      reply.code(400).send({ error: 'email is required' });
+      return;
+    }
+
+    try {
+      const verification = await verifyEmailWithGhl(conn, email);
+      return {
+        ok: true,
+        verification,
+        estimatedCostUsd: env.EMAIL_VERIFY_COST_PER_1000 / 1000,
+      };
+    } catch (err) {
+      reply.code(502).send({
+        error: describeGhlVerificationError(err),
+        detail: (err as Error)?.message || 'unknown error',
+      });
     }
   });
 

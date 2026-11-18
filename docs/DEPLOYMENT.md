@@ -67,6 +67,44 @@ Notes:
 - The **AI provider keys** (OpenAI / Claude / Gemini / DeepSeek / custom) are configured in the
   dashboard (**Settings → AI**), not in `.env`.
 
+### GHL email verification (optional, paid)
+
+Pre-send mailbox checks use HighLevel's `POST /email/verify` endpoint. They are **not** a bounce
+metric for Google Calendar invitations.
+
+1. Add the **`lc-email.readonly`** scope to the GHL Marketplace app (or the private integration
+   token). Existing GHL OAuth connections must reconnect before the scope is available; a private
+   token must be regenerated with the scope.
+2. Use a GHL location on **LC Email or Mailgun**. The endpoint is unavailable for other providers.
+3. GHL bills each check to the location/company wallet — approximately **$2.50 per 1,000 checks**.
+   The app only displays an estimate; GHL is the source of truth for the charge.
+4. Configure the run limits in `.env`:
+
+   ```bash
+   EMAIL_VERIFY_QUEUE_NAME=email-verify-queue
+   EMAIL_VERIFY_CONCURRENCY=3
+   EMAIL_VERIFY_CACHE_DAYS=30
+   EMAIL_VERIFY_MAX_PER_RUN=10000
+   EMAIL_VERIFY_COST_PER_1000=2.5
+   ```
+
+5. Rebuild **both** `app-api` and `app-worker`; the worker runs the `email-verify-queue`.
+6. Prove the setup with one address before a list-wide run:
+
+   ```bash
+   curl -s -X POST https://connect.vibesuite.io/api/connections/<connectionId>/email-verification/test \
+     -H 'Content-Type: application/json' \
+     -d '{"email":"you@example.com"}'
+   ```
+
+   A 403 means the scope is missing; a 400/404 means the location is not on LC Email/Mailgun; a 402
+   means the wallet needs topping up. The same probe is available in the Google account menu as
+   **Test email verification**.
+
+Verification is warning-only: `undeliverable` and `do_not_send` are skipped, while catch-all, unknown
+and unchecked addresses still send with a warning. The cache means re-running a list only pays for
+new addresses.
+
 ---
 
 ## 2. SSL / TLS

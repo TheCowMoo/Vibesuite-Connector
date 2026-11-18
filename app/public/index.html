@@ -317,6 +317,11 @@
       <h3 class="card__title">Top campaigns</h3>
       <div id="statsCampaigns"></div>
     </div>
+
+    <div class="card">
+      <h3 class="card__title">Email verification</h3>
+      <div id="statsVerification"></div>
+    </div>
   </section>
 
   <!-- Campaigns -->
@@ -473,6 +478,25 @@
   </div>
 </div>
 
+<!-- Test GHL email verification -->
+<div class="backdrop" id="verifyEmailTest" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="verifyEmailTestTitle">
+    <div class="modal__head">
+      <h2 class="modal__title" id="verifyEmailTestTitle">Test GHL email verification</h2>
+      <button class="icon-btn" data-close="verifyEmailTest" aria-label="Close">&times;</button>
+    </div>
+    <p class="muted" id="verifyEmailTestIntro"></p>
+    <label class="field"><span class="field__label">Email address</span><input id="verifyEmailTestAddress" type="email" placeholder="person@example.com" /></label>
+    <p class="muted">GHL charges this check to the location wallet — about $0.0025 per address at $2.50 per 1,000. This is a pre-send check, not a bounce.</p>
+    <div class="invite-result" id="verifyEmailTestResult" hidden></div>
+    <div class="modal__foot">
+      <span class="spacer"></span>
+      <button class="btn btn--ghost" data-close="verifyEmailTest">Close</button>
+      <button class="btn btn--primary" id="verifyEmailTestRun">Verify one email</button>
+    </div>
+  </div>
+</div>
+
 <!-- Edit connection -->
 <div class="backdrop" id="edit" hidden>
   <div class="modal" role="dialog" aria-modal="true" aria-labelledby="editTitle">
@@ -560,6 +584,25 @@
       <span class="spacer"></span>
       <button class="btn btn--ghost" data-close="newList">Cancel</button>
       <button class="btn btn--primary" id="newListSave">Create contact list</button>
+    </div>
+  </div>
+</div>
+
+<!-- Verify list emails -->
+<div class="backdrop" id="verifyList" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="verifyListTitle">
+    <div class="modal__head">
+      <h2 class="modal__title" id="verifyListTitle">Verify emails</h2>
+      <button class="icon-btn" data-close="verifyList" aria-label="Close">&times;</button>
+    </div>
+    <p class="muted" id="verifyListIntro"></p>
+    <label class="field"><span class="field__label">GHL location that pays</span><select id="verifyListConnection"></select></label>
+    <p class="muted" id="verifyListEstimate"></p>
+    <div class="invite-result" id="verifyListResult" hidden></div>
+    <div class="modal__foot">
+      <span class="spacer"></span>
+      <button class="btn btn--ghost" data-close="verifyList">Cancel</button>
+      <button class="btn btn--primary" id="verifyListStart">Start verification</button>
     </div>
   </div>
 </div>
@@ -1151,6 +1194,7 @@
 
 <div class="toasts" id="toasts" aria-live="polite"></div>
 
+<script src="/static/rateTone.js"></script>
 <script src="/static/rsvpChart.js"></script>
 <script src="/static/app.js"></script>
 </body>

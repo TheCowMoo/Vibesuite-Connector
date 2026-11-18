@@ -16,6 +16,13 @@ export type CrmZoomResult =
   | 'not_invited';
 export type CrmRsvp = RsvpStatus | 'none';
 
+export interface CampaignCrmVerification {
+  result: 'deliverable' | 'undeliverable' | 'do_not_send' | 'unknown' | 'catch_all';
+  risk: 'low' | 'medium' | 'high' | 'unknown';
+  reasons: string[];
+  checkedAt: number;
+}
+
 export interface CampaignCrmProfile {
   name?: string;
   company?: string;
@@ -36,6 +43,8 @@ export interface CampaignCrmRow {
   sentAt?: number;
   eventId?: string;
   sendError?: string;
+  /** Pre-send GHL mailbox check for this person, when one exists. */
+  verification?: CampaignCrmVerification;
   rsvp: CrmRsvp;
   rsvpHistory: RsvpHistoryEntry[];
   zoom: CrmZoomResult;
@@ -94,6 +103,8 @@ export interface CampaignCrmBuildInput {
   /** `${connectionId}|${eventId}` -> email -> history. */
   history?: Record<string, Record<string, RsvpHistoryEntry[]>>;
   connectionNames?: Record<string, string>;
+  /** Normalized email -> pre-send GHL verification result. */
+  verificationByEmail?: Record<string, CampaignCrmVerification>;
 }
 
 export interface CampaignCrmBuildResult {
@@ -257,6 +268,9 @@ export function buildCampaignCrm(input: CampaignCrmBuildInput): CampaignCrmBuild
       sentAt: rec.sentAt,
       eventId: rec.eventId,
       sendError: rec.error,
+      ...(email && input.verificationByEmail?.[email]
+        ? { verification: input.verificationByEmail[email] }
+        : {}),
       rsvp,
       rsvpHistory: historyEntries,
       zoom,

@@ -1,5 +1,6 @@
 import { getAttendance } from './attendanceStore';
 import { collectCampaignStats } from './campaignStatsCollect';
+import { collectCampaignVerification } from './campaignVerification';
 import { getCampaign, getRecipients, listCampaigns } from './campaignStore';
 import { listConnections } from './connectionStore';
 import { getSession, listSessions, type SessionRecord } from './sessionStore';
@@ -127,6 +128,7 @@ async function collectCampaignExport(request: StatsExportRequest, now: number): 
       campaigns.map(async (campaign): Promise<CampaignExportRow> => ({
         campaign,
         stats: await collectCampaignStats(campaign),
+        verification: await collectCampaignVerification(campaign),
       })),
     ),
     hasLinkedCall ? listSessions() : Promise.resolve([] as SessionRecord[]),

@@ -7,6 +7,7 @@ import { distributionMode } from './campaign';
 import { getCampaign, listCampaigns, saveCampaign } from './campaignStore';
 import { getSenderGauge, getSenderHistory, getSenderProfile, saveSenderProfile } from './senderStore';
 import { collectCampaignStats } from './campaignStatsCollect';
+import { collectCampaignVerification } from './campaignVerification';
 import {
   SNAPSHOT_APPENDIX,
   campaignLabel,
@@ -72,7 +73,10 @@ export async function collectAdvisorSnapshot(): Promise<{ snapshot: AdvisorSnaps
     ci += 1;
     targets.campaigns.push({ label, id: camp.id });
 
-    const { funnel, hasAttendance } = await collectCampaignStats(camp);
+    const [{ funnel, hasAttendance }, verification] = await Promise.all([
+      collectCampaignStats(camp),
+      collectCampaignVerification(camp),
+    ]);
     campaigns.push({
       label,
       status: camp.status,
@@ -88,10 +92,13 @@ export async function collectAdvisorSnapshot(): Promise<{ snapshot: AdvisorSnaps
       noResponse: funnel.noResponse,
       attended: funnel.attended,
       noShow: funnel.noShow,
+      failedRate: funnel.failedRate,
       rsvpRate: funnel.rsvpRate,
       acceptanceRate: funnel.acceptanceRate,
+      responseRate: funnel.responseRate,
       attendanceRate: funnel.attendanceRate,
       hasAttendance,
+      verification,
     });
   }
 

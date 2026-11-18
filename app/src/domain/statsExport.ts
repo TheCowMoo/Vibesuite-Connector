@@ -1,8 +1,9 @@
 import type { AttendanceReport } from './attendance';
 import type { Campaign } from './campaign';
-import type { CampaignStats } from './campaignStats';
+import { percent, type CampaignStats } from './campaignStats';
 import type { SessionRecord } from './sessionStore';
 import type { StatsOverview } from './statsOverview';
+import { emptyVerificationSummary, type VerificationSummary } from './emailVerificationPolicy';
 
 export const EXPORT_SCOPES = [
   'summary',
@@ -118,7 +119,17 @@ export function buildSummaryTable(overview: StatsOverview): ExportTable {
       { key: 'sessions', label: 'Sessions' },
       { key: 'attendances', label: 'Attendances' },
       { key: 'noShows', label: 'No-shows' },
+      { key: 'verifiedChecked', label: 'Verified checked' },
+      { key: 'verifiedDeliverable', label: 'Verified deliverable' },
+      { key: 'verifiedUndeliverable', label: 'Verified undeliverable' },
+      { key: 'verifiedDoNotSend', label: 'Verified do-not-send' },
+      { key: 'verifiedCatchAll', label: 'Verified catch-all' },
+      { key: 'verifiedUnknown', label: 'Verified unknown' },
+      { key: 'verifiedUnchecked', label: 'Verified unchecked' },
+      { key: 'verifiedUndeliverableRate', label: 'Verified undeliverable rate (%)' },
+      { key: 'verifiedUncheckedRate', label: 'Verified unchecked rate (%)' },
       { key: 'acceptanceRate', label: 'Acceptance rate (%)' },
+      { key: 'responseRate', label: 'Yes rate (%) — Yes ÷ (Yes + Maybe)' },
       { key: 'attendanceRate', label: 'Attendance rate (%)' },
       { key: 'rsvpAccepted', label: 'Accepted' },
       { key: 'rsvpDeclined', label: 'Declined' },
@@ -136,7 +147,20 @@ export function buildSummaryTable(overview: StatsOverview): ExportTable {
         sessions: totals.sessions,
         attendances: totals.attendances,
         noShows: totals.noShows,
+        verifiedChecked: overview.verification.checked,
+        verifiedDeliverable: overview.verification.deliverable,
+        verifiedUndeliverable: overview.verification.undeliverable,
+        verifiedDoNotSend: overview.verification.doNotSend,
+        verifiedCatchAll: overview.verification.catchAll,
+        verifiedUnknown: overview.verification.unknown,
+        verifiedUnchecked: overview.verification.unchecked,
+        verifiedUndeliverableRate: percent(
+          overview.verification.undeliverable + overview.verification.doNotSend,
+          overview.verification.checked,
+        ),
+        verifiedUncheckedRate: percent(overview.verification.unchecked, overview.verification.total),
         acceptanceRate: totals.acceptanceRate,
+        responseRate: totals.responseRate,
         attendanceRate: totals.attendanceRate,
         rsvpAccepted: rsvp.accepted,
         rsvpDeclined: rsvp.declined,
@@ -193,6 +217,7 @@ export function buildMailboxTable(
 export interface CampaignExportRow {
   campaign: Campaign;
   stats: CampaignStats;
+  verification?: VerificationSummary;
 }
 
 export interface CallExportRow {
@@ -220,20 +245,32 @@ export function buildCampaignTable(
       { key: 'queued', label: 'Queued' },
       { key: 'sent', label: 'Sent' },
       { key: 'failed', label: 'Failed' },
+      { key: 'failedRate', label: 'Failed send rate (%)' },
       { key: 'accepted', label: 'Accepted' },
       { key: 'declined', label: 'Declined' },
       { key: 'tentative', label: 'Maybe' },
       { key: 'noResponse', label: 'No reply' },
       { key: 'attended', label: 'Attended' },
       { key: 'noShow', label: 'No-show' },
+      { key: 'verifiedChecked', label: 'Verified checked' },
+      { key: 'verifiedDeliverable', label: 'Verified deliverable' },
+      { key: 'verifiedUndeliverable', label: 'Verified undeliverable' },
+      { key: 'verifiedDoNotSend', label: 'Verified do-not-send' },
+      { key: 'verifiedCatchAll', label: 'Verified catch-all' },
+      { key: 'verifiedUnknown', label: 'Verified unknown' },
+      { key: 'verifiedUnchecked', label: 'Verified unchecked' },
+      { key: 'verifiedUndeliverableRate', label: 'Verified undeliverable rate (%)' },
+      { key: 'verifiedUncheckedRate', label: 'Verified unchecked rate (%)' },
       { key: 'rsvpRate', label: 'RSVP rate (%)' },
       { key: 'acceptanceRate', label: 'Acceptance rate (%)' },
+      { key: 'responseRate', label: 'Yes rate (%) — Yes ÷ (Yes + Maybe)' },
       { key: 'attendanceRate', label: 'Attendance rate (%)' },
       { key: 'attendanceTracked', label: 'Attendance tracked' },
     ],
-    rows: rows.map(({ campaign, stats }) => {
+    rows: rows.map(({ campaign, stats, verification }) => {
       const funnel = stats.funnel;
       const tracked = stats.hasAttendance;
+      const verified = verification ?? emptyVerificationSummary(0);
       return {
         campaignId: campaign.id,
         campaign: campaign.name,
@@ -249,14 +286,25 @@ export function buildCampaignTable(
         queued: funnel.queued,
         sent: funnel.sent,
         failed: funnel.failed,
+        failedRate: funnel.failedRate,
         accepted: funnel.accepted,
         declined: funnel.declined,
         tentative: funnel.tentative,
         noResponse: funnel.noResponse,
         attended: tracked ? funnel.attended : '',
         noShow: tracked ? funnel.noShow : '',
+        verifiedChecked: verified.checked,
+        verifiedDeliverable: verified.deliverable,
+        verifiedUndeliverable: verified.undeliverable,
+        verifiedDoNotSend: verified.doNotSend,
+        verifiedCatchAll: verified.catchAll,
+        verifiedUnknown: verified.unknown,
+        verifiedUnchecked: verified.unchecked,
+        verifiedUndeliverableRate: percent(verified.undeliverable + verified.doNotSend, verified.checked),
+        verifiedUncheckedRate: percent(verified.unchecked, verified.total),
         rsvpRate: funnel.rsvpRate,
         acceptanceRate: funnel.acceptanceRate,
+        responseRate: funnel.responseRate,
         attendanceRate: tracked ? funnel.attendanceRate : '',
         attendanceTracked: tracked ? 'yes' : 'no',
       };
@@ -322,6 +370,7 @@ export function buildCampaignVariantTable(rows: CampaignExportRow[]): ExportTabl
         queued: variant.queued,
         sent: variant.sent,
         failed: variant.failed,
+        failedRate: variant.failedRate,
         accepted: variant.accepted,
         declined: variant.declined,
         tentative: variant.tentative,
@@ -330,6 +379,7 @@ export function buildCampaignVariantTable(rows: CampaignExportRow[]): ExportTabl
         noShow: tracked ? variant.noShow : '',
         rsvpRate: variant.rsvpRate,
         acceptanceRate: variant.acceptanceRate,
+        responseRate: variant.responseRate,
         attendanceRate: tracked ? variant.attendanceRate : '',
       });
     }
@@ -343,6 +393,7 @@ export function buildCampaignVariantTable(rows: CampaignExportRow[]): ExportTabl
       { key: 'queued', label: 'Queued' },
       { key: 'sent', label: 'Sent' },
       { key: 'failed', label: 'Failed' },
+      { key: 'failedRate', label: 'Failed send rate (%)' },
       { key: 'accepted', label: 'Accepted' },
       { key: 'declined', label: 'Declined' },
       { key: 'tentative', label: 'Maybe' },
@@ -351,6 +402,7 @@ export function buildCampaignVariantTable(rows: CampaignExportRow[]): ExportTabl
       { key: 'noShow', label: 'No-show' },
       { key: 'rsvpRate', label: 'RSVP rate (%)' },
       { key: 'acceptanceRate', label: 'Acceptance rate (%)' },
+      { key: 'responseRate', label: 'Yes rate (%) — Yes ÷ (Yes + Maybe)' },
       { key: 'attendanceRate', label: 'Attendance rate (%)' },
     ],
     rows: out,

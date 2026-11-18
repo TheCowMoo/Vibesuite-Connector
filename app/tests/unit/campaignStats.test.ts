@@ -52,7 +52,9 @@ describe('buildCampaignStats', () => {
 
     expect(funnel).toMatchObject({ invited: 4, sent: 2, failed: 1, queued: 1, accepted: 1, declined: 1, noResponse: 0 });
     expect(funnel.rsvpRate).toBe(100);
+    expect(funnel.failedRate).toBe(33.3);
     expect(funnel.acceptanceRate).toBe(50);
+    expect(funnel.responseRate).toBe(100);
     expect(hasAttendance).toBe(false);
 
     expect(perSender.map((p) => p.connectionId)).toEqual(['m1', 'm2']);
@@ -68,6 +70,33 @@ describe('buildCampaignStats', () => {
     expect(funnel.tentative).toBe(1);
     expect(funnel.noResponse).toBe(1);
     expect(funnel.rsvpRate).toBe(50);
+    expect(funnel.responseRate).toBe(0);
+  });
+
+  it('computes the KPI as yes ÷ (yes + maybe), ignoring no and no-reply', () => {
+    const { funnel } = buildCampaignStats({
+      recipients: [
+        rec('a@x.com', 'm1', 'sent', 'ev1'),
+        rec('b@x.com', 'm1', 'sent', 'ev1'),
+        rec('c@x.com', 'm1', 'sent', 'ev1'),
+        rec('d@x.com', 'm1', 'sent', 'ev1'),
+        rec('e@x.com', 'm1', 'sent', 'ev1'),
+      ],
+      rsvpByConnection: {
+        m1: {
+          ev1: {
+            'a@x.com': 'accepted',
+            'b@x.com': 'accepted',
+            'c@x.com': 'accepted',
+            'd@x.com': 'tentative',
+            'e@x.com': 'declined',
+          },
+        },
+      },
+    });
+
+    // 3 yes / (3 yes + 1 maybe); the decline is deliberately outside the denominator.
+    expect(funnel.responseRate).toBe(75);
   });
 
   it('matches recipients and RSVP keys case-insensitively', () => {
@@ -98,6 +127,7 @@ describe('buildCampaignStats', () => {
     expect(funnel.attended).toBe(1);
     // b (accepted) and c (tentative) were both expected but never showed; d declined.
     expect(funnel.noShow).toBe(2);
+    expect(funnel.responseRate).toBe(66.7);
     expect(funnel.attendanceRate).toBe(33.3);
   });
 
@@ -122,7 +152,9 @@ describe('buildCampaignStats', () => {
   it('handles an empty campaign', () => {
     const { funnel, perSender, variants } = buildCampaignStats({ recipients: [], rsvpByConnection: {} });
     expect(funnel.invited).toBe(0);
+    expect(funnel.failedRate).toBe(0);
     expect(funnel.acceptanceRate).toBe(0);
+    expect(funnel.responseRate).toBe(0);
     expect(perSender).toEqual([]);
     expect(variants).toEqual([]);
   });
@@ -141,8 +173,8 @@ describe('buildCampaignStats', () => {
 
     expect(funnel).toMatchObject({ invited: 3, sent: 3, accepted: 2, declined: 1 });
     expect(variants.map((v) => v.variant)).toEqual(['A', 'B']);
-    expect(variants[0]).toMatchObject({ variant: 'A', invited: 2, sent: 2, accepted: 1, declined: 1, acceptanceRate: 50 });
-    expect(variants[1]).toMatchObject({ variant: 'B', invited: 1, sent: 1, accepted: 1, acceptanceRate: 100 });
+    expect(variants[0]).toMatchObject({ variant: 'A', invited: 2, sent: 2, accepted: 1, declined: 1, acceptanceRate: 50, responseRate: 100 });
+    expect(variants[1]).toMatchObject({ variant: 'B', invited: 1, sent: 1, accepted: 1, acceptanceRate: 100, responseRate: 100 });
   });
 
   it('orders unlimited variant stats A, B, … Z, AA', () => {

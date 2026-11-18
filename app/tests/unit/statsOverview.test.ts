@@ -10,7 +10,7 @@ function funnel(over: Partial<CampaignFunnel> = {}): CampaignFunnel {
   return {
     invited: 0, queued: 0, sent: 0, failed: 0, accepted: 0, declined: 0,
     tentative: 0, noResponse: 0, attended: 0, noShow: 0,
-    rsvpRate: 0, acceptanceRate: 0, attendanceRate: 0,
+    rsvpRate: 0, failedRate: 0, acceptanceRate: 0, responseRate: 0, attendanceRate: 0,
     ...over,
   };
 }
@@ -52,6 +52,7 @@ describe('buildStatsOverview', () => {
     expect(out.totals).toMatchObject({ invitations: 0, pending: 0, failed: 0, sessions: 0 });
     expect(out.hasActivity).toBe(false);
     expect(out.totals.acceptanceRate).toBe(0);
+    expect(out.totals.responseRate).toBe(0);
     expect(out.totals.attendanceRate).toBe(0);
     expect(out.topCampaigns).toEqual([]);
     expect(out.byMailbox).toEqual([]);
@@ -104,6 +105,20 @@ describe('buildStatsOverview', () => {
     });
     expect(out.rsvp).toEqual({ accepted: 1, declined: 2, tentative: 0, noResponse: 1 });
     expect(out.totals.acceptanceRate).toBe(25);
+    expect(out.totals.responseRate).toBe(100);
+  });
+
+  it('computes the overview KPI from yes and maybe replies only', () => {
+    const out = buildStatsOverview({
+      campaigns: [campaign({
+        recipients: [recipient('sent', NOW - DAY)],
+        funnel: funnel({ sent: 4, accepted: 3, tentative: 1, declined: 0, noResponse: 0, responseRate: 75 }),
+      })],
+      sessions: [], days: 7, now: NOW,
+    });
+
+    expect(out.totals.responseRate).toBe(75);
+    expect(out.topCampaigns[0]).toMatchObject({ accepted: 3, tentative: 1, responseRate: 75 });
   });
 
   it('ignores replies from a campaign that sent nothing in the window', () => {
@@ -131,6 +146,38 @@ describe('buildStatsOverview', () => {
     expect(out.byMailbox[1]).toMatchObject({ connectionId: 's2', sent: 1 });
   });
 
+  it('aggregates pre-send verification for campaigns included in the window', () => {
+    const out = buildStatsOverview({
+      campaigns: [campaign({
+        recipients: [recipient('sent', NOW - DAY)],
+        funnel: funnel({ sent: 1 }),
+        verification: {
+          total: 10,
+          checked: 8,
+          deliverable: 5,
+          undeliverable: 1,
+          doNotSend: 1,
+          catchAll: 0,
+          unknown: 1,
+          unchecked: 2,
+        },
+      })],
+      sessions: [], days: 7, now: NOW,
+    });
+
+    expect(out.verification).toEqual({
+      total: 10,
+      checked: 8,
+      deliverable: 5,
+      undeliverable: 1,
+      doNotSend: 1,
+      catchAll: 0,
+      unknown: 1,
+      unchecked: 2,
+    });
+    expect(out.topCampaigns[0].verification).toMatchObject({ checked: 8, undeliverable: 1 });
+  });
+
   it('lists the five biggest campaigns by invitations sent', () => {
     const campaigns = Array.from({ length: 7 }, (_, i) => campaign({
       id: 'c' + i, recipients: [recipient('sent', NOW - DAY)], funnel: funnel({ sent: 10 + i }),
@@ -138,6 +185,7 @@ describe('buildStatsOverview', () => {
     const out = buildStatsOverview({ campaigns, sessions: [], days: 7, now: NOW });
     expect(out.topCampaigns).toHaveLength(5);
     expect(out.topCampaigns.map((c) => c.sent)).toEqual([16, 15, 14, 13, 12]);
+    expect(out.topCampaigns[0]).toMatchObject({ tentative: 0, responseRate: 0 });
   });
 
   it('counts sessions in the window and derives attendance rate', () => {

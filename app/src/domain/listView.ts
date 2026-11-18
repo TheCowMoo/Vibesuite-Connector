@@ -1,5 +1,6 @@
 import type { ListRecord, ListSummary } from './listStore';
 import type { ListSegmentationStatus } from './listSegmentStore';
+import type { ListVerificationStatus } from './listVerificationStore';
 
 export interface PreviewSegment {
   name: string;
@@ -23,6 +24,59 @@ export interface PublicSegmentationStatus {
   warnings?: string[];
   startedAt?: number;
   finishedAt?: number;
+}
+
+export interface PublicListVerificationStatus {
+  status: ListVerificationStatus['status'];
+  total: number;
+  checked: number;
+  cached: number;
+  deliverable: number;
+  undeliverable: number;
+  doNotSend: number;
+  catchAll: number;
+  unknown: number;
+  errors: number;
+  unchecked: number;
+  billableChecks: number;
+  estimatedCostUsd: number;
+  connectionId: string;
+  segments?: string[];
+  maxChecks: number;
+  error?: string;
+  lastError?: string;
+  warnings?: string[];
+  startedAt?: number;
+  finishedAt?: number;
+}
+
+export function publicListVerificationStatus(
+  status: ListVerificationStatus | null,
+): PublicListVerificationStatus | null {
+  if (!status) return null;
+  return {
+    status: status.status,
+    total: status.total,
+    checked: status.checked,
+    cached: status.cached,
+    deliverable: status.deliverable,
+    undeliverable: status.undeliverable,
+    doNotSend: status.doNotSend,
+    catchAll: status.catchAll,
+    unknown: status.unknown,
+    errors: status.errors,
+    unchecked: status.unchecked,
+    billableChecks: status.billableChecks,
+    estimatedCostUsd: status.estimatedCostUsd,
+    connectionId: status.connectionId,
+    ...(status.segments?.length ? { segments: status.segments } : {}),
+    maxChecks: status.maxChecks,
+    ...(status.error ? { error: status.error } : {}),
+    ...(status.lastError ? { lastError: status.lastError } : {}),
+    ...(status.warnings?.length ? { warnings: status.warnings } : {}),
+    ...(status.startedAt ? { startedAt: status.startedAt } : {}),
+    ...(status.finishedAt ? { finishedAt: status.finishedAt } : {}),
+  };
 }
 
 export function publicSegmentationStatus(status: ListSegmentationStatus | null): PublicSegmentationStatus | null {
@@ -67,7 +121,11 @@ export function previewSegmentationResult(result: unknown, limit = 25): ResultPr
   return { segments, truncated };
 }
 
-export function listView(rec: ListRecord, status: ListSegmentationStatus | null): Record<string, unknown> {
+export function listView(
+  rec: ListRecord,
+  status: ListSegmentationStatus | null,
+  verification: ListVerificationStatus | null = null,
+): Record<string, unknown> {
   return {
     id: rec.id,
     name: rec.name,
@@ -77,6 +135,7 @@ export function listView(rec: ListRecord, status: ListSegmentationStatus | null)
     updatedAt: rec.updatedAt,
     hasResult: rec.result != null,
     segmentation: publicSegmentationStatus(status),
+    verification: publicListVerificationStatus(verification),
     result: previewSegmentationResult(rec.result),
   };
 }
@@ -84,6 +143,7 @@ export function listView(rec: ListRecord, status: ListSegmentationStatus | null)
 export function listSummaryView(
   summary: ListSummary,
   status: ListSegmentationStatus | null,
+  verification: ListVerificationStatus | null = null,
 ): Record<string, unknown> {
   return {
     id: summary.id,
@@ -94,5 +154,6 @@ export function listSummaryView(
     updatedAt: summary.updatedAt,
     hasResult: summary.hasResult,
     segmentation: publicSegmentationStatus(status),
+    verification: publicListVerificationStatus(verification),
   };
 }

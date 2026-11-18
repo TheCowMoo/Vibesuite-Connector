@@ -42,9 +42,21 @@ function campaign(over: Partial<CampaignSnapshot> = {}): CampaignSnapshot {
     attended: 10,
     noShow: 5,
     rsvpRate: 28,
+    failedRate: 0,
     acceptanceRate: 20,
+    responseRate: 87,
     attendanceRate: 43.5,
     hasAttendance: true,
+    verification: {
+      total: 100,
+      checked: 80,
+      deliverable: 60,
+      undeliverable: 5,
+      doNotSend: 1,
+      catchAll: 10,
+      unknown: 4,
+      unchecked: 20,
+    },
     ...over,
   };
 }
@@ -78,6 +90,13 @@ describe('buildAdvisorPrompt', () => {
     expect(prompt).toContain('2000');
     expect(prompt).toContain('1000ms');
     expect(prompt).not.toContain('set_sender_hourly_cap');
+  });
+
+  it('includes the Yes-rate KPI and verification counts in the campaign snapshot', () => {
+    const prompt = buildAdvisorPrompt(snapshot([mailbox()], [campaign()]));
+    expect(prompt).toContain('"responseRate": 87');
+    expect(prompt).toContain('"verification"');
+    expect(prompt).toContain('"undeliverable": 5');
   });
 });
 

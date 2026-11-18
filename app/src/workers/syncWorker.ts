@@ -7,7 +7,8 @@ import { inc } from '../lib/metrics';
 import { startMetricsServer } from '../lib/metricsServer';
 import { processSync } from './pipeline';
 import { processListSegmentation } from './listSegment';
-import type { ListSegmentJobData, SyncJobData } from '../queue/jobs/types';
+import { processListVerification } from './emailVerification';
+import type { EmailVerifyJobData, ListSegmentJobData, SyncJobData } from '../queue/jobs/types';
 import { startWatchRenewal } from '../scheduler/renewal';
 import { startAttendancePolling } from '../scheduler/attendance';
 import { startCampaignScheduler } from '../scheduler/campaigns';
@@ -46,6 +47,25 @@ async function main(): Promise<void> {
   );
   listSegmentWorker.on('failed', (job, err) =>
     logger.error({ jobId: job?.id, listId: job?.data?.listId, err: err.message }, 'list segmentation job failed')
+  );
+
+  const emailVerifyWorker = new Worker<EmailVerifyJobData>(
+    QUEUE_NAMES.emailVerify,
+    async (job) => {
+      await processListVerification(job.data.listId, job.data.runId);
+    },
+    {
+      connection: redis,
+      concurrency: 1,
+      // A large list can spend several minutes in GHL calls; keep the BullMQ lock alive.
+      lockDuration: 120000,
+    }
+  );
+  emailVerifyWorker.on('completed', (job) =>
+    logger.info({ jobId: job.id, listId: job.data.listId }, 'list email verification completed')
+  );
+  emailVerifyWorker.on('failed', (job, err) =>
+    logger.error({ jobId: job?.id, listId: job?.data?.listId, err: err.message }, 'list email verification job failed')
   );
 
   startWatchRenewal();

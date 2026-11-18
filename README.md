@@ -181,6 +181,11 @@ Key counters: `webhook_received_total`, `webhook_rejected_total`, `jobs_enqueued
 | GET | `/oauth/google/callback` | complete Google OAuth |
 | GET | `/oauth/ghl/start?connectionId=` | redirect to GHL OAuth |
 | GET | `/oauth/ghl/callback` | complete GHL OAuth |
+| POST | `/api/connections/:id/email-verification/test` | one-address GHL verification readiness probe |
+| POST | `/api/lists/:id/verify` | queue a list-wide GHL email-verification run |
+| GET | `/api/lists/:id/verify` | verification status and counts |
+| POST | `/api/lists/:id/verify/cancel` | cancel a running verification |
+| GET | `/api/campaigns/:id/verification` | verification summary for a campaign audience |
 | GET | `/api/stats/overview?days=30` | cross-campaign statistics (1–365 days) |
 | GET | `/api/stats/export?scope=campaigns&period=all` | download one statistics table as CSV or JSON |
 | GET | `/api/campaigns/:id/crm` | per-person campaign CRM (filters + pagination) |
@@ -192,6 +197,12 @@ Key counters: `webhook_received_total`, `webhook_rejected_total`, `jobs_enqueued
 
 ## Notes & caveats
 
+- **Email verification is pre-send, not bounce data.** `POST /email/verify` asks GHL whether a mailbox
+  looks deliverable, catch-all, unknown or do-not-send. It requires `lc-email.readonly` and a location
+  on LC Email/Mailgun, is billed to the GHL wallet (about $2.50 per 1,000 checks) and is cached for
+  30 days. Results are warning-only: `undeliverable` and `do_not_send` are skipped; catch-all, unknown
+  and unchecked addresses still go out with a warning. Google Calendar invitations still do not expose
+  delivery or bounce status.
 - Google push notifications are **not 100% reliable**, and the webhook answers Google `200` before it
   enqueues the job — so a dropped notification or a failed enqueue has no retry path. The
   **reconciliation sweep** (`scheduler/reconcile.ts`) closes that gap: it calls `processSync()` for

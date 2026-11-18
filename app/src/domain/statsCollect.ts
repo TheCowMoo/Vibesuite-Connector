@@ -1,5 +1,6 @@
 import { getAttendance } from './attendanceStore';
 import { collectCampaignStats } from './campaignStatsCollect';
+import { collectCampaignVerification } from './campaignVerification';
 import { getRecipients, listCampaigns } from './campaignStore';
 import { listSessions } from './sessionStore';
 import {
@@ -21,7 +22,11 @@ export async function collectStatsOverview(days: number, now = Date.now()): Prom
   const campaigns = await listCampaigns();
 
   const overviewCampaigns = await Promise.all(campaigns.map(async (camp): Promise<OverviewCampaign> => {
-    const [stats, recipients] = await Promise.all([collectCampaignStats(camp), getRecipients(camp.id)]);
+    const [stats, recipients, verification] = await Promise.all([
+      collectCampaignStats(camp),
+      getRecipients(camp.id),
+      collectCampaignVerification(camp),
+    ]);
     return {
       id: camp.id,
       name: camp.name,
@@ -30,6 +35,7 @@ export async function collectStatsOverview(days: number, now = Date.now()): Prom
       recipients,
       funnel: stats.funnel,
       perSender: stats.perSender,
+      verification,
     };
   }));
 

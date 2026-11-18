@@ -19,6 +19,13 @@ vi.mock('../../src/domain/listSegmentQueue', () => ({
   getListSegmentStatus: vi.fn(),
   getListSegmentStatuses: vi.fn(),
 }));
+vi.mock('../../src/domain/listVerificationQueue', () => ({
+  enqueueListVerification: vi.fn(),
+  cancelListVerification: vi.fn(),
+  deleteListVerification: vi.fn(),
+  getListVerificationStatus: vi.fn(),
+  getListVerificationStatuses: vi.fn(),
+}));
 vi.mock('../../src/lib/ai', () => ({
   generateJson: vi.fn(),
   AiJsonError: class AiJsonError extends Error {
@@ -40,6 +47,12 @@ import {
   getListSegmentStatus,
   getListSegmentStatuses,
 } from '../../src/domain/listSegmentQueue';
+import {
+  cancelListVerification,
+  enqueueListVerification,
+  getListVerificationStatus,
+  getListVerificationStatuses,
+} from '../../src/domain/listVerificationQueue';
 import { AiJsonError, generateJson } from '../../src/lib/ai';
 
 const getListMock = getList as unknown as ReturnType<typeof vi.fn>;
@@ -53,6 +66,10 @@ const enqueueMock = enqueueListSegmentation as unknown as ReturnType<typeof vi.f
 const cancelMock = cancelListSegmentation as unknown as ReturnType<typeof vi.fn>;
 const getStatusMock = getListSegmentStatus as unknown as ReturnType<typeof vi.fn>;
 const getStatusesMock = getListSegmentStatuses as unknown as ReturnType<typeof vi.fn>;
+const getVerifyStatusMock = getListVerificationStatus as unknown as ReturnType<typeof vi.fn>;
+const getVerifyStatusesMock = getListVerificationStatuses as unknown as ReturnType<typeof vi.fn>;
+const cancelVerifyMock = cancelListVerification as unknown as ReturnType<typeof vi.fn>;
+const enqueueVerifyMock = enqueueListVerification as unknown as ReturnType<typeof vi.fn>;
 const generateJsonMock = generateJson as unknown as ReturnType<typeof vi.fn>;
 
 const list = {
@@ -64,6 +81,30 @@ const list = {
   createdAt: 1,
   updatedAt: 1,
 };
+
+function verificationStatus(status: 'queued' | 'running' | 'done' | 'failed' | 'cancelled') {
+  return {
+    status,
+    runId: 'verify-run-1',
+    listId: 'list1',
+    connectionId: 'conn1',
+    locationId: 'loc1',
+    maxChecks: 10000,
+    total: 2,
+    checked: 0,
+    cached: 0,
+    deliverable: 0,
+    undeliverable: 0,
+    doNotSend: 0,
+    catchAll: 0,
+    unknown: 0,
+    errors: 0,
+    unchecked: 2,
+    billableChecks: 0,
+    estimatedCostUsd: 0.005,
+    createdAt: 1,
+  };
+}
 
 async function build(): Promise<FastifyInstance> {
   const app = Fastify({ logger: false, bodyLimit: 25 * 1024 * 1024 });
@@ -79,6 +120,10 @@ beforeEach(() => {
   saveListResultMock.mockResolvedValue(undefined);
   getStatusMock.mockResolvedValue(null);
   getStatusesMock.mockResolvedValue({});
+  getVerifyStatusMock.mockResolvedValue(null);
+  getVerifyStatusesMock.mockResolvedValue({});
+  cancelVerifyMock.mockResolvedValue(null);
+  enqueueVerifyMock.mockResolvedValue(verificationStatus('queued'));
   cancelMock.mockResolvedValue(null);
   enqueueMock.mockResolvedValue({
     status: 'queued',
@@ -236,6 +281,44 @@ describe('GET /api/lists/:id', () => {
     expect(res.statusCode).toBe(200);
     expect(res.json().lists[0].rowCount).toBe(50000);
     expect(res.json().lists[0].segmentation.processedRows).toBe(25000);
+    await app.close();
+  });
+
+  it('queues email verification for a sorted list', async () => {
+    getListMock.mockResolvedValue({
+      ...list,
+      result: { segments: [{ name: 'All', rows: ['a@x.com', 'b@x.com'] }] },
+    });
+    const app = await build();
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/lists/list1/verify',
+      payload: { connectionId: 'conn1' },
+    });
+
+    expect(res.statusCode).toBe(202);
+    expect(res.json().verification.status).toBe('queued');
+    expect(enqueueVerifyMock).toHaveBeenCalledWith('list1', {
+      connectionId: 'conn1',
+      segments: undefined,
+      maxChecks: undefined,
+    });
+    await app.close();
+  });
+
+  it('returns the verification status and cancels a run', async () => {
+    getVerifyStatusMock.mockResolvedValue(verificationStatus('running'));
+    cancelVerifyMock.mockResolvedValue(verificationStatus('cancelled'));
+    const app = await build();
+
+    const status = await app.inject({ method: 'GET', url: '/api/lists/list1/verify' });
+    expect(status.statusCode).toBe(200);
+    expect(status.json().verification.status).toBe('running');
+
+    const cancelled = await app.inject({ method: 'POST', url: '/api/lists/list1/verify/cancel' });
+    expect(cancelled.statusCode).toBe(200);
+    expect(cancelled.json().verification.status).toBe('cancelled');
     await app.close();
   });
 

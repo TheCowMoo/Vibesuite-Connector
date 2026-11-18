@@ -12,3 +12,12 @@ export interface ListSegmentJobData {
   runId: string;
 }
 
+export interface EmailVerifyJobData {
+  listId: string;
+  runId: string;
+  connectionId: string;
+  locationId: string;
+  segments?: string[];
+  maxChecks: number;
+}
+

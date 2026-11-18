@@ -264,6 +264,50 @@ A round is **one event per selected account**. With three accounts and 300 recip
 - A failed event's recipients stay queued for the next round.
 - Batching off (the default) means one event per account, with every recipient that account can send today.
 
+## Verify emails before sending (optional, paid)
+
+GoHighLevel can check whether an address looks deliverable **before** we create the Calendar event.
+This is a **pre-send mailbox check, not a bounce**: Google Calendar still does not tell us whether its
+invitation email was delivered.
+
+**Lists → Verify emails.** Choose the GHL location whose wallet pays for the checks. GHL bills about
+**$2.50 per 1,000 checks** (confirm the current rate in your GHL wallet). The run needs:
+
+- the **`lc-email.readonly`** scope on the GHL app or private integration token;
+- a GHL location using **LC Email or Mailgun**;
+- a connection with a GHL location id.
+
+What the run does:
+
+- checks only addresses that have no cached result; the cache lasts 30 days, so re-running after a
+  new import only pays for the new addresses;
+- caps the run at **10,000 new checks** by default (configurable), leaving the rest unchecked;
+- can be cancelled between chunks; progress is saved if you leave the page;
+- never invents a result: an address it did not check stays **unchecked**.
+
+| Result | What happens |
+|---|---|
+| **Deliverable** | GHL believes the mailbox exists; the address is invited normally |
+| **Undeliverable** | GHL says it does not exist; the address is **skipped** |
+| **Do not send** | GHL suppression/unsafe; the address is **skipped** |
+| **Catch-all** | The domain accepts every address, so existence cannot be confirmed; invited with a warning |
+| **Unknown** | No verdict; invited with a warning |
+| **Unchecked** | No result; invited with a warning |
+
+Campaigns and one-off invitations apply the same warning-only policy. The campaign detail shows the
+checked/excluded counts, **Campaign CRM → People** has a per-person Verified chip, and Statistics has
+an **Email verification** card. None of these numbers is a bounce rate.
+
+**Troubleshooting**
+
+| Message | Fix |
+|---|---|
+| “scope is missing — add lc-email.readonly” | Add the scope to the GHL Marketplace app or private token, then reconnect/regenerate the token |
+| “unavailable for this location (LC Email or Mailgun is required)” | Use a location on LC Email or Mailgun, or skip verification |
+| “GHL wallet has no email-verification credits” | Top up the location or company wallet |
+| “No GHL connection with a location id” | Edit the Google account and add its GHL Location ID |
+| “addresses remain unchecked after the per-run cap” | Run verification again; cached results are free |
+
 ## Running a campaign
 
 Creating, starting, pausing, ending and deleting a campaign is limited to **owner/admin**; other roles can
@@ -339,8 +383,9 @@ Open **Campaigns → Details** to see every variant and **Send test copy**. A te
 - leaves a `[TEST]` event on the sending account's calendar, and its RSVPs are ignored by the sync pipeline.
 
 Campaign Details also shows **What happened, per copy variant**: sent, yes/no/maybe/no reply, attendance (once
-the call is synced), RSVP rate and acceptance rate. The app has no open/click tracking, so choose a winner
-yourself from those numbers — there is no automatic winner.
+the call is synced), RSVP rate, **failed-send rate**, acceptance rate and the **Yes rate** KPI
+(`yes ÷ (yes + maybe)`). The app has no open/click tracking, so choose a winner yourself from those numbers
+— there is no automatic winner.
 
 Variants are fixed when sending starts. While a campaign is a draft or scheduled, **Details → Edit copy** lets
 you add, remove or change any variant; once the audience is frozen, the copy is locked.
@@ -523,6 +568,22 @@ invitations represented, and the legend keeps the exact count and percentage for
 is included because it is part of the invitation funnel; it is not a fourth answer choice. The same
 counts and percentages are available to screen readers and in the Statistics exports.
 
+The **Yes rate** KPI is `Yes ÷ (Yes + Maybe) × 100`, not Yes ÷ sent. The target is **>70%**: the KPI is
+green above 70%, yellow from 50% through 70% (exactly 70 is yellow), and red below 50%. When nobody has
+said yes or maybe yet the ratio has no denominator, so the panel shows a grey `—` instead of pretending
+it is 0%. The card always shows the raw yes and maybe counts, so a small sample is visible rather than
+hidden behind a percentage. The same colored KPI appears per campaign in **Top campaigns** and in
+**Campaigns → Details → What happened**.
+
+The **Top campaigns** table also shows each campaign's **failed-send rate** (`failed ÷ (sent + failed)`),
+which is a Google API/event-creation failure, not a bounce.
+
+The **Email verification** card reports the pre-send GHL checks separately: checked / deliverable /
+undeliverable / do-not-send / catch-all / unknown / unchecked, plus the top campaigns. The
+undeliverable rate is `(undeliverable + do-not-send) ÷ checked`; the unchecked rate is
+`unchecked ÷ total`. These are mailbox checks before sending, **not bounces**, and they never change
+the RSVP funnel or the Yes-rate denominator.
+
 Two deliberate details:
 
 - **Invitations are windowed by when they were sent; replies and attendance are not re-windowed.** A campaign
@@ -573,7 +634,11 @@ or Sheets) or **JSON**:
 | Not invited | Pending/failed — no invitation was delivered, so this is not a no-show |
 | Follow-up | A campaign-scoped note state: None, To contact, Contacted or Done |
 | Tracking started | The first RSVP value we observed; not a Google reply timestamp |
-| Acceptance rate | `accepted ÷ sent` |
+| Yes rate (campaign KPI) | `accepted ÷ (accepted + maybe)` — of the people who gave a positive or possible answer; target >70%, colored green/yellow/red |
+| Failed-send rate | `failed ÷ (sent + failed)` — attempted Google Calendar sends that failed; not a bounce |
+| Acceptance rate | `accepted ÷ sent` — overall conversion across everyone invited |
+| Verified undeliverable rate | `(undeliverable + do-not-send) ÷ checked` — pre-send GHL mailbox checks; **not a bounce** |
+| Verified unchecked rate | `unchecked ÷ total` — addresses GHL has not checked |
 | Campaign attendance rate | `attended ÷ (accepted + maybe)` — of the people who said they would come |
 | Statistics attendance rate | `attended ÷ (attended + no-show)` — of the outcomes Zoom actually reported |
 
@@ -581,7 +646,8 @@ Numbers can differ between a campaign and Statistics without either being wrong:
 different denominators, and a person can appear in more than one campaign.
 
 Open and bounce rates are deliberately absent — the campaign CRM tracks replies, attendance and follow-up,
-but no email open or bounce signal exists. RSVP answers are the reply signal.
+but no email open or bounce signal exists. RSVP answers are the reply signal. The **Email verification**
+card is a pre-send GHL mailbox check, not a delivery or bounce report.
 
 ## Checking a domain (Deliverability)
 

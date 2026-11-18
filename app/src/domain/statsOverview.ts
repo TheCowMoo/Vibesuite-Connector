@@ -1,5 +1,6 @@
 import { percent, type CampaignFunnel, type SenderAttribution } from './campaignStats';
 import type { RecipientRecord } from './campaign';
+import { emptyVerificationSummary, type VerificationSummary } from './emailVerificationPolicy';
 
 /** One campaign, reduced to what the overview needs. */
 export interface OverviewCampaign {
@@ -10,6 +11,8 @@ export interface OverviewCampaign {
   recipients: RecipientRecord[];
   funnel: CampaignFunnel;
   perSender: SenderAttribution[];
+  /** Pre-send GHL verification for this campaign's frozen audience. */
+  verification?: VerificationSummary;
 }
 
 export interface OverviewSession {
@@ -36,9 +39,13 @@ export interface StatsOverview {
     attendances: number;
     noShows: number;
     acceptanceRate: number;
+    /** Yes ÷ (Yes + Maybe) across the campaigns that sent inside the window. */
+    responseRate: number;
     attendanceRate: number;
   };
   rsvp: { accepted: number; declined: number; tentative: number; noResponse: number };
+  /** Pre-send verification totals for the campaigns included in the window. */
+  verification: VerificationSummary;
   daily: Array<{ date: string; sent: number }>;
   byMailbox: SenderAttribution[];
   topCampaigns: Array<{
@@ -46,8 +53,13 @@ export interface StatsOverview {
     name: string;
     status: string;
     sent: number;
+    failed: number;
+    failedRate: number;
     accepted: number;
+    tentative: number;
+    responseRate: number;
     attended: number;
+    verification?: VerificationSummary;
   }>;
 }
 
@@ -61,6 +73,18 @@ export interface StatsOverviewInput {
 
 export function dayKey(ts: number): string {
   return new Date(ts).toISOString().slice(0, 10);
+}
+
+function addVerification(target: VerificationSummary, source?: VerificationSummary): void {
+  if (!source) return;
+  target.total += source.total;
+  target.checked += source.checked;
+  target.deliverable += source.deliverable;
+  target.undeliverable += source.undeliverable;
+  target.doNotSend += source.doNotSend;
+  target.catchAll += source.catchAll;
+  target.unknown += source.unknown;
+  target.unchecked += source.unchecked;
 }
 
 /** Start of the last-N-days window (UTC, including today), clamped to 1–365. */
@@ -105,6 +129,7 @@ export function buildStatsOverview(input: StatsOverviewInput): StatsOverview {
 
   const rsvp = { accepted: 0, declined: 0, tentative: 0, noResponse: 0 };
   let rsvpBase = 0;
+  const verification = emptyVerificationSummary(0);
 
   const mailboxes = new Map<string, SenderAttribution>();
   const top: StatsOverview['topCampaigns'] = [];
@@ -142,6 +167,7 @@ export function buildStatsOverview(input: StatsOverviewInput): StatsOverview {
     rsvp.tentative += camp.funnel.tentative;
     rsvp.noResponse += camp.funnel.noResponse;
     rsvpBase += camp.funnel.sent;
+    addVerification(verification, camp.verification);
 
     for (const sender of camp.perSender) {
       const merged = mailboxes.get(sender.connectionId) ?? {
@@ -173,8 +199,13 @@ export function buildStatsOverview(input: StatsOverviewInput): StatsOverview {
       name: camp.name,
       status: camp.status,
       sent: camp.funnel.sent,
+      failed: camp.funnel.failed,
+      failedRate: camp.funnel.failedRate,
       accepted: camp.funnel.accepted,
+      tentative: camp.funnel.tentative,
+      responseRate: camp.funnel.responseRate,
       attended: camp.funnel.attended,
+      verification: camp.verification,
     });
   }
 
@@ -206,9 +237,11 @@ export function buildStatsOverview(input: StatsOverviewInput): StatsOverview {
       attendances,
       noShows,
       acceptanceRate: percent(rsvp.accepted, rsvpBase),
+      responseRate: percent(rsvp.accepted, rsvp.accepted + rsvp.tentative),
       attendanceRate: percent(attendances, attendances + noShows),
     },
     rsvp,
+    verification: { ...verification, unchecked: Math.max(0, verification.total - verification.checked) },
     daily,
     byMailbox: Array.from(mailboxes.values()).sort((a, b) => b.sent - a.sent),
     topCampaigns: top.sort((a, b) => b.sent - a.sent || b.accepted - a.accepted).slice(0, 5),

@@ -22,7 +22,8 @@ export function buildGhlAuthUrl(state: string): string {
     response_type: 'code',
     client_id: env.GHL_OAUTH_CLIENT_ID,
     redirect_uri: ghlRedirectUri(),
-    scope: 'contacts.write contacts.readonly calendars.write calendars.readonly workflows.write workflows.readonly',
+    scope:
+      'contacts.write contacts.readonly calendars.write calendars.readonly workflows.write workflows.readonly lc-email.readonly',
     state,
   });
   // NOTE: verify the exact Marketplace authorization URL against current GHL docs.

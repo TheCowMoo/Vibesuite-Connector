@@ -3,6 +3,7 @@ import { env } from './env';
 export const QUEUE_NAMES = {
   sync: env.SYNC_QUEUE_NAME,
   listSegment: env.LIST_SEGMENT_QUEUE_NAME,
+  emailVerify: env.EMAIL_VERIFY_QUEUE_NAME,
 } as const;
 
 export const JOB_NAMES = {
@@ -36,6 +37,13 @@ export const REDIS_KEYS = {
   list: (id: string) => `list:${id}`,
   listSegmentStatus: (id: string) => `list:${id}:segment`,
   listSegmentBatches: (id: string, runId: string) => `list:${id}:segment:batches:${runId}`,
+  /** Global pre-send email verification cache (email -> GHL result JSON). */
+  emailVerifyCache: (email: string) => `email:verify:${email.toLowerCase()}`,
+  listVerifyStatus: (id: string) => `list:${id}:verify`,
+  listVerifyResults: (id: string) => `list:${id}:verify:results`,
+  /** Frozen verification snapshot for a campaign audience. */
+  campaignVerifyResults: (id: string) => `campaign:${id}:verification`,
+  campaignVerifyAudience: (id: string) => `campaign:${id}:verification:audience`,
   invitesIndex: () => 'invites:index',
   invite: (id: string) => `invite:${id}`,
   listInvites: (listId: string) => `list:${listId}:invites`,

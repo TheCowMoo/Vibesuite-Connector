@@ -17,7 +17,19 @@ import {
   LIST_MAX_CHARS,
   LIST_MAX_ROWS,
 } from '../../domain/listSegment';
-import { listSummaryView, listView, publicSegmentationStatus } from '../../domain/listView';
+import {
+  listSummaryView,
+  listView,
+  publicListVerificationStatus,
+  publicSegmentationStatus,
+} from '../../domain/listView';
+import {
+  cancelListVerification,
+  deleteListVerification,
+  enqueueListVerification,
+  getListVerificationStatus,
+  getListVerificationStatuses,
+} from '../../domain/listVerificationQueue';
 import {
   cancelListSegmentation,
   deleteListSegmentation,
@@ -27,12 +39,25 @@ import {
 } from '../../domain/listSegmentQueue';
 import { AiJsonError, generateJson } from '../../lib/ai';
 import { logger } from '../../lib/logger';
+import { env } from '../../config/env';
 
 export async function listRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/lists', async () => {
     const lists = await listLists();
-    const statuses = await getListSegmentStatuses(lists.map((list) => list.id));
-    return { lists: lists.map((list) => listSummaryView(list, statuses[list.id] ?? null)) };
+    const ids = lists.map((list) => list.id);
+    const [statuses, verifications] = await Promise.all([
+      getListSegmentStatuses(ids),
+      getListVerificationStatuses(ids),
+    ]);
+    return {
+      lists: lists.map((list) =>
+        listSummaryView(list, statuses[list.id] ?? null, verifications[list.id] ?? null),
+      ),
+      verificationConfig: {
+        costPer1000: env.EMAIL_VERIFY_COST_PER_1000,
+        maxPerRun: env.EMAIL_VERIFY_MAX_PER_RUN,
+      },
+    };
   });
 
   app.post('/api/lists', async (req, reply) => {
@@ -54,7 +79,7 @@ export async function listRoutes(app: FastifyInstance): Promise<void> {
     }
 
     const rec = await createList(b.name || 'Untitled list', b.content, b.criteria || '', rows.length);
-    return { list: listView(rec, null) };
+    return { list: listView(rec, null, null) };
   });
 
   app.get('/api/lists/:id', async (req, reply) => {
@@ -64,8 +89,11 @@ export async function listRoutes(app: FastifyInstance): Promise<void> {
       reply.code(404).send({ error: 'not found' });
       return;
     }
-    const status = await getListSegmentStatus(id);
-    return { list: listView(rec, status) };
+    const [status, verification] = await Promise.all([
+      getListSegmentStatus(id),
+      getListVerificationStatus(id),
+    ]);
+    return { list: listView(rec, status, verification) };
   });
 
   app.get('/api/lists/:id/segment/status', async (req, reply) => {
@@ -151,11 +179,73 @@ export async function listRoutes(app: FastifyInstance): Promise<void> {
     }
   });
 
+  app.get('/api/lists/:id/verify', async (req, reply) => {
+    const id = (req.params as { id: string }).id;
+    if (!(await getList(id))) {
+      reply.code(404).send({ error: 'not found' });
+      return;
+    }
+    const status = await getListVerificationStatus(id);
+    if (!status) {
+      reply.code(404).send({ error: 'not found' });
+      return;
+    }
+    return { verification: publicListVerificationStatus(status) };
+  });
+
+  app.post('/api/lists/:id/verify/cancel', async (req, reply) => {
+    const id = (req.params as { id: string }).id;
+    if (!(await getList(id))) {
+      reply.code(404).send({ error: 'not found' });
+      return;
+    }
+    const status = await cancelListVerification(id);
+    if (!status) {
+      reply.code(404).send({ error: 'not found' });
+      return;
+    }
+    return { ok: true, verification: publicListVerificationStatus(status) };
+  });
+
+  app.post('/api/lists/:id/verify', async (req, reply) => {
+    const id = (req.params as { id: string }).id;
+    const rec = await getList(id);
+    if (!rec) {
+      reply.code(404).send({ error: 'not found' });
+      return;
+    }
+    if (!rec.result) {
+      reply.code(400).send({ error: 'list has no segmentation result — run Segment first' });
+      return;
+    }
+
+    const b = (req.body || {}) as { connectionId?: string; segments?: unknown; maxChecks?: unknown };
+    const connectionId = typeof b.connectionId === 'string' ? b.connectionId.trim() : '';
+    if (!connectionId) {
+      reply.code(400).send({ error: 'connectionId is required' });
+      return;
+    }
+    const segments = Array.isArray(b.segments)
+      ? b.segments.map((s) => String(s)).filter(Boolean)
+      : undefined;
+    const maxChecks = typeof b.maxChecks === 'number' ? b.maxChecks : undefined;
+
+    try {
+      const status = await enqueueListVerification(id, { connectionId, segments, maxChecks });
+      reply.code(202).send({ ok: true, verification: publicListVerificationStatus(status) });
+    } catch (err) {
+      logger.warn({ err, listId: id }, 'could not queue list email verification');
+      reply.code(400).send({ error: (err as Error).message || 'could not queue email verification' });
+    }
+  });
+
   app.delete('/api/lists/:id', async (req) => {
     const id = (req.params as { id: string }).id;
     await cancelListSegmentation(id);
+    await cancelListVerification(id);
     await deleteList(id);
     await deleteListSegmentation(id);
+    await deleteListVerification(id);
     return { ok: true };
   });
 }

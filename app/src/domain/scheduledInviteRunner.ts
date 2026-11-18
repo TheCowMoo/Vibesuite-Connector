@@ -9,6 +9,8 @@ import { accountAllowances } from './inviteCapacity';
 import { planInviteSplit } from './invitePlan';
 import { sendInviteRound } from './inviteSend';
 import { nextRoundAt } from './inviteBatches';
+import { applyVerificationPolicy } from './emailVerificationPolicy';
+import { loadListVerificationResults } from './emailVerificationLookup';
 import { logger } from '../lib/logger';
 import { inc } from '../lib/metrics';
 
@@ -74,9 +76,18 @@ export async function runScheduledInviteRound(id: string, now = Date.now()): Pro
     return;
   }
 
+  const verificationResults = await loadListVerificationResults(schedule.listId, candidates);
+  const verification = applyVerificationPolicy(candidates, verificationResults);
+  if (!verification.allowed.length) {
+    schedule.remaining = [];
+    finish(schedule, 'completed', 'every remaining address was excluded by email verification');
+    await saveScheduledInvite(schedule);
+    return;
+  }
+
   const accounts = await accountAllowances(schedule.connectionIds, new Date(now));
   const capped = accounts.map((a) => ({ ...a, allowance: Math.min(a.allowance, schedule.batchSize) }));
-  const split = planInviteSplit(candidates, capped);
+  const split = planInviteSplit(verification.allowed, capped);
 
   if (!split.totalCapacity) {
     schedule.error = 'no chosen account has sending headroom right now — retrying';

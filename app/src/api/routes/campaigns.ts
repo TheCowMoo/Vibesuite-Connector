@@ -31,6 +31,8 @@ import { getList } from '../../domain/listStore';
 import { getInvitedEmails } from '../../domain/inviteStore';
 import { buildAudience } from '../../domain/audience';
 import { collectCampaignStats } from '../../domain/campaignStatsCollect';
+import { collectCampaignVerification } from '../../domain/campaignVerification';
+import { clearCampaignVerification } from '../../domain/listVerificationStore';
 import { collectCampaignCrm } from '../../domain/campaignCrmCollect';
 import { buildCampaignCrmTable } from '../../domain/campaignCrmExport';
 import type { CampaignCrmQuery } from '../../domain/campaignCrm';
@@ -397,7 +399,21 @@ export async function campaignRoutes(app: FastifyInstance): Promise<void> {
       return;
     }
 
-    return { stats: await collectCampaignStats(camp), sessionId: camp.sessionId ?? null };
+    const [stats, verification] = await Promise.all([
+      collectCampaignStats(camp),
+      collectCampaignVerification(camp),
+    ]);
+    return { stats, verification, sessionId: camp.sessionId ?? null };
+  });
+
+  /** Pre-send email verification for this campaign's frozen audience. */
+  app.get('/api/campaigns/:id/verification', async (req, reply) => {
+    const camp = await getCampaign((req.params as { id: string }).id);
+    if (!camp) {
+      reply.code(404).send({ error: 'campaign not found' });
+      return;
+    }
+    return { verification: await collectCampaignVerification(camp) };
   });
 
   app.post('/api/campaigns', guard, async (req, reply) => {
@@ -521,6 +537,7 @@ export async function campaignRoutes(app: FastifyInstance): Promise<void> {
       reply.code(404).send({ error: 'campaign not found' });
       return;
     }
+    await clearCampaignVerification(id);
     await deleteCampaign(id);
     return { ok: true };
   });

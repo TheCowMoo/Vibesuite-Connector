@@ -16,9 +16,14 @@ export interface CampaignFunnel {
   noResponse: number;
   attended: number;
   noShow: number;
+  /** Failed ÷ (sent + failed) — attempted-send failure rate, not a bounce. */
+  failedRate: number;
   /** Percentages (0–100, one decimal). */
   rsvpRate: number;
+  /** Yes ÷ sent — overall conversion, kept alongside the KPI below. */
   acceptanceRate: number;
+  /** Yes ÷ (Yes + Maybe) — share of positive/possible replies that are a definite yes. */
+  responseRate: number;
   attendanceRate: number;
 }
 
@@ -94,8 +99,10 @@ function emptyFunnel(): CampaignFunnel {
     noResponse: 0,
     attended: 0,
     noShow: 0,
+    failedRate: 0,
     rsvpRate: 0,
     acceptanceRate: 0,
+    responseRate: 0,
     attendanceRate: 0,
   };
 }
@@ -103,7 +110,11 @@ function emptyFunnel(): CampaignFunnel {
 function finalizeFunnel(funnel: CampaignFunnel): void {
   const expected = funnel.accepted + funnel.tentative;
   funnel.rsvpRate = percent(funnel.accepted + funnel.declined + funnel.tentative, funnel.sent);
+  funnel.failedRate = percent(funnel.failed, funnel.sent + funnel.failed);
   funnel.acceptanceRate = percent(funnel.accepted, funnel.sent);
+  // The KPI is conditional on a positive/possible reply: declines and silence are excluded.
+  // `percent()` returns 0 when nobody said yes or maybe, which the UI renders as "no replies yet".
+  funnel.responseRate = percent(funnel.accepted, expected);
   funnel.attendanceRate = percent(funnel.attended, expected);
 }
 

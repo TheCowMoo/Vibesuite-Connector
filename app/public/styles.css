@@ -223,6 +223,10 @@ input[type="datetime-local"], input[type="date"] { font-variant-numeric: tabular
 .stat--warning { border-left-color: var(--warning); }
 .stat--neutral { border-left-color: var(--neutral); }
 .stat__value { font-size: 1.7rem; font-weight: 700; color: var(--navy); line-height: 1.1; font-variant-numeric: tabular-nums; }
+.stat__value--success { color: var(--success); }
+.stat__value--warning { color: var(--warning); }
+.stat__value--danger { color: var(--danger); }
+.stat__value--neutral { color: var(--neutral); }
 .stat__label { color: var(--ink-muted); font-size: 0.85rem; }
 
 /* ---- Statistics dashboard ---- */
@@ -774,6 +778,7 @@ fieldset.field legend { margin-bottom: 0.4rem; }
   border-radius: var(--radius); border: 1px solid var(--line); font-size: 0.92rem;
 }
 .invite-result--success { background: var(--success-tint); border-color: #B9DFC7; color: var(--success); }
+.invite-result--warning { background: var(--warning-tint); border-color: #EFD6AC; color: var(--warning); }
 .invite-result--error { background: #FBEDEB; border-color: #E8B8B4; color: var(--danger); }
 .invite-result a { color: var(--royal); font-weight: 600; }
 .section-title { margin: 1.5rem 0 0.6rem; font-size: 1.1rem; }
@@ -1153,6 +1158,10 @@ fieldset.field legend { margin-bottom: 0.4rem; }
 .summary { display: flex; gap: 1.25rem; flex-wrap: wrap; margin-bottom: 1rem; }
 .summary__item { display: flex; align-items: baseline; gap: 0.5rem; }
 .summary__value { font-weight: 700; color: var(--navy); font-variant-numeric: tabular-nums; }
+.summary__value--success { color: var(--success); }
+.summary__value--warning { color: var(--warning); }
+.summary__value--danger { color: var(--danger); }
+.summary__value--neutral { color: var(--neutral); }
 .summary__label { color: var(--ink-muted); font-size: 0.82rem; }
 
 /* ---- Deliverability (domain reputation) ---- */

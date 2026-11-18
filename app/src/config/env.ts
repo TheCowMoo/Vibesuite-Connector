@@ -47,6 +47,15 @@ const EnvSchema = z.object({
   GHL_WEBHOOK_NO: z.string().url().optional(),
   GHL_RSVP_CUSTOM_FIELD_ID: z.string().optional(),
 
+  // GHL Email Verification (pre-send deliverability check via POST /email/verify).
+  // This is not a bounce metric: Google Calendar invitations still do not expose delivery/bounce.
+  EMAIL_VERIFY_QUEUE_NAME: z.string().default('email-verify-queue'),
+  EMAIL_VERIFY_CONCURRENCY: z.coerce.number().int().min(1).max(10).default(3),
+  EMAIL_VERIFY_CACHE_DAYS: z.coerce.number().int().min(1).default(30),
+  EMAIL_VERIFY_MAX_PER_RUN: z.coerce.number().int().min(1).default(10000),
+  /** Display-only estimate; GHL bills the location wallet at its own rate. */
+  EMAIL_VERIFY_COST_PER_1000: z.coerce.number().min(0).default(2.5),
+
   WATCH_TTL_SECONDS: z.coerce.number().int().positive().default(2592000),
   WATCH_RENEWAL_THRESHOLD_DAYS: z.coerce.number().int().positive().default(5),
   WATCH_RENEWAL_CHECK_INTERVAL_MS: z.coerce.number().int().positive().default(86400000),

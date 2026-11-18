@@ -22,3 +22,13 @@ export const listSegmentQueue = new Queue(QUEUE_NAMES.listSegment, {
     removeOnFail: 1000,
   },
 });
+
+export const emailVerifyQueue = new Queue(QUEUE_NAMES.emailVerify, {
+  connection: redis,
+  defaultJobOptions: {
+    attempts: 2,
+    backoff: { type: 'exponential', delay: 2000 },
+    removeOnComplete: 500,
+    removeOnFail: 1000,
+  },
+});

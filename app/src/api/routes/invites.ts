@@ -12,6 +12,8 @@ import { planInviteSplit } from '../../domain/invitePlan';
 import { accountAllowances } from '../../domain/inviteCapacity';
 import { sendInviteRound } from '../../domain/inviteSend';
 import { sanitizeDescription } from '../../lib/richText';
+import { applyVerificationPolicy } from '../../domain/emailVerificationPolicy';
+import { loadListVerificationResults } from '../../domain/emailVerificationLookup';
 import {
   createScheduledInvite,
   getScheduledInvite,
@@ -137,13 +139,23 @@ export async function inviteRoutes(app: FastifyInstance): Promise<void> {
 
     const audience = buildAudience(rec.result, b.segments, await getInvitedEmails(b.listId));
     const meta = await getInvitedMeta(b.listId);
+    const verificationResults = await loadListVerificationResults(b.listId, audience.emails);
+    const verification = applyVerificationPolicy(audience.emails, verificationResults);
+    const allowed = new Set(verification.allowed);
 
     return {
-      emails: audience.emails,
-      perSegment: audience.perSegment,
+      emails: verification.allowed,
+      perSegment: audience.perSegment.map((segment) => ({
+        ...segment,
+        emails: segment.emails.filter((email) => allowed.has(email)),
+      })),
       duplicatesRemoved: audience.duplicatesRemoved,
       invalid: audience.invalid,
       alreadyInvited: audience.alreadyInvited,
+      verification: verification.summary,
+      verificationWarnings: verification.warnings,
+      excludedByVerification:
+        verification.excluded.doNotSend.length + verification.excluded.undeliverable.length,
       // The same people, each with a human label naming the event they were invited to. Returned
       // alongside the plain `alreadyInvited` list so nothing that reads that is affected.
       previouslyInvited: audience.alreadyInvited.map((email) => ({
@@ -246,10 +258,17 @@ export async function inviteRoutes(app: FastifyInstance): Promise<void> {
 
     const invited = b.force ? new Set<string>() : await getInvitedEmails(b.listId);
     const audience = buildAudience(list.result, b.segments, invited);
-    const emails = audience.emails;
-
-    if (!emails.length) {
+    if (!audience.emails.length) {
       reply.code(400).send({ error: `${describeEmptyAudience(audience)} — use force to resend if you meant to.` });
+      return;
+    }
+
+    const verificationResults = await loadListVerificationResults(b.listId, audience.emails);
+    const verification = applyVerificationPolicy(audience.emails, verificationResults);
+    const emails = verification.allowed;
+    if (!emails.length) {
+      const why = verification.warnings.length ? ` ${verification.warnings.join(' ')}` : '';
+      reply.code(400).send({ error: `every address was excluded by email verification.${why}` });
       return;
     }
 
@@ -369,6 +388,10 @@ export async function inviteRoutes(app: FastifyInstance): Promise<void> {
           .map((a) => ({ connectionId: a.connectionId, name: a.name, reason: a.reason })),
       },
       senders,
+      verification: verification.summary,
+      verificationWarnings: verification.warnings,
+      excludedByVerification:
+        verification.excluded.doNotSend.length + verification.excluded.undeliverable.length,
     };
   });
 }

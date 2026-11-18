@@ -46,6 +46,9 @@ import { startBlockedByDeadline } from './campaignLifecycle';
 import { blockedSendReasons, dueForNextBatch, senderCanProgress, senderReadiness } from './campaignSchedule';
 import { describeSendError, isGoogleAuthExpired } from './campaignSendError';
 import { variantJoinUrl } from './joinLink';
+import { applyVerificationPolicy, type VerificationSummary } from './emailVerificationPolicy';
+import { loadListVerificationResults, snapshotCampaignVerification } from './emailVerificationLookup';
+import { clearCampaignVerification } from './listVerificationStore';
 
 /** The linked call, if this campaign has one. Each variant's link is resolved separately. */
 async function campaignSession(camp: Campaign) {
@@ -62,6 +65,9 @@ export async function startCampaign(
   alreadyInvited: number;
   invalid: number;
   reInviting: number;
+  excludedByVerification: number;
+  verification: VerificationSummary;
+  verificationWarnings: string[];
 }> {
   const camp = await getCampaign(id);
   if (!camp) throw new Error('campaign not found');
@@ -84,8 +90,18 @@ export async function startCampaign(
     camp.segments,
     camp.includeAlreadyInvited ? new Set<string>() : allInvited,
   );
-  const emails = audience.emails;
-  if (!emails.length) throw new Error(describeEmptyAudience(audience));
+  const audienceEmails = audience.emails;
+  if (!audienceEmails.length) throw new Error(describeEmptyAudience(audience));
+
+  // Pre-send verification is warning-only. Undeliverable and do-not-send addresses are removed when
+  // GHL has a result for them; catch-all, unknown and unchecked addresses still go out with a warning.
+  const verificationResults = await loadListVerificationResults(camp.listId, audienceEmails);
+  const verification = applyVerificationPolicy(audienceEmails, verificationResults);
+  const emails = verification.allowed;
+  if (!emails.length) {
+    const why = verification.warnings.length ? ` ${verification.warnings.join(' ')}` : '';
+    throw new Error(`every address was excluded by email verification.${why}`);
+  }
   const reInviting = camp.includeAlreadyInvited ? emails.filter((e) => allInvited.has(e)).length : 0;
 
   const connectionIds = camp.senders.map((s) => s.connectionId);
@@ -93,6 +109,8 @@ export async function startCampaign(
   await resetCampaignCounters(id, connectionIds);
   await clearRecipients(id);
   await clearCampaignVariantMap(id);
+  await clearCampaignVerification(id);
+  await snapshotCampaignVerification(id, camp.listId, audienceEmails);
 
   // Freeze the copy-variant split with the audience. The queue still carries plain emails; this map is
   // what lets a mailbox group its claimed slice by variant without an extra read per recipient.
@@ -133,6 +151,9 @@ export async function startCampaign(
     alreadyInvited: audience.alreadyInvited.length,
     invalid: audience.invalid.length,
     reInviting,
+    excludedByVerification: verification.excluded.doNotSend.length + verification.excluded.undeliverable.length,
+    verification: verification.summary,
+    verificationWarnings: verification.warnings,
   };
 }
 

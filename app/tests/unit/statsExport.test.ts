@@ -35,7 +35,9 @@ function funnel(overrides: Partial<CampaignFunnel> = {}): CampaignFunnel {
     attended: 3,
     noShow: 1,
     rsvpRate: 77.8,
+    failedRate: 0,
     acceptanceRate: 44.4,
+    responseRate: 66.7,
     attendanceRate: 50,
     ...overrides,
   };
@@ -80,7 +82,7 @@ function stats(overrides: Partial<CampaignStats> = {}): CampaignStats {
     ],
     variants: [
       { variant: 'A', ...funnel() },
-      { variant: 'B', ...funnel({ sent: 4, accepted: 1, rsvpRate: 50, acceptanceRate: 25 }) },
+      { variant: 'B', ...funnel({ sent: 4, accepted: 1, rsvpRate: 50, acceptanceRate: 25, responseRate: 33.3 }) },
     ],
     hasAttendance: true,
     ...overrides,
@@ -105,9 +107,20 @@ function overview(overrides: Partial<StatsOverview> = {}): StatsOverview {
       attendances: 5,
       noShows: 2,
       acceptanceRate: 44.4,
+      responseRate: 66.7,
       attendanceRate: 71.4,
     },
     rsvp: { accepted: 4, declined: 1, tentative: 2, noResponse: 2 },
+    verification: {
+      total: 10,
+      checked: 8,
+      deliverable: 5,
+      undeliverable: 1,
+      doNotSend: 0,
+      catchAll: 1,
+      unknown: 1,
+      unchecked: 2,
+    },
     daily: [
       { date: '2026-11-05', sent: 4 },
       { date: '2026-11-06', sent: 5 },
@@ -266,7 +279,17 @@ describe('overview tables', () => {
       sessions: 1,
       attendances: 5,
       noShows: 2,
+      verifiedChecked: 8,
+      verifiedDeliverable: 5,
+      verifiedUndeliverable: 1,
+      verifiedDoNotSend: 0,
+      verifiedCatchAll: 1,
+      verifiedUnknown: 1,
+      verifiedUnchecked: 2,
+      verifiedUndeliverableRate: 12.5,
+      verifiedUncheckedRate: 20,
       acceptanceRate: 44.4,
+      responseRate: 66.7,
       attendanceRate: 71.4,
       rsvpAccepted: 4,
       rsvpDeclined: 1,
@@ -306,6 +329,7 @@ describe('campaign tables', () => {
       noShow: 1,
       rsvpRate: 77.8,
       acceptanceRate: 44.4,
+      responseRate: 66.7,
       attendanceRate: 50,
       attendanceTracked: 'yes',
     });
@@ -341,7 +365,41 @@ describe('campaign tables', () => {
   it('exports one row per copy variant', () => {
     const table = buildCampaignVariantTable([campaignRow()]);
     expect(table.rows.map((row) => row.variant)).toEqual(['A', 'B']);
-    expect(table.rows[1]).toMatchObject({ sent: 4, acceptanceRate: 25 });
+    expect(table.rows[1]).toMatchObject({ sent: 4, acceptanceRate: 25, responseRate: 33.3 });
+  });
+
+  it('exports campaign verification counts and rates', () => {
+    const row = campaignRow();
+    row.verification = {
+      total: 10,
+      checked: 8,
+      deliverable: 5,
+      undeliverable: 1,
+      doNotSend: 0,
+      catchAll: 1,
+      unknown: 1,
+      unchecked: 2,
+    };
+    const table = buildCampaignTable([row]);
+
+    expect(table.rows[0]).toMatchObject({
+      verifiedChecked: 8,
+      verifiedDeliverable: 5,
+      verifiedUndeliverable: 1,
+      verifiedCatchAll: 1,
+      verifiedUnknown: 1,
+      verifiedUnchecked: 2,
+      verifiedUndeliverableRate: 12.5,
+      verifiedUncheckedRate: 20,
+    });
+    expect(table.columns.map((column) => column.key)).toContain('verifiedChecked');
+  });
+
+  it('includes the Yes rate column in every rate export', () => {
+    const keys = (table: { columns: Array<{ key: string }> }) => table.columns.map((column) => column.key);
+    expect(keys(buildSummaryTable(overview()))).toContain('responseRate');
+    expect(keys(buildCampaignTable([campaignRow()]))).toContain('responseRate');
+    expect(keys(buildCampaignVariantTable([campaignRow()]))).toContain('responseRate');
   });
 });
 
