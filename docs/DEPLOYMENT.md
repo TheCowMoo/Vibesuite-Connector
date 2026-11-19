@@ -367,9 +367,13 @@ docker compose restart nginx
 
 | Role | Can do |
 |---|---|
-| `owner` | Everything, including promoting/demoting owners |
-| `admin` | Invite members, change roles, disable/remove members |
+| `owner` | Everything, including promoting/demoting owners and managing other owners/admins |
+| `admin` | Invite **members**, and manage/disable/remove/reset **members** only |
 | `member` | Use the product only (no Team tab) |
+
+Admins cannot promote anyone to admin/owner, and cannot reset, disable, remove or sign out an owner or
+another admin. They also do not see pending owner/admin invitations, so they cannot resend, revoke or copy
+those links. Those actions return an error from the API, not just a hidden button.
 
 ### Invites
 
@@ -377,11 +381,31 @@ docker compose restart nginx
 - Optionally set a **GHL inbound webhook URL** in **Team → Invite delivery** (or `TEAM_INVITE_WEBHOOK_URL`); every invite is also POSTed there so GHL sends the email. Use **Send test** first.
 - The webhook payload includes `email`, `name`, `role`, `inviteUrl`, `invitedBy`, `expiresAt`, `subject`.
 
+### Password resets
+
+- **Forgot password?** is available on the sign-in screen at `/forgot-password`. The response is always
+  generic, so it cannot be used to test whether an address exists.
+- A reset link is a 32-byte token; only its SHA-256 is stored. It is single-use, expires after
+  `PASSWORD_RESET_TTL_MINUTES` (default 30), and a newer request replaces the previous link.
+- Resetting a password revokes every session and does **not** sign the user in.
+- Reset email goes through **System email** only. There is deliberately no invite-webhook fallback, so a
+  reset link is never handed to a workflow that was built for invites. If system email is not configured,
+  an owner/admin can use **Team → Reset password → Generate link** and send it privately.
+- New passwords must be at least 12 characters. Existing users are not forced to change until they next
+  set a password.
+- Owner/admin **Sign out everywhere** revokes all sessions without changing the password.
+
+```bash
+# Example: shorter-lived links (5–1440 minutes; default 30)
+PASSWORD_RESET_TTL_MINUTES=30
+```
+
 ### Notes
 
 - Sessions live in Redis (`auth:session:*`) and are issued as an httpOnly `SameSite=Lax` cookie; only the token's SHA-256 is stored.
 - `/webhooks/google/calendar` and `/oauth/**` **must remain public** — they are allowlisted in `app/src/lib/authPaths.ts`. If RSVP sync breaks right after enabling auth, check that first.
-- Login attempts are rate-limited (10 per 15 min per email+IP).
+- Login attempts are rate-limited (10 per 15 min per email+IP); forgot-password requests are limited to
+  5 per 15 min per email+IP, and reset attempts to 10 per 15 min per token.
 - With `AUTH_ENABLED=false` every route behaves exactly as before.
 
 ## 9. Zoom authorisation (optional)

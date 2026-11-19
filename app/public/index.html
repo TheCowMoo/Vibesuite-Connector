@@ -850,7 +850,7 @@
   </div>
 </div>
 
-<!-- Auth gate (login / first-run setup / accept invite) -->
+<!-- Auth gate (login / first-run setup / accept invite / forgot / reset) -->
 <div class="auth-gate" id="authGate" hidden>
   <div class="auth-card">
     <img src="/static/logo.png" alt="Vibesuite" class="auth-logo" />
@@ -859,10 +859,14 @@
     <form id="authForm" novalidate>
       <label class="field" id="authNameWrap" hidden><span class="field__label">Your name</span><input name="name" autocomplete="name" /></label>
       <label class="field" id="authEmailWrap"><span class="field__label">Email</span><input name="email" type="email" autocomplete="username" /></label>
-      <label class="field"><span class="field__label">Password</span><input name="password" type="password" autocomplete="current-password" placeholder="At least 8 characters" /></label>
+      <label class="field" id="authPasswordWrap"><span class="field__label">Password</span><input name="password" type="password" autocomplete="current-password" placeholder="At least 12 characters" /></label>
+      <label class="field" id="authConfirmWrap" hidden><span class="field__label">Confirm password</span><input name="confirmPassword" type="password" autocomplete="new-password" placeholder="Type it again" /></label>
     </form>
     <p class="auth-error" id="authError" hidden></p>
+    <p class="auth-message" id="authMessage" hidden></p>
     <button class="btn btn--primary auth-submit" id="authSubmit">Sign in</button>
+    <button type="button" class="link-btn auth-link" id="authForgotLink">Forgot password?</button>
+    <button type="button" class="link-btn auth-link" id="authBackLink" hidden>Back to sign in</button>
   </div>
 </div>
 
@@ -879,7 +883,7 @@
       <label class="field"><span class="field__label">Role</span>
         <select name="role">
           <option value="member">Member — product access only</option>
-          <option value="admin">Admin — can invite &amp; manage the team</option>
+          <option value="admin">Admin — can invite &amp; manage members</option>
           <option value="owner">Owner — full control</option>
         </select>
       </label>
@@ -902,12 +906,33 @@
     </div>
     <form id="changePasswordForm" novalidate>
       <label class="field"><span class="field__label">Current password</span><input name="currentPassword" type="password" autocomplete="current-password" /></label>
-      <label class="field"><span class="field__label">New password</span><input name="newPassword" type="password" autocomplete="new-password" placeholder="At least 8 characters" /></label>
+      <label class="field"><span class="field__label">New password</span><input name="newPassword" type="password" autocomplete="new-password" placeholder="At least 12 characters" /></label>
+      <label class="field"><span class="field__label">Confirm new password</span><input name="confirmPassword" type="password" autocomplete="new-password" placeholder="Type it again" /></label>
     </form>
+    <p class="muted">Changing your password signs out every session, including this one.</p>
     <div class="modal__foot">
       <span class="spacer"></span>
       <button class="btn btn--ghost" data-close="changePassword">Cancel</button>
       <button class="btn btn--primary" id="changePasswordSave">Update password</button>
+    </div>
+  </div>
+</div>
+
+<!-- Reset another user's password -->
+<div class="backdrop" id="resetUserPassword" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="resetUserPasswordTitle">
+    <div class="modal__head">
+      <h2 class="modal__title" id="resetUserPasswordTitle">Reset password</h2>
+      <button class="icon-btn" data-close="resetUserPassword" aria-label="Close">&times;</button>
+    </div>
+    <p class="muted" id="resetUserPasswordIntro"></p>
+    <p class="muted">The link works once and expires automatically. Anyone with the link can set this user's password, so send it privately. Email delivery requires the system email configured in Team settings.</p>
+    <div class="invite-result" id="resetUserPasswordResult" hidden></div>
+    <div class="modal__foot">
+      <span class="spacer"></span>
+      <button class="btn btn--ghost" data-close="resetUserPassword">Close</button>
+      <button class="btn btn--outline" id="resetUserGenerate">Generate link</button>
+      <button class="btn btn--primary" id="resetUserSend">Send reset email</button>
     </div>
   </div>
 </div>

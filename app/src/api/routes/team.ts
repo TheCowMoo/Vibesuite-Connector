@@ -1,8 +1,25 @@
 import axios from 'axios';
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { env } from '../../config/env';
-import { listAudit, listUsers, publicUser, type UserRole, type UserStatus } from '../../domain/authStore';
-import { createTeamInvite, listTeamInvites, removeUser, resendInvite, revokeInvite, setUserRole, setUserStatus } from '../../domain/auth';
+import {
+  listAudit,
+  listUsers,
+  publicUser,
+  type UserRecord,
+  type UserRole,
+  type UserStatus,
+} from '../../domain/authStore';
+import {
+  createAdminPasswordReset,
+  createTeamInvite,
+  listTeamInvites,
+  removeUser,
+  resendInvite,
+  revokeInvite,
+  revokeUserSessions,
+  setUserRole,
+  setUserStatus,
+} from '../../domain/auth';
 import { getTeamSettings, saveTeamSettings, resolveInviteWebhookUrl } from '../../domain/teamSettings';
 import {
   getSystemEmailSettings,
@@ -25,13 +42,39 @@ function describeErr(err: unknown): string {
     : e?.message || 'unknown error';
 }
 
+/**
+ * With auth off there is no signed-in user; team management still has to work. Treat that mode as an
+ * owner, exactly as the rest of the panel does (all routes are open). With auth on, a missing user is a
+ * real 401 rather than an accidental privilege escalation.
+ */
+function actingUser(req: FastifyRequest): UserRecord | null {
+  const user = getAuthUser(req);
+  if (user) return user;
+  if (env.AUTH_ENABLED) return null;
+  return {
+    id: 'system',
+    email: 'system',
+    emailLower: 'system',
+    name: 'System',
+    role: 'owner',
+    status: 'active',
+    passwordHash: '',
+    createdAt: 0,
+  };
+}
+
 export async function teamRoutes(app: FastifyInstance): Promise<void> {
   const guard = { preHandler: requireRole('owner', 'admin') };
   const baseUrl = (): string => env.OAUTH_BASE_URL;
 
-  app.get('/api/team', guard, async () => {
+  app.get('/api/team', guard, async (req, reply) => {
+    const actor = actingUser(req);
+    if (!actor) {
+      reply.code(401).send({ error: 'not authenticated' });
+      return;
+    }
     const users = await listUsers();
-    const invites = await listTeamInvites(baseUrl());
+    const invites = await listTeamInvites(baseUrl(), actor.role);
     const settings = await getTeamSettings();
     return {
       users: users.map(publicUser),
@@ -57,13 +100,18 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
       reply.code(400).send({ error: 'email and a valid role are required' });
       return;
     }
-    const actor = getAuthUser(req);
+    const actor = actingUser(req);
+    if (!actor) {
+      reply.code(401).send({ error: 'not authenticated' });
+      return;
+    }
     try {
       const out = await createTeamInvite({
         email: b.email,
         role: b.role,
         name: b.name,
-        invitedBy: actor?.email ?? 'unknown',
+        invitedBy: actor.email,
+        actorRole: actor.role,
         baseUrl: baseUrl(),
       });
       return {
@@ -78,21 +126,47 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
   });
 
   app.post('/api/team/invites/:id/resend', guard, async (req, reply) => {
-    const out = await resendInvite((req.params as { id: string }).id, baseUrl());
-    if (!out) {
-      reply.code(404).send({ error: 'invite not found' });
+    const actor = actingUser(req);
+    if (!actor) {
+      reply.code(401).send({ error: 'not authenticated' });
       return;
     }
-    return { ok: true, inviteUrl: out.inviteUrl, webhook: out.webhook };
+    try {
+      const out = await resendInvite((req.params as { id: string }).id, baseUrl(), actor);
+      if (!out) {
+        reply.code(404).send({ error: 'invite not found' });
+        return;
+      }
+      return { ok: true, inviteUrl: out.inviteUrl, webhook: out.webhook };
+    } catch (err) {
+      reply.code(400).send({ error: (err as Error).message });
+    }
   });
 
-  app.delete('/api/team/invites/:id', guard, async (req) => {
-    await revokeInvite((req.params as { id: string }).id);
-    return { ok: true };
+  app.delete('/api/team/invites/:id', guard, async (req, reply) => {
+    const actor = actingUser(req);
+    if (!actor) {
+      reply.code(401).send({ error: 'not authenticated' });
+      return;
+    }
+    try {
+      const removed = await revokeInvite((req.params as { id: string }).id, actor);
+      if (!removed) {
+        reply.code(404).send({ error: 'invite not found' });
+        return;
+      }
+      return { ok: true };
+    } catch (err) {
+      reply.code(400).send({ error: (err as Error).message });
+    }
   });
 
   app.patch('/api/team/users/:id', guard, async (req, reply) => {
-    const actor = getAuthUser(req);
+    const actor = actingUser(req);
+    if (!actor) {
+      reply.code(401).send({ error: 'not authenticated' });
+      return;
+    }
     const id = (req.params as { id: string }).id;
     const b = req.body as { role?: UserRole; status?: UserStatus };
     try {
@@ -101,14 +175,14 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
           reply.code(400).send({ error: 'invalid role' });
           return;
         }
-        await setUserRole(actor?.email ?? 'unknown', id, b.role);
+        await setUserRole(actor, id, b.role);
       }
       if (b.status) {
         if (b.status !== 'active' && b.status !== 'disabled') {
           reply.code(400).send({ error: 'invalid status' });
           return;
         }
-        await setUserStatus(actor?.email ?? 'unknown', actor?.id ?? '', id, b.status);
+        await setUserStatus(actor, id, b.status);
       }
       return { ok: true };
     } catch (err) {
@@ -117,9 +191,48 @@ export async function teamRoutes(app: FastifyInstance): Promise<void> {
   });
 
   app.delete('/api/team/users/:id', guard, async (req, reply) => {
-    const actor = getAuthUser(req);
+    const actor = actingUser(req);
+    if (!actor) {
+      reply.code(401).send({ error: 'not authenticated' });
+      return;
+    }
     try {
-      await removeUser(actor?.email ?? 'unknown', actor?.id ?? '', (req.params as { id: string }).id);
+      await removeUser(actor, (req.params as { id: string }).id);
+      return { ok: true };
+    } catch (err) {
+      reply.code(400).send({ error: (err as Error).message });
+    }
+  });
+
+  app.post('/api/team/users/:id/password-reset', guard, async (req, reply) => {
+    reply.header('Cache-Control', 'no-store');
+    const actor = actingUser(req);
+    if (!actor) {
+      reply.code(401).send({ error: 'not authenticated' });
+      return;
+    }
+    const b = (req.body || {}) as { sendEmail?: boolean };
+    try {
+      const out = await createAdminPasswordReset(
+        actor,
+        (req.params as { id: string }).id,
+        baseUrl(),
+        b.sendEmail !== false,
+      );
+      return { ok: true, ...out };
+    } catch (err) {
+      reply.code(400).send({ error: (err as Error).message });
+    }
+  });
+
+  app.post('/api/team/users/:id/sessions/revoke', guard, async (req, reply) => {
+    const actor = actingUser(req);
+    if (!actor) {
+      reply.code(401).send({ error: 'not authenticated' });
+      return;
+    }
+    try {
+      await revokeUserSessions(actor, (req.params as { id: string }).id);
       return { ok: true };
     } catch (err) {
       reply.code(400).send({ error: (err as Error).message });

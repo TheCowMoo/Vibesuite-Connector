@@ -40,12 +40,19 @@ export function buildApp(): FastifyInstance {
 
   // Control panel (single page). `/invite` serves the same shell so invite
   // links resolve; the client reads ?token= and shows the accept-invite view.
-  const serveSpa = async (_req: FastifyRequest, reply: FastifyReply): Promise<void> => {
+  const serveSpa = async (req: FastifyRequest, reply: FastifyReply): Promise<void> => {
     const html = fs.readFileSync(path.join(publicDir, 'index.html'), 'utf8');
-    reply.header('Content-Type', 'text/html; charset=utf-8').send(html);
+    reply.header('Content-Type', 'text/html; charset=utf-8');
+    // Reset URLs carry a token in the query string; keep it out of Referer headers and caches.
+    if (req.url.split('?')[0] === '/reset-password') {
+      reply.header('Referrer-Policy', 'no-referrer').header('Cache-Control', 'no-store');
+    }
+    reply.send(html);
   };
   app.get('/', serveSpa);
   app.get('/invite', serveSpa);
+  app.get('/forgot-password', serveSpa);
+  app.get('/reset-password', serveSpa);
 
   void app.register(infoRoutes);
   void app.register(integrationRoutes);

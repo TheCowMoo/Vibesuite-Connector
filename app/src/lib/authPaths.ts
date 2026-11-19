@@ -10,6 +10,8 @@ const PUBLIC_EXACT = new Set([
   '/',
   '/login',
   '/invite',
+  '/forgot-password',
+  '/reset-password',
   '/favicon.ico',
   '/healthz',
   '/readyz',
@@ -19,6 +21,8 @@ const PUBLIC_EXACT = new Set([
   '/api/auth/logout',
   '/api/auth/setup',
   '/api/auth/accept-invite',
+  '/api/auth/forgot-password',
+  '/api/auth/reset-password',
 ]);
 
 const PUBLIC_PREFIXES = ['/static/', '/webhooks/google/calendar', '/oauth/google', '/oauth/ghl', '/oauth/zoom'];

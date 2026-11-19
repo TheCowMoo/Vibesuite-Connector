@@ -4285,7 +4285,9 @@
   var authState = { enabled: false, authenticated: false, user: null };
   var authMode = 'login';
   var inviteToken = null;
+  var resetToken = null;
   var teamData = null;
+  var resetUserPasswordId = null;
 
   function isAdmin() {
     return !!(authState.user && (authState.user.role === 'owner' || authState.user.role === 'admin'));
@@ -4299,10 +4301,28 @@
   }
 
   function bootstrapAuth() {
-    inviteToken = new URLSearchParams(window.location.search).get('token');
+    var params = new URLSearchParams(window.location.search);
+    var pathname = window.location.pathname.replace(/\/+$/, '');
+    var isResetPath = pathname === '/reset-password';
+    var isForgotPath = pathname === '/forgot-password';
+    resetToken = isResetPath ? params.get('token') : null;
+    inviteToken = isResetPath || isForgotPath ? null : params.get('token');
     return api('/api/auth/me')
       .then(function (d) {
         authState = d;
+        if (isResetPath) {
+          showAuthGate('reset');
+          if (!resetToken) {
+            var err = document.getElementById('authError');
+            err.textContent = 'This reset link is incomplete. Request a new one.';
+            err.hidden = false;
+          }
+          return;
+        }
+        if (isForgotPath) {
+          showAuthGate('forgot');
+          return;
+        }
         if (d.needsSetup) return showAuthGate('setup');
         if (inviteToken) return showAuthGate('invite');
         if (d.enabled && !d.authenticated) return showAuthGate('login');
@@ -4333,31 +4353,149 @@
     authMode = mode;
     document.getElementById('authGate').hidden = false;
     document.getElementById('authError').hidden = true;
+    var message = document.getElementById('authMessage');
+    if (message) {
+      message.hidden = true;
+      message.textContent = '';
+    }
     var form = document.getElementById('authForm');
     form.reset();
-    document.getElementById('authEmailWrap').hidden = mode === 'invite';
-    document.getElementById('authNameWrap').hidden = mode === 'login';
 
-    var titles = { login: 'Sign in', setup: 'Create your owner account', invite: 'Accept your invite' };
+    var reset = mode === 'reset';
+    var forgot = mode === 'forgot';
+    var needsName = mode === 'setup' || mode === 'invite';
+    var needsEmail = mode !== 'invite' && !reset;
+    var needsPassword = !forgot;
+    var needsConfirm = mode === 'setup' || mode === 'invite' || reset;
+
+    document.getElementById('authNameWrap').hidden = !needsName;
+    document.getElementById('authEmailWrap').hidden = !needsEmail;
+    document.getElementById('authPasswordWrap').hidden = !needsPassword;
+    document.getElementById('authConfirmWrap').hidden = !needsConfirm;
+    document.getElementById('authForgotLink').hidden = mode !== 'login';
+    document.getElementById('authBackLink').hidden = mode !== 'forgot' && mode !== 'reset';
+
+    var titles = {
+      login: 'Sign in',
+      setup: 'Create your owner account',
+      invite: 'Accept your invite',
+      forgot: 'Reset your password',
+      reset: 'Set a new password'
+    };
     var subs = {
       login: 'Welcome back.',
       setup: 'First-run setup — this disappears once an account exists.',
-      invite: 'Set a password to join the team.'
+      invite: 'Set a password to join the team.',
+      forgot: 'Enter your account email and we will send a reset link if email delivery is configured.',
+      reset: 'Choose a new password. This link works once.'
     };
     document.getElementById('authTitle').textContent = titles[mode];
     document.getElementById('authSub').textContent = subs[mode];
-    document.getElementById('authSubmit').textContent = mode === 'login' ? 'Sign in' : mode === 'setup' ? 'Create account' : 'Join team';
-    form.querySelector('[name="password"]').setAttribute('autocomplete', mode === 'login' ? 'current-password' : 'new-password');
+    document.getElementById('authSubmit').textContent =
+      mode === 'login' ? 'Sign in' :
+      mode === 'setup' ? 'Create account' :
+      mode === 'invite' ? 'Join team' :
+      mode === 'forgot' ? 'Send reset link' : 'Set new password';
+
+    var password = form.querySelector('[name="password"]');
+    password.setAttribute('autocomplete', mode === 'login' ? 'current-password' : 'new-password');
+    password.setAttribute('placeholder', mode === 'login' ? '' : 'At least 12 characters');
   }
 
   function submitAuth() {
     var fd = new FormData(document.getElementById('authForm'));
     var errEl = document.getElementById('authError');
+    var messageEl = document.getElementById('authMessage');
     errEl.hidden = true;
+    if (messageEl) {
+      messageEl.hidden = true;
+      messageEl.textContent = '';
+    }
 
-    var path = authMode === 'login' ? '/api/auth/login' : authMode === 'setup' ? '/api/auth/setup' : '/api/auth/accept-invite';
-    var body = { email: fd.get('email'), name: fd.get('name'), password: fd.get('password') };
-    if (authMode === 'invite') body.token = inviteToken;
+    var email = String(fd.get('email') || '').trim();
+    var name = String(fd.get('name') || '').trim();
+    var password = String(fd.get('password') || '');
+    var confirmPassword = String(fd.get('confirmPassword') || '');
+
+    if (authMode === 'forgot') {
+      if (!email) {
+        errEl.textContent = 'Enter your account email.';
+        errEl.hidden = false;
+        return;
+      }
+      withBusy(document.getElementById('authSubmit'), api('/api/auth/forgot-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email })
+      }))
+        .then(function () {
+          if (messageEl) {
+            messageEl.textContent = 'If an account exists and email delivery is configured, a reset link has been sent. If nothing arrives, ask an owner/admin to generate one from Team.';
+            messageEl.hidden = false;
+          }
+        })
+        .catch(function (e) {
+          errEl.textContent = e.message;
+          errEl.hidden = false;
+        });
+      return;
+    }
+
+    if (authMode === 'reset') {
+      if (!resetToken) {
+        errEl.textContent = 'This reset link is incomplete. Request a new one.';
+        errEl.hidden = false;
+        return;
+      }
+      if (password.length < 12) {
+        errEl.textContent = 'Password must be at least 12 characters.';
+        errEl.hidden = false;
+        return;
+      }
+      if (password !== confirmPassword) {
+        errEl.textContent = 'The two passwords do not match.';
+        errEl.hidden = false;
+        return;
+      }
+      withBusy(document.getElementById('authSubmit'), api('/api/auth/reset-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: resetToken, newPassword: password })
+      }))
+        .then(function () {
+          history.replaceState(null, '', '/');
+          resetToken = null;
+          toast('Password updated — please sign in', 'success');
+          showAuthGate('login');
+        })
+        .catch(function (e) {
+          errEl.textContent = e.message;
+          errEl.hidden = false;
+        });
+      return;
+    }
+
+    if ((authMode === 'setup' || authMode === 'invite') && password !== confirmPassword) {
+      errEl.textContent = 'The two passwords do not match.';
+      errEl.hidden = false;
+      return;
+    }
+    if ((authMode === 'setup' || authMode === 'invite') && password.length < 12) {
+      errEl.textContent = 'Password must be at least 12 characters.';
+      errEl.hidden = false;
+      return;
+    }
+
+    var path = authMode === 'login'
+      ? '/api/auth/login'
+      : authMode === 'setup'
+        ? '/api/auth/setup'
+        : '/api/auth/accept-invite';
+    var body = authMode === 'login'
+      ? { email: email, password: password }
+      : authMode === 'setup'
+        ? { email: email, name: name, password: password }
+        : { token: inviteToken, name: name, password: password };
 
     withBusy(document.getElementById('authSubmit'), api(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }))
       .then(function (r) {
@@ -4520,6 +4658,10 @@
     el.innerHTML = '';
     users.forEach(function (u) {
       var me = authState.user && authState.user.id === u.id;
+      // Auth off means there is no signed-in user; the API treats that as owner, so the UI can too.
+      var myRole = authState.user ? authState.user.role : 'owner';
+      var manageable = !me && (myRole === 'owner' || (myRole === 'admin' && u.role === 'member'));
+      var roleOptions = myRole === 'owner' ? ['member', 'admin', 'owner'] : ['member'];
       var box = document.createElement('div');
       box.className = 'conn';
       box.innerHTML =
@@ -4530,18 +4672,82 @@
             badge('Last login: ' + (u.lastLoginAt ? new Date(u.lastLoginAt).toLocaleString() : 'never')) + '</div>' +
         '</div>' +
         '<div class="conn__actions">' +
-          '<select data-role-for="' + esc(u.id) + '" aria-label="Role">' +
-            ['member', 'admin', 'owner'].map(function (r) {
-              return '<option value="' + r + '"' + (r === u.role ? ' selected' : '') + '>' + r + '</option>';
-            }).join('') +
-          '</select>' +
-          '<button class="btn btn--ghost btn--sm" data-action="toggleUser" data-id="' + esc(u.id) + '" data-status="' +
-            (u.status === 'disabled' ? 'active' : 'disabled') + '">' + (u.status === 'disabled' ? 'Enable' : 'Disable') + '</button>' +
-          '<button class="btn btn--danger btn--sm" data-action="removeUser" data-id="' + esc(u.id) + '">Remove</button>' +
+          (manageable
+            ? '<select data-role-for="' + esc(u.id) + '" aria-label="Role">' +
+                roleOptions.map(function (r) {
+                  return '<option value="' + r + '"' + (r === u.role ? ' selected' : '') + '>' + r + '</option>';
+                }).join('') +
+              '</select>' +
+              '<button class="btn btn--outline btn--sm" data-action="resetUserPassword" data-id="' + esc(u.id) + '">Reset password</button>' +
+              '<button class="btn btn--ghost btn--sm" data-action="revokeUserSessions" data-id="' + esc(u.id) + '">Sign out everywhere</button>' +
+              '<button class="btn btn--ghost btn--sm" data-action="toggleUser" data-id="' + esc(u.id) + '" data-status="' +
+                (u.status === 'disabled' ? 'active' : 'disabled') + '">' + (u.status === 'disabled' ? 'Enable' : 'Disable') + '</button>' +
+              '<button class="btn btn--danger btn--sm" data-action="removeUser" data-id="' + esc(u.id) + '">Remove</button>'
+            : '<span class="muted" style="font-size:0.8rem">' +
+                (me ? 'Use the account menu to change your password.' : 'A higher role is required to manage this account.') +
+              '</span>') +
         '</div>';
       el.appendChild(box);
     });
   }
+
+  function openUserPasswordReset(id) {
+    var user = (teamData && teamData.users || []).filter(function (u) { return u.id === id; })[0];
+    if (!user) return;
+    resetUserPasswordId = id;
+    document.getElementById('resetUserPasswordIntro').textContent =
+      'Generate a one-time password reset link for ' + user.email + '.';
+    var result = document.getElementById('resetUserPasswordResult');
+    result.hidden = true;
+    result.innerHTML = '';
+    openModal('resetUserPassword');
+  }
+
+  function submitUserPasswordReset(sendEmail, btn) {
+    if (!resetUserPasswordId) return;
+    var result = document.getElementById('resetUserPasswordResult');
+    withBusy(btn, api('/api/team/users/' + resetUserPasswordId + '/password-reset', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sendEmail: sendEmail })
+    }))
+      .then(function (r) {
+        result.hidden = false;
+        var delivery = r.delivery;
+        var tone = delivery && !delivery.ok ? 'warning' : 'success';
+        result.className = 'invite-result invite-result--' + tone;
+        var deliveryText = sendEmail
+          ? delivery
+            ? delivery.ok
+              ? 'Email sent via ' + (delivery.via === 'ghl' ? 'GoHighLevel' : delivery.via) + '.'
+              : 'Email could not be sent: ' + (delivery.detail || 'unknown error') + '. Copy the link below instead.'
+            : 'Email delivery was not attempted.'
+          : 'Link generated. No email was sent.';
+        result.innerHTML =
+          '<div>' + esc(deliveryText) + '</div>' +
+          '<div class="invite-link"><input readonly value="' + esc(r.resetUrl) + '" aria-label="Password reset link" />' +
+            '<button type="button" class="btn btn--ghost btn--sm" data-copy-reset>Copy link</button></div>' +
+          '<div class="muted">Expires ' + esc(prettyDate(r.expiresAt)) + '.</div>';
+      })
+      .catch(function (e) {
+        result.hidden = false;
+        result.className = 'invite-result invite-result--error';
+        result.textContent = e.message;
+      });
+  }
+
+  document.getElementById('resetUserGenerate').addEventListener('click', function () {
+    submitUserPasswordReset(false, this);
+  });
+  document.getElementById('resetUserSend').addEventListener('click', function () {
+    submitUserPasswordReset(true, this);
+  });
+  document.getElementById('resetUserPasswordResult').addEventListener('click', function (e) {
+    var copy = e.target.closest('[data-copy-reset]');
+    if (!copy) return;
+    var input = copy.parentElement.querySelector('input');
+    if (input) copyText(input.value);
+  });
 
   function renderTeamInvites(invites) {
     var el = document.getElementById('teamInvites');
@@ -4594,7 +4800,17 @@
   }
 
   function openInviteMember() {
-    document.getElementById('inviteMemberForm').reset();
+    var form = document.getElementById('inviteMemberForm');
+    form.reset();
+    var owner = !authState.user || authState.user.role === 'owner';
+    var role = form.querySelector('[name="role"]');
+    Array.prototype.forEach.call(role.options, function (option) {
+      if (option.value === 'admin' || option.value === 'owner') {
+        option.hidden = !owner;
+        option.disabled = !owner;
+      }
+    });
+    if (!owner) role.value = 'member';
     var r = document.getElementById('inviteMemberResult');
     r.hidden = true;
     r.innerHTML = '';
@@ -4642,7 +4858,17 @@
     var btn = e.target.closest('[data-action]');
     if (!btn) return;
     var id = btn.dataset.id;
-    if (btn.dataset.action === 'toggleUser') {
+    if (btn.dataset.action === 'resetUserPassword') {
+      openUserPasswordReset(id);
+    } else if (btn.dataset.action === 'revokeUserSessions') {
+      confirmDialog('Sign this user out everywhere?', 'Every active session for this account will end. They can sign in again with their current password.', 'Sign out everywhere')
+        .then(function (ok) {
+          if (!ok) return;
+          api('/api/team/users/' + id + '/sessions/revoke', { method: 'POST' })
+            .then(function () { toast('Sessions revoked', 'success'); })
+            .catch(function (err) { toast(err.message, 'error'); });
+        });
+    } else if (btn.dataset.action === 'toggleUser') {
       api('/api/team/users/' + id, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: btn.dataset.status }) })
         .then(function () { toast('Updated', 'success'); loadTeam(); })
         .catch(function (err) { toast(err.message, 'error'); });
@@ -4722,7 +4948,17 @@
 
   document.getElementById('changePasswordSave').addEventListener('click', function () {
     var fd = new FormData(document.getElementById('changePasswordForm'));
-    var body = { currentPassword: fd.get('currentPassword'), newPassword: fd.get('newPassword') };
+    var newPassword = String(fd.get('newPassword') || '');
+    var confirmPassword = String(fd.get('confirmPassword') || '');
+    if (newPassword.length < 12) {
+      toast('Password must be at least 12 characters', 'error');
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      toast('The two passwords do not match', 'error');
+      return;
+    }
+    var body = { currentPassword: fd.get('currentPassword'), newPassword: newPassword };
     withBusy(this, api('/api/auth/change-password', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }))
       .then(function () {
         closeModal('changePassword');
@@ -4737,6 +4973,11 @@
   document.getElementById('authForm').addEventListener('submit', function (e) {
     e.preventDefault();
     submitAuth();
+  });
+  document.getElementById('authForgotLink').addEventListener('click', function () { showAuthGate('forgot'); });
+  document.getElementById('authBackLink').addEventListener('click', function () {
+    history.replaceState(null, '', '/');
+    showAuthGate('login');
   });
 
   /* ---- Senders ---- */

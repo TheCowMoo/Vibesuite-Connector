@@ -87,6 +87,11 @@ calendar id, location id, and optional webhook URLs. All runtime keys are namesp
 | `list:{id}` | full uploaded list + segmentation result |
 | `list:{id}:segment` | background sort status/progress (`queued`, `running`, `done`, `failed`, `cancelled`) |
 | `list:{id}:segment:batches:{runId}` | checkpointed AI batch results for resume |
+| `auth:user:{id}` / `auth:email:{emailLower}` | team user record and email → id index |
+| `auth:session:{sha256}` / `auth:logins:{userId}` | one login session and the set of that user's session hashes |
+| `auth:passwordReset:{sha256}` | one-time password-reset record (user, issued/expiry, requested IP); the raw token is never stored |
+| `auth:passwordResetByUser:{userId}` | the only active reset hash for a user, so a new request replaces the old link |
+| `auth:passwordResetAttempts:{key}` | forgot/reset rate-limit counter (15-minute window) |
 
 ## List segmentation
 
@@ -630,7 +635,7 @@ is unverified, which is why step 2 matters.
 
 ## System email
 
-Platform mail — team invites and account notices — goes through **GoHighLevel's Conversations API**,
+Platform mail — team invites, password reset links and account notices — goes through **GoHighLevel's Conversations API**,
 not SMTP and not the calendar path. Calendar invitations are deliberately excluded: those are sent by
 each connection's own Google account (`createInviteEvent` → `sendUpdates: 'all'`), so they must never
 be routed through here.
@@ -646,6 +651,10 @@ be routed through here.
    across a deploy.
 3. **Nothing** — the invite still returns a copyable link, and the caller is told which path was used.
 
+Password-reset calls deliberately omit `webhookPayload`, so a reset link can never fall through to the
+invite webhook even when one is configured. If system email is unavailable, an owner/admin copies the
+one-time link from Team instead.
+
 `ghlRequest()` now accepts a `GhlRequestTarget` (a `Pick` of the fields it actually reads) rather than a
 full `StoredConnection`, so the system path reuses the same retry, backoff, `Retry-After` and 401
 handling without fabricating a connection.
@@ -659,6 +668,57 @@ otherwise the email would send successfully and be unusable.
 Credentials and template live in `settings:systemEmail`, encrypted with `CREDENTIALS_ENCRYPTION_KEY`
 and exposed only as a masked token. **The from address must be a verified sender on that GHL
 location**, or GHL rejects it or silently substitutes the location default.
+
+## Auth and password resets
+
+Authentication is optional (`AUTH_ENABLED=false` by default). When it is on, every `/api/*` route is
+deny-by-default except the allowlist in `lib/authPaths.ts`; the SPA shell and static assets stay public
+so the login view can render.
+
+Sessions are httpOnly `SameSite=Lax` cookies. Only the token's SHA-256 is stored (`auth:session:*`), and
+each user has a set of their session hashes (`auth:logins:*`) so a password change or an admin action can
+revoke every session at once.
+
+### Self-service reset
+
+`POST /api/auth/forgot-password` always returns the same `{ ok: true }` response, whether the address
+exists, is disabled, or delivery failed. For an active account, `requestPasswordReset()`:
+
+1. generates a 32-byte URL-safe token and stores only its SHA-256 (`auth:passwordReset:*`);
+2. sets a single active hash per user (`auth:passwordResetByUser:*`), so requesting again replaces the
+   previous link;
+3. expires it after `PASSWORD_RESET_TTL_MINUTES` (default 30) and rate-limits requests to 5 per 15
+   minutes per email+IP;
+4. sends a dedicated reset email through `sendSystemEmail()` — **no invite-webhook fallback**. If system
+   email is not configured, the user is told to ask an owner/admin, who can copy a link from Team.
+
+`POST /api/auth/reset-password` consumes the token once, checks the account is still active, rejects a
+link issued before `UserRecord.passwordChangedAt`, enforces the shared 12-character policy, revokes
+every existing session and **does not sign the user in**. The reset link page is public
+(`/reset-password?token=…`); the token is never returned by the self-service request.
+
+### Admin reset and role hierarchy
+
+Team → a manageable user exposes **Reset password** (generate a one-time link or send the email) and
+**Sign out everywhere**. Admins never set or see a password; they can only hand over a reset link.
+
+The hierarchy is enforced in `domain/userRoles.ts` and in the auth domain, not just in the UI:
+
+| Actor | Can manage | Can assign |
+|---|---|---|
+| `owner` | owners, admins, members | any role |
+| `admin` | members only | `member` only |
+| `member` | nobody | nothing |
+
+Admins therefore cannot invite/promote/disable/remove/reset an owner or another admin, and pending
+owner/admin invitations are filtered out of their Team view so they cannot copy, resend or revoke those
+links. Last-owner protection remains for demote, disable and remove. Disabling a user or changing their
+role also invalidates any outstanding reset link, so a link generated while they were a member cannot
+survive a promotion. Every reset request/link, password completion, session revoke, role change and
+invite action goes into `auth:audit`.
+
+Passwords are hashed with scrypt. New passwords require at least 12 characters and cannot equal the
+account's email or display name; existing users are not forced to change until they next set a password.
 
 ## Advisor
 

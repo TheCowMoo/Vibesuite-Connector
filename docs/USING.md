@@ -42,6 +42,24 @@ Google accounts (who sends) + Contact list (who receives) + Event details
   campaign actions are owner/admin.
 - **Settings** — AI provider/key, Zoom mode and hosts, security, and branding.
 
+## Signing in and passwords
+
+If the panel asks you to sign in, use the email and password your owner/admin set up for you.
+
+- **Forgot your password?** Use **Forgot password?** under the sign-in form. The panel always gives the
+  same answer, whether or not the address exists. If system email is configured, a one-time link arrives
+  by email; if not, ask an owner/admin to generate a link for you from **Team**.
+- **The link** opens `/reset-password`, works once, and expires after 30 minutes by default. It does
+  **not** sign you in — after setting the new password, sign in normally.
+- **New passwords** must be at least 12 characters and cannot be your email or display name. Changing
+  your password signs out every session, including the one you are using.
+- **Owners/admins:** open **Team**, find the person, and choose **Reset password**. You can generate a
+  one-time link and copy it, or send the reset email when system email is configured. **Sign out
+  everywhere** ends all of that user's sessions. You never see or set their password.
+
+Role limits are deliberate: owners can manage anyone; admins can manage members only, and can invite
+members only. If a control is missing, your role is not high enough for that account.
+
 ## Before anything works
 
 A campaign needs two things before it can even be created. The Campaigns tab says which one is missing

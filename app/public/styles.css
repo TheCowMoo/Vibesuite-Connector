@@ -833,6 +833,12 @@ fieldset.field legend { margin-bottom: 0.4rem; }
   border-radius: var(--radius); padding: 0.5rem 0.7rem;
   font-size: 0.85rem; margin: 0 0 0.75rem;
 }
+.auth-message {
+  background: var(--success-tint); border: 1px solid #B9DFC7; color: var(--success);
+  border-radius: var(--radius); padding: 0.5rem 0.7rem;
+  font-size: 0.85rem; margin: 0 0 0.75rem;
+}
+.auth-link { display: block; margin: 0.75rem auto 0; font-size: 0.85rem; }
 .menu__head {
   font-size: 0.75rem; font-weight: 700; color: var(--ink-muted);
   text-transform: uppercase; letter-spacing: 0.02em;

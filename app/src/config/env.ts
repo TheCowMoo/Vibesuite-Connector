@@ -108,6 +108,7 @@ const EnvSchema = z.object({
   AUTH_COOKIE_NAME: z.string().default('vibesuite_session'),
   SESSION_TTL_DAYS: z.coerce.number().int().positive().default(30),
   INVITE_TTL_DAYS: z.coerce.number().int().positive().default(7),
+  PASSWORD_RESET_TTL_MINUTES: z.coerce.number().int().min(5).max(1440).default(30),
   AUTH_ALLOW_FIRST_RUN_SETUP: z.enum(['true', 'false']).default('true').transform((v) => v === 'true'),
   TEAM_INVITE_WEBHOOK_URL: z.string().url().optional(),
   // System email via GoHighLevel (team invites and account notices — never calendar invitations).

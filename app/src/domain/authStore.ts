@@ -17,6 +17,8 @@ export interface UserRecord {
   createdBy?: string;
   lastLoginAt?: number;
   disabledAt?: number;
+  /** Set whenever the password changes; invalidates reset links issued before it. */
+  passwordChangedAt?: number;
 }
 
 export interface InviteRecord {
@@ -41,6 +43,15 @@ export interface LoginRecord {
   expiresAt: number;
 }
 
+export interface PasswordResetRecord {
+  tokenHash: string;
+  userId: string;
+  emailLower: string;
+  issuedAt: number;
+  expiresAt: number;
+  requestedIp?: string;
+}
+
 export interface AuditEvent {
   at: number;
   actor?: string;
@@ -48,7 +59,9 @@ export interface AuditEvent {
   detail?: string;
 }
 
-export function publicUser(u: UserRecord): Omit<UserRecord, 'passwordHash' | 'emailLower'> {
+export function publicUser(
+  u: UserRecord,
+): Omit<UserRecord, 'passwordHash' | 'emailLower' | 'passwordChangedAt'> {
   return {
     id: u.id,
     email: u.email,
@@ -121,7 +134,14 @@ export async function listUsers(): Promise<UserRecord[]> {
 
 export async function deleteUser(id: string): Promise<void> {
   const rec = await getUser(id);
-  const multi = redis.multi().srem(REDIS_KEYS.authUsers(), id).del(REDIS_KEYS.authUser(id)).del(REDIS_KEYS.authLogins(id));
+  const resetHash = await redis.get(REDIS_KEYS.authPasswordResetByUser(id));
+  const multi = redis
+    .multi()
+    .srem(REDIS_KEYS.authUsers(), id)
+    .del(REDIS_KEYS.authUser(id))
+    .del(REDIS_KEYS.authLogins(id))
+    .del(REDIS_KEYS.authPasswordResetByUser(id));
+  if (resetHash) multi.del(REDIS_KEYS.authPasswordReset(resetHash));
   if (rec) multi.del(REDIS_KEYS.authEmail(rec.emailLower));
   await multi.exec();
 }
@@ -200,6 +220,94 @@ export async function deleteUserLogins(userId: string): Promise<void> {
   for (const t of tokens) multi.del(REDIS_KEYS.authSession(t));
   multi.del(REDIS_KEYS.authLogins(userId));
   await multi.exec();
+}
+
+/* ---------------- Password resets ---------------- */
+
+export async function savePasswordReset(rec: PasswordResetRecord, ttlSeconds: number): Promise<void> {
+  // One atomic replacement: a second request must not leave the first link alive behind a newer
+  // pointer. The old reset key is derived from the pointer value and the stable key prefix.
+  await redis.eval(
+    [
+      "local previous = redis.call('GET', KEYS[2])",
+      "if previous and previous ~= ARGV[1] then redis.call('DEL', ARGV[4] .. previous) end",
+      "redis.call('SET', KEYS[1], ARGV[2], 'EX', ARGV[3])",
+      "redis.call('SET', KEYS[2], ARGV[1], 'EX', ARGV[3])",
+      'return 1',
+    ].join('\n'),
+    2,
+    REDIS_KEYS.authPasswordReset(rec.tokenHash),
+    REDIS_KEYS.authPasswordResetByUser(rec.userId),
+    rec.tokenHash,
+    JSON.stringify(rec),
+    String(ttlSeconds),
+    REDIS_KEYS.authPasswordReset(''),
+  );
+}
+
+export async function getPasswordReset(tokenHash: string): Promise<PasswordResetRecord | null> {
+  return readJson<PasswordResetRecord>(REDIS_KEYS.authPasswordReset(tokenHash));
+}
+
+/**
+ * Atomically read and delete a reset token. `MULTI` prevents two simultaneous requests from both
+ * claiming the same link, which is what makes "single use" true rather than merely likely.
+ */
+export async function consumePasswordReset(tokenHash: string): Promise<PasswordResetRecord | null> {
+  const result = await redis.multi().get(REDIS_KEYS.authPasswordReset(tokenHash)).del(REDIS_KEYS.authPasswordReset(tokenHash)).exec();
+  const raw = result?.[0]?.[1];
+  if (typeof raw !== 'string') return null;
+  try {
+    return JSON.parse(raw) as PasswordResetRecord;
+  } catch {
+    return null;
+  }
+}
+
+export async function deletePasswordReset(tokenHash: string, userId?: string): Promise<void> {
+  const rec = userId ? null : await getPasswordReset(tokenHash);
+  const resolvedUserId = userId || rec?.userId;
+  if (!resolvedUserId) {
+    await redis.del(REDIS_KEYS.authPasswordReset(tokenHash));
+    return;
+  }
+
+  // Compare-and-delete atomically: a newer request may have replaced the pointer, and deleting it
+  // would quietly detach the newer link.
+  await redis.eval(
+    [
+      "local pointer = redis.call('GET', KEYS[2])",
+      "if pointer == ARGV[1] then redis.call('DEL', KEYS[2]) end",
+      "redis.call('DEL', KEYS[1])",
+      'return 1',
+    ].join('\n'),
+    2,
+    REDIS_KEYS.authPasswordReset(tokenHash),
+    REDIS_KEYS.authPasswordResetByUser(resolvedUserId),
+    tokenHash,
+  );
+}
+
+export async function deletePasswordResetForUser(userId: string): Promise<void> {
+  const tokenHash = await redis.get(REDIS_KEYS.authPasswordResetByUser(userId));
+  if (tokenHash) {
+    await deletePasswordReset(tokenHash, userId);
+    return;
+  }
+  await redis.del(REDIS_KEYS.authPasswordResetByUser(userId));
+}
+
+/* ---------------- Password-reset rate limiting ---------------- */
+
+export async function getPasswordResetAttempts(key: string): Promise<number> {
+  const value = await redis.get(REDIS_KEYS.authPasswordResetAttempts(key));
+  return value ? Number(value) : 0;
+}
+
+export async function bumpPasswordResetAttempts(key: string, ttlSeconds: number): Promise<number> {
+  const n = await redis.incr(REDIS_KEYS.authPasswordResetAttempts(key));
+  if (n === 1) await redis.expire(REDIS_KEYS.authPasswordResetAttempts(key), ttlSeconds);
+  return n;
 }
 
 /* ---------------- Login rate limiting ---------------- */

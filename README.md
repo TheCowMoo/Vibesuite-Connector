@@ -58,6 +58,20 @@ app/src/scripts/       bootstrap-watch (<connectionId>), seed-connection (legacy
 app/tests/             unit tests (transform, dedupe, crypto)
 ```
 
+## Login, team, and password resets
+
+Auth is off by default (`AUTH_ENABLED=false`). When enabled, the panel uses Redis-backed sessions and
+has three roles:
+
+- **owner** — manages everyone, including other owners/admins;
+- **admin** — manages members only, and can invite members only;
+- **member** — uses the product, no Team tab.
+
+There are no temporary passwords. Users reset through a one-time `/reset-password?token=…` link; owners
+and admins can generate or email that link from **Team**, and can **Sign out everywhere**. Reset email
+uses the Team → System email (GHL) path, never the invite webhook. New passwords must be at least 12
+characters. See `docs/DEPLOYMENT.md` and `docs/USING.md` for the operational details.
+
 ## Prerequisites
 
 1. A public HTTPS domain pointing at the VPS (for Google push + OAuth redirects).

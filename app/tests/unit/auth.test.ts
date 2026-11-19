@@ -52,6 +52,10 @@ describe('isPublicPath', () => {
     expect(isPublicPath('/static/app.js')).toBe(true);
     expect(isPublicPath('/healthz')).toBe(true);
     expect(isPublicPath('/invite')).toBe(true);
+    expect(isPublicPath('/forgot-password')).toBe(true);
+    expect(isPublicPath('/reset-password')).toBe(true);
+    expect(isPublicPath('/api/auth/forgot-password')).toBe(true);
+    expect(isPublicPath('/api/auth/reset-password')).toBe(true);
     expect(isPublicPath('/')).toBe(true);
   });
 

@@ -1,6 +1,7 @@
 import { logger } from '../lib/logger';
 import { hashPassword } from '../lib/passwords';
 import { countUsers, createUser, pushAudit } from '../domain/authStore';
+import { passwordProblems } from '../domain/passwordPolicy';
 
 function arg(name: string): string | undefined {
   const idx = process.argv.indexOf(`--${name}`);
@@ -17,7 +18,8 @@ async function main(): Promise<void> {
       'usage: npm run create-owner -- --email you@example.com --password "your-password"  (or set ADMIN_EMAIL / ADMIN_PASSWORD)'
     );
   }
-  if (password.length < 8) throw new Error('password must be at least 8 characters');
+  const problems = passwordProblems(password, { email, name });
+  if (problems.length) throw new Error(problems.join('; '));
 
   const existing = await countUsers();
   if (existing > 0) logger.warn({ existing }, 'users already exist — creating an additional owner');
