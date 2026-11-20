@@ -39,7 +39,16 @@ import type {
   AttendanceRosterSettings,
   StoredConnection,
 } from '../domain/connection';
-import { effectiveAttendanceActions, rosterTokenForActions } from '../domain/attendanceActions';
+import {
+  effectiveAttendanceActions,
+  hasGhlCredentials,
+  rosterTokenForActions,
+} from '../domain/attendanceActions';
+import {
+  hasResultWebhooks,
+  resultWebhookFingerprint,
+  webhookForSegment,
+} from '../domain/resultWebhooks';
 import axios from 'axios';
 
 function buildPayload(
@@ -299,14 +308,17 @@ export interface DispatchResult {
   segments: AttendanceSegments['counts'];
   roster: RosterDeliveryResult;
   workflows: { applied: number; skipped: number; failed: number };
+  /** Simple per-result webhooks, independent of the GHL action account. */
+  webhooks: { sent: number; failed: number; skipped: number };
   workflowError?: string;
 }
 
 /**
  * Deliver a session's attendance.
  *
- * Two channels: per-person (GHL tag/custom field + condition webhooks) and an optional roster
- * webhook carrying a whole segment. Walk-ins are dispatched too, and never counted as no-shows.
+ * Per person: simple result→webhook mappings first (they work without GHL), then the optional GHL
+ * tag/custom field/condition-webhook actions. The optional roster webhook carries the whole call.
+ * Walk-ins are dispatched too, and never counted as no-shows.
  */
 export async function dispatchSession(
   sessionId: string,
@@ -321,8 +333,22 @@ export async function dispatchSession(
   const actionConnectionId = session.attendanceActionConnectionId || session.connectionId;
   const conn = actionConnectionId ? await getConnection(actionConnectionId) : null;
   const actions = conn ? effectiveAttendanceActions(session, conn) : null;
+  const simpleWebhooks = session.attendanceResultWebhooks;
+  const simpleWebhooksEnabled = hasResultWebhooks(simpleWebhooks);
+  const actionsEnabled = !!(conn && actions);
+  const ghlApiEnabled = actionsEnabled && hasGhlCredentials(conn);
+  const ghlMode = actions?.deliveryMode ?? 'both';
+  const apiTagsWork = ghlApiEnabled && (ghlMode === 'api' || ghlMode === 'both');
+  const advancedWebhookWork = !!(
+    actionsEnabled &&
+    actions &&
+    (ghlMode === 'webhook' || ghlMode === 'both') &&
+    actions.rules.length > 0
+  );
+  const perPersonGhlWork = apiTagsWork || advancedWebhookWork;
   let dispatched = 0;
   let failed = 0;
+  const webhooks = { sent: 0, failed: 0, skipped: 0 };
 
   if (opts.rosterOnly) {
     const roster = await deliverRoster(session, report, segments, conn, actions, opts.forceRoster === true);
@@ -332,12 +358,11 @@ export async function dispatchSession(
       segments: segments.counts,
       roster,
       workflows: { applied: 0, skipped: 0, failed: 0 },
+      webhooks,
     };
   }
 
-  if (conn && actions) {
-    const mode = actions.deliveryMode;
-
+  if (perPersonGhlWork || simpleWebhooksEnabled) {
     await forEachLimit(
       segmentEntries(segments),
       env.ATTENDANCE_DISPATCH_CONCURRENCY,
@@ -348,8 +373,30 @@ export async function dispatchSession(
         const identity = email || person.name || person.participantId || person.registrantId || 'anon';
         const fingerprint =
           segment === 'not_invited' ? `${identity}:${segment}:${person.status}` : `${identity}:${person.status}`;
-        const claimed = await tryClaimAttendanceDispatch(sessionId, fingerprint);
-        if (!claimed) return;
+        const webhookUrl = webhookForSegment(simpleWebhooks, segment);
+        const webhookFingerprint = webhookUrl
+          ? resultWebhookFingerprint(identity, segment, webhookUrl)
+          : null;
+
+        // Simple result webhooks and GHL contact actions have separate claims. A webhook-only call
+        // must not block GHL actions added later, and changing a webhook URL is a new target.
+        const ghlClaimed = perPersonGhlWork
+          ? await tryClaimAttendanceDispatch(sessionId, fingerprint)
+          : false;
+        const webhookClaimed = webhookFingerprint
+          ? await tryClaimAttendanceDispatch(sessionId, webhookFingerprint)
+          : false;
+
+        if (!ghlClaimed && !webhookClaimed) {
+          if (webhookUrl) webhooks.skipped += 1;
+          return;
+        }
+
+        let anySucceeded = false;
+        let personFailed = false;
+
+        if (ghlClaimed && conn && actions) {
+          const mode = actions.deliveryMode;
 
         try {
           // Retrying the whole entry is safe: tags and custom fields are idempotent, and webhook
@@ -358,7 +405,7 @@ export async function dispatchSession(
             async () => {
               const ctx = buildAttendanceContext(session, person, report, segment, segments);
 
-              if (mode === 'api' || mode === 'both') {
+              if ((mode === 'api' || mode === 'both') && ghlApiEnabled) {
                 if (email) {
                   const contact = await lookupContactByEmail(conn, email);
                   if (contact?.id) {
@@ -396,22 +443,48 @@ export async function dispatchSession(
             { attempts: 3, baseDelayMs: 400 },
           );
 
-          dispatched += 1;
-          inc('attendance_dispatched_total', { status: person.status, segment });
+          anySucceeded = true;
         } catch (err) {
-          failed += 1;
+          personFailed = true;
           await releaseAttendanceDispatch(sessionId, fingerprint);
           logger.error({ sessionId, email, segment, err: (err as Error).message }, 'attendance dispatch failed');
         }
+        }
+
+        if (webhookClaimed && webhookUrl && webhookFingerprint) {
+          try {
+            await withRetry(
+              async () => {
+                await postWebhook(webhookUrl, buildPayload(session, person, report, segment, segments));
+              },
+              { attempts: 3, baseDelayMs: 400 },
+            );
+            webhooks.sent += 1;
+            anySucceeded = true;
+            logger.info({ sessionId, email, segment }, 'result webhook fired');
+          } catch (err) {
+            webhooks.failed += 1;
+            personFailed = true;
+            await releaseAttendanceDispatch(sessionId, webhookFingerprint);
+            logger.error(
+              { sessionId, email, segment, err: (err as Error).message },
+              'result webhook failed',
+            );
+          }
+        }
+
+        if (anySucceeded) inc('attendance_dispatched_total', { status: person.status, segment });
+        if (personFailed) failed += 1;
+        else if (anySucceeded) dispatched += 1;
       },
     );
   } else {
-    logger.info({ sessionId }, 'no action account linked; skipping GHL contact actions');
+    logger.info({ sessionId }, 'no per-person actions or result webhooks; skipping');
   }
 
   let workflows = { applied: 0, skipped: 0, failed: 0 };
   let workflowError: string | undefined;
-  if (conn && actions) {
+  if (ghlApiEnabled && conn && actions) {
     try {
       const ruleResult = await applyWorkflowRules(session, report, segments, conn, actions);
       workflows.applied += ruleResult.applied;
@@ -439,7 +512,7 @@ export async function dispatchSession(
     latest.lastDispatchedAt = Date.now();
     await saveSession(latest);
   }
-  return { dispatched, failed, segments: segments.counts, roster, workflows, workflowError };
+  return { dispatched, failed, segments: segments.counts, roster, workflows, webhooks, workflowError };
 }
 
 /** Pick a representative person for the sample payload, preferring a matched attendee. */

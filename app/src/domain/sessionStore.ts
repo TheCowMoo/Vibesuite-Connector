@@ -10,6 +10,14 @@ import {
 
 export type SessionStatus = 'pending' | 'synced' | 'failed';
 
+/** Simple per-person post-call webhooks, one URL per result. No GHL connection required. */
+export interface AttendanceResultWebhooks {
+  attended?: string;
+  partial?: string;
+  noShow?: string;
+  notInvited?: string;
+}
+
 export type WorkflowAssignmentSource = 'rule' | 'ai' | 'manual';
 export type WorkflowAssignmentStatus = 'applied' | 'skipped' | 'failed';
 
@@ -65,6 +73,8 @@ export interface SessionRecord {
   attendanceActionConnectionId?: string;
   /** The call's own editable copy of the after-call actions. */
   attendanceActions?: AttendanceActionSnapshot;
+  /** Simple result → webhook mapping; works even without an action account. */
+  attendanceResultWebhooks?: AttendanceResultWebhooks;
   /** Which authorised Zoom host owns this session (user-managed Zoom auth). */
   zoomUserId?: string;
   inviteId?: string;

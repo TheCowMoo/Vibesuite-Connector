@@ -4,6 +4,7 @@ import type { SessionRecord } from '../../src/domain/sessionStore';
 import {
   actionsFromConnection,
   effectiveAttendanceActions,
+  hasGhlCredentials,
   publicAttendanceActions,
   snapshotAttendanceActions,
 } from '../../src/domain/attendanceActions';
@@ -73,6 +74,13 @@ describe('attendance action snapshots', () => {
     const effective = effectiveAttendanceActions(session, conn);
     expect(effective?.deliveryMode).toBe('api');
     expect(effective?.copiedFromConnectionId).toBe('conn-1');
+  });
+
+  it('recognises whether the action account can call GHL', () => {
+    expect(hasGhlCredentials(conn)).toBe(true);
+    expect(hasGhlCredentials({ ...conn, ghlApiToken: undefined })).toBe(false);
+    expect(hasGhlCredentials({ ...conn, ghlLocationId: '' })).toBe(false);
+    expect(hasGhlCredentials(null)).toBe(false);
   });
 
   it('redacts the sealed roster token from the public snapshot', () => {

@@ -2124,7 +2124,9 @@
           '<div class="conn__meta">' +
             '<span class="conn__cal">' + icon('video') + esc(providerLabel(s.provider)) + ' ' + esc(s.sessionType || 'meeting') + ' · ' + esc(s.externalId) + '</span>' +
             badge(new Date(s.startTime).toLocaleString()) +
-            badge(sessionActionConnection(s) ? 'Actions: ' + sessionActionConnection(s).name : 'No action account') +
+            badge(sessionActionConnection(s)
+              ? 'Actions: ' + sessionActionConnection(s).name
+              : (hasSessionResultWebhooks(s) ? 'Post-call webhooks' : 'No action account')) +
           '</div>' +
           (s.error ? '<div class="muted" style="font-size:0.8rem">' + esc(s.error) + '</div>' : '') +
           ((s.warnings || []).length
@@ -2282,23 +2284,29 @@
 
   function afterCallSummaryLine(session) {
     var conn = sessionActionConnection(session);
-    if (!conn) return 'Choose an action account to run after-call actions.';
-    var actions = sessionActionSettings(session) || {};
+    var actions = conn ? (sessionActionSettings(session) || {}) : {};
     var parts = [];
-    var mode = actions.deliveryMode || 'both';
-    parts.push('Actions via ' + conn.name);
-    parts.push(mode === 'webhook' ? 'Tags off' : 'Tags on');
-    var rules = (actions.workflowRules || []).filter(function (r) { return r.enabled !== false; });
-    if (rules.length) parts.push(rules.length + ' workflow rule' + (rules.length === 1 ? '' : 's'));
-    else if ((actions.workflows || []).length) parts.push('No workflow rules');
-    else parts.push('No workflows');
-    var ai = actions.aiWorkflow;
-    if (ai && ai.enabled && (actions.workflows || []).length) {
-      parts.push('AI: ' + (ai.mode === 'auto' ? 'automatic' : 'review first'));
+    if (conn) {
+      var mode = actions.deliveryMode || 'both';
+      parts.push('Actions via ' + conn.name);
+      parts.push(mode === 'webhook' ? 'Tags off' : 'Tags on');
+      var rules = (actions.workflowRules || []).filter(function (r) { return r.enabled !== false; });
+      if (rules.length) parts.push(rules.length + ' workflow rule' + (rules.length === 1 ? '' : 's'));
+      else if ((actions.workflows || []).length) parts.push('No workflow rules');
+      else parts.push('No workflows');
+      var ai = actions.aiWorkflow;
+      if (ai && ai.enabled && (actions.workflows || []).length) {
+        parts.push('AI: ' + (ai.mode === 'auto' ? 'automatic' : 'review first'));
+      }
+      if (actions.roster && actions.roster.url) parts.push('Call report webhook on');
+      var hooks = (actions.rules || []).filter(function (r) { return r.enabled !== false; });
+      if (mode !== 'api' && hooks.length) parts.push(hooks.length + ' per-person webhook' + (hooks.length === 1 ? '' : 's'));
     }
-    if (actions.roster && actions.roster.url) parts.push('Call report webhook on');
-    var hooks = (actions.rules || []).filter(function (r) { return r.enabled !== false; });
-    if (mode !== 'api' && hooks.length) parts.push(hooks.length + ' per-person webhook' + (hooks.length === 1 ? '' : 's'));
+    var webhookLabels = resultWebhookLabels(session.attendanceResultWebhooks);
+    if (webhookLabels.length) parts.push('Webhooks: ' + webhookLabels.join(', '));
+    if (!parts.length) {
+      return conn ? 'No after-call actions configured.' : 'Choose an action account or add post-call webhooks.';
+    }
     return parts.join(' · ');
   }
 
@@ -2310,6 +2318,7 @@
       ? '<div class="session-status__error">Call report failed: ' + esc(session.rosterError) + '</div>'
       : '';
     var conn = sessionActionConnection(session);
+    var webhooks = '<button type="button" class="link-btn" data-session-action="webhooks">Post-call webhooks</button>';
     var manage = conn
       ? '<button type="button" class="link-btn" data-session-action="manage">Manage actions</button>'
       : '<button type="button" class="link-btn" data-session-action="edit">Choose action account</button>';
@@ -2321,7 +2330,7 @@
         (meta.length ? '<div class="session-status__meta">' + esc(meta.join(' · ')) + '</div>' : '') +
         error +
       '</div>' +
-      manage +
+      '<div class="conn__actions">' + webhooks + manage + '</div>' +
     '</div>';
   }
 
@@ -2334,8 +2343,8 @@
       btn.dataset.sessionAction = 'sync';
       return;
     }
-    if (!conn) {
-      btn.textContent = 'Choose action account';
+    if (!conn && !hasSessionResultWebhooks(session)) {
+      btn.textContent = 'Set up actions';
       btn.dataset.sessionAction = 'edit';
       return;
     }
@@ -2598,6 +2607,26 @@
     return (state.connections || []).filter(function (c) { return c.id === id; })[0] || null;
   }
 
+  var RESULT_WEBHOOK_LABELS = {
+    attended: 'Attended',
+    partial: 'Brief visit',
+    noShow: 'No-show',
+    notInvited: 'Walk-in'
+  };
+
+  function resultWebhookLabels(webhooks) {
+    if (!webhooks) return [];
+    return ['attended', 'partial', 'noShow', 'notInvited'].filter(function (key) {
+      return !!webhooks[key];
+    }).map(function (key) {
+      return RESULT_WEBHOOK_LABELS[key];
+    });
+  }
+
+  function hasSessionResultWebhooks(session) {
+    return resultWebhookLabels(session && session.attendanceResultWebhooks).length > 0;
+  }
+
   /** The call's snapshot, or the action account's template for calls created before snapshots. */
   function sessionActionSettings(session) {
     if (session.attendanceActions) return session.attendanceActions;
@@ -2737,9 +2766,11 @@
         if (r.workflows && r.workflows.applied) parts.push(r.workflows.applied + ' workflow' + (r.workflows.applied === 1 ? '' : 's'));
         if (r.workflows && r.workflows.failed) parts.push(r.workflows.failed + ' workflow failed');
         if (r.workflowError) parts.push('workflow error');
+        if (r.webhooks && r.webhooks.sent) parts.push(r.webhooks.sent + ' webhook' + (r.webhooks.sent === 1 ? '' : 's') + ' sent');
+        if (r.webhooks && r.webhooks.failed) parts.push(r.webhooks.failed + ' webhook' + (r.webhooks.failed === 1 ? '' : 's') + ' failed');
         if (r.roster && r.roster.error) parts.push('call report failed');
         else if (r.roster && !r.roster.skipped) parts.push('call report sent');
-        var bad = r.failed || (r.workflows && r.workflows.failed) || r.workflowError || (r.roster && r.roster.error);
+        var bad = r.failed || (r.workflows && r.workflows.failed) || (r.webhooks && r.webhooks.failed) || r.workflowError || (r.roster && r.roster.error);
         toast(parts.length ? 'Sent: ' + parts.join(' · ') : 'Nothing new to send', bad ? 'error' : 'success');
         openSession(currentSessionId);
       })
@@ -2915,6 +2946,50 @@
     }).catch(function (e) { toast(e.message, 'error'); });
   }
 
+  function openSessionResultWebhooks() {
+    if (!currentSessionId) return;
+    var fill = function (session) {
+      var form = document.getElementById('sessionResultWebhooksForm');
+      form.reset();
+      var webhooks = session.attendanceResultWebhooks || {};
+      ['attended', 'partial', 'noShow', 'notInvited'].forEach(function (key) {
+        form.elements[key].value = webhooks[key] || '';
+      });
+      openModal('sessionResultWebhooks');
+    };
+    if (currentSessionData && currentSessionData.id === currentSessionId) {
+      fill(currentSessionData);
+      return;
+    }
+    api('/api/sessions/' + currentSessionId).then(function (d) {
+      fill(d.session);
+    }).catch(function (e) { toast(e.message, 'error'); });
+  }
+
+  function saveSessionResultWebhooks() {
+    if (!currentSessionId) return;
+    var id = currentSessionId;
+    var form = document.getElementById('sessionResultWebhooksForm');
+    var body = {};
+    ['attended', 'partial', 'noShow', 'notInvited'].forEach(function (key) {
+      body[key] = form.elements[key].value.trim();
+    });
+    withBusy(document.getElementById('sessionResultWebhooksSave'), api('/api/sessions/' + id + '/result-webhooks', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    }))
+      .then(function (r) {
+        replaceSessionRecord(r.session);
+        closeModal('sessionResultWebhooks');
+        toast('Post-call webhooks saved', 'success');
+        return loadAttendance().then(function () {
+          if (currentSessionId === id) openSession(id);
+        });
+      })
+      .catch(function (e) { toast(e.message, 'error'); });
+  }
+
   function createRuleFromPoll(question, answer) {
     openSessionWorkflowAutomations({ pollQuestion: question, pollAnswer: answer });
   }
@@ -2941,6 +3016,7 @@
       if (sa === 'sync') syncSession(currentSessionId, sessionAction);
       else if (sa === 'edit') openEditSession();
       else if (sa === 'manage') openSessionWorkflowAutomations(null, { advanced: true });
+      else if (sa === 'webhooks') openSessionResultWebhooks();
       else if (sa === 'dispatch') dispatchSession(sessionAction);
       return;
     }
@@ -3055,6 +3131,7 @@
 
   document.getElementById('newSessionBtn').addEventListener('click', openNewSession);
   document.getElementById('newSessionSave').addEventListener('click', saveNewSession);
+  document.getElementById('sessionResultWebhooksSave').addEventListener('click', saveSessionResultWebhooks);
   document.getElementById('sessionDispatch').addEventListener('click', function () {
     var action = this.dataset.sessionAction || 'dispatch';
     if (action === 'sync') syncSession(currentSessionId, this);

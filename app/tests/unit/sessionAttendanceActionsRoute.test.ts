@@ -131,4 +131,39 @@ describe('session after-call action routes', () => {
     expect(body.session.attendanceActions.tags.attended).toBe('old-tag');
     expect(mocks.saveSession).toHaveBeenCalled();
   });
+
+  it('saves simple result webhooks without needing an action account', async () => {
+    const app = Fastify();
+    await app.register(sessionRoutes);
+
+    const response = await app.inject({
+      method: 'PUT',
+      url: '/api/sessions/sess-1/result-webhooks',
+      payload: {
+        attended: 'https://hooks.example.com/attended',
+        noShow: 'https://hooks.example.com/no-show',
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().session.attendanceResultWebhooks).toEqual({
+      attended: 'https://hooks.example.com/attended',
+      noShow: 'https://hooks.example.com/no-show',
+    });
+    expect(mocks.getConnection).not.toHaveBeenCalled();
+    expect(mocks.saveSession).toHaveBeenCalled();
+  });
+
+  it('rejects an unsafe simple webhook URL', async () => {
+    const app = Fastify();
+    await app.register(sessionRoutes);
+
+    const response = await app.inject({
+      method: 'PUT',
+      url: '/api/sessions/sess-1/result-webhooks',
+      payload: { attended: 'javascript:alert(1)' },
+    });
+
+    expect(response.statusCode).toBe(400);
+  });
 });

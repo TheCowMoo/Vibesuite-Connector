@@ -151,6 +151,26 @@ first answer is a 404.
 
 ### After-call actions
 
+#### Simple post-call webhooks (no GHL needed)
+
+If all you need is “if they attended, send them to this webhook”, open a call’s **View results** and
+press **Post-call webhooks**. There are four optional URLs:
+
+- Attended → URL
+- Brief visit → URL
+- No-show → URL
+- Walk-in → URL
+
+Every matching person gets one POST to the URL for their result. Leave a field blank to turn that result
+off. This works without a Google/GHL action account and without tags or workflow IDs. A successful POST
+is remembered per person, result and URL, so pressing **Send results** again does not duplicate it; if
+the URL changes, the new destination is treated as a new target.
+
+The payload is the normal per-person attendance payload and includes the person, `segment`
+(`attended`, `partial`, `no_show` or `not_invited`), minutes and session details.
+
+#### Full GHL action templates
+
 Open **Calls → Action templates** or **Google accounts → ⋯ → After-call action templates**. Those
 settings are a **template**: they are copied into a new call, but they are not the live action set for
 calls that already exist.
@@ -194,12 +214,13 @@ The dialog has three parts:
    list. Each person carries `result` (`attended`, `partial`, `no_show` or `not_invited`). Leave the
    URL blank to turn it off. The URL, format and bearer token belong to the call copy.
 
-**Advanced** holds how tags are sent (API, webhooks or both), per-person webhooks, and developer
-examples. These are still fully editable; they are collapsed because most accounts do not use them.
+**Advanced** holds how tags are sent (API, webhooks or both), advanced condition webhooks, and developer
+examples. These are still fully editable; they are collapsed because most accounts do not use them. The
+simple **Post-call webhooks** above are separate from these advanced rules.
 
-**Send results** runs that call's copy: tags, per-person webhooks, workflow rules, AI matching and the
-call report. It runs automatically after a successful sync too. **More → Send call report** sends only
-the call report, even when its content is unchanged.
+**Send results** runs that call's copy: simple result webhooks, tags, advanced per-person webhooks,
+workflow rules, AI matching and the call report. It runs automatically after a successful sync too.
+**More → Send call report** sends only the call report, even when its content is unchanged.
 
 The call report defaults to **One flat list of everyone**. Two older formats remain available for
 consumers that already expect them: **One request per result group** (`attendance.segment`) and **One

@@ -206,6 +206,7 @@ Key counters: `webhook_received_total`, `webhook_rejected_total`, `jobs_enqueued
 | GET | `/api/campaigns/:id/crm` | per-person campaign CRM (filters + pagination) |
 | GET | `/api/campaigns/:id/crm/export` | all filtered campaign people as CSV |
 | PATCH | `/api/campaigns/:id/crm/notes` | save a campaign-scoped note/follow-up |
+| PUT | `/api/sessions/:id/result-webhooks` | save per-result post-call webhooks (no GHL account needed) |
 | PUT | `/api/sessions/:id/attendance-actions` | save this call's own after-call action copy |
 | POST | `/api/sessions/:id/attendance-actions/from-account` | reset the call copy to its action account template |
 | POST | `/api/sessions/:id/workflows/preview` | workflow matches from the call copy (no GHL writes) |
@@ -214,6 +215,9 @@ Key counters: `webhook_received_total`, `webhook_rejected_total`, `jobs_enqueued
 
 ## Notes & caveats
 
+- **Simple post-call webhooks need no GHL account.** `PUT /api/sessions/:id/result-webhooks` maps
+  Attended / Brief visit / No-show / Walk-in to optional URLs. Every matching person gets the normal
+  per-person attendance payload; the dispatch is independent of GHL tags, workflows and action accounts.
 - **After-call actions are per call.** Creating a call copies its selected action account's template;
   editing the call changes only that call. Every attendee is evaluated against the call copy, regardless
   of which Google account invited them, and all GHL contact/workflow actions run in the action account's

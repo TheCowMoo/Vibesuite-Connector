@@ -61,6 +61,12 @@ export function effectiveAttendanceActions(
   return conn ? actionsFromConnection(conn) : null;
 }
 
+/** True only when the action connection can actually call GHL. A plain calendar connection is enough
+ * for simple result webhooks, but not for tags/custom fields/workflows. */
+export function hasGhlCredentials(conn: StoredConnection | null): boolean {
+  return !!conn && !!conn.ghlLocationId && !!(conn.ghlApiToken || conn.ghlAccessToken || conn.ghlRefreshToken);
+}
+
 export function rosterTokenForActions(
   actions: AttendanceActionSnapshot,
   conn: StoredConnection | null,

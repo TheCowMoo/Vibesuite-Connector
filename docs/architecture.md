@@ -77,7 +77,7 @@ calendar id, location id, and optional webhook URLs. All runtime keys are namesp
 | `conn:{id}:calendarEmail` | real address behind a `primary`/resource calendar (24-hour TTL; `-` means Google had none) |
 | `advisor:analysis` | latest Advisor analysis (snapshot + label→id targets + recommendations) |
 | `advisor:applyLog` | append-only audit of every Apply, newest first (200 max) |
-| `session:{id}` | session record, including its after-call action snapshot, workflow assignments and the last preview |
+| `session:{id}` | session record, including its simple result webhooks, after-call action snapshot, workflow assignments and the last preview |
 | `session:{id}:attendance` | normalized report: per-person behavior, poll summary, raw Q&A/registration rows |
 | `session:{id}:dispatch:seen:{fp}` | per-person attendance delivery guard (5-min TTL) |
 | `session:{id}:workflow:{email}` | the GHL workflow already applied to this person in this call (30-day TTL) |
@@ -515,6 +515,13 @@ sync; the action account supplies the GHL location and credentials. The live act
 `session.attendanceActions` when present. Older calls without a snapshot fall back to the action account's
 current template, preserving pre-upgrade behaviour.
 
+**Simple result webhooks** (`session.attendanceResultWebhooks`) are independent of the action account:
+four optional URLs keyed by result. They are dispatched before the GHL path and run even when
+`getConnection()` returns null. Each successful POST is claimed under
+`session:{id}:dispatch:seen:{identity}:result-webhook:{segment}:{urlHash}`; the URL hash means changing a
+URL is a new target, while an unchanged URL cannot be delivered twice for the same person and result.
+The payload is the normal per-person `attendance.result` payload.
+
 `dispatchSession()` then delivers two ways:
 
 - **Per person** — a GHL tag from the call snapshot's `tags` (a blank partial falls back to the attended
@@ -544,7 +551,8 @@ current template, preserving pre-upgrade behaviour.
   fatal.
 - **API** — `POST /api/sessions/:id/dispatch` accepts `{ rosterOnly, forceRoster }`; the response reports
   `dispatched`, `failed`, the segment counts and a `roster` block (`sent`, `skipped`, `reason`, `error`).
-  It also reports `workflows` (`applied`, `skipped`, `failed`) and `workflowError` when routing itself failed.
+  It also reports `webhooks` (`sent`, `failed`, `skipped`), `workflows` (`applied`, `skipped`, `failed`)
+  and `workflowError` when routing itself failed.
 
 ### Routing attendance into GHL workflows
 

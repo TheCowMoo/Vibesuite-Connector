@@ -22,6 +22,7 @@ import {
 } from '../../domain/attendanceActionSettings';
 import { seal } from '../../lib/crypto';
 import { env } from '../../config/env';
+import { parseResultWebhooks } from '../../domain/resultWebhooks';
 import type { AttendanceActionSnapshot, StoredConnection } from '../../domain/connection';
 import {
   applyWorkflowPreview,
@@ -336,6 +337,23 @@ export async function sessionRoutes(app: FastifyInstance): Promise<void> {
     session.rosterRevision = undefined;
     session.workflowPreview = undefined;
     session.workflowAiHash = undefined;
+    await saveSession(session);
+    return { ok: true, session: publicSession(session) };
+  });
+
+  /** Simple per-result webhooks. No GHL action account is required. */
+  app.put('/api/sessions/:id/result-webhooks', async (req, reply) => {
+    const session = await getSession((req.params as { id: string }).id);
+    if (!session) {
+      reply.code(404).send({ error: 'not found' });
+      return;
+    }
+    const parsed = parseResultWebhooks(req.body || {});
+    if (!parsed.ok) {
+      reply.code(400).send({ error: parsed.error });
+      return;
+    }
+    session.attendanceResultWebhooks = parsed.value;
     await saveSession(session);
     return { ok: true, session: publicSession(session) };
   });

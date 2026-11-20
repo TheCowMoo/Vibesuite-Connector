@@ -717,6 +717,29 @@
   </div>
 </div>
 
+<!-- Simple post-call webhooks -->
+<div class="backdrop" id="sessionResultWebhooks" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="sessionResultWebhooksTitle">
+    <div class="modal__head">
+      <h2 class="modal__title" id="sessionResultWebhooksTitle">Post-call webhooks</h2>
+      <button class="icon-btn" data-close="sessionResultWebhooks" aria-label="Close">&times;</button>
+    </div>
+    <p class="muted">Every matching person gets one POST to the URL for their result. Leave a field blank to turn that result off. This works without a GHL account.</p>
+    <form id="sessionResultWebhooksForm" novalidate>
+      <label class="field"><span class="field__label">Attended → webhook URL</span><input name="attended" placeholder="https://hooks.example.com/attended" /></label>
+      <label class="field"><span class="field__label">Brief visit → webhook URL</span><input name="partial" placeholder="https://hooks.example.com/brief-visit" /></label>
+      <label class="field"><span class="field__label">No-show → webhook URL</span><input name="noShow" placeholder="https://hooks.example.com/no-show" /></label>
+      <label class="field"><span class="field__label">Walk-in → webhook URL</span><input name="notInvited" placeholder="https://hooks.example.com/walk-in" /></label>
+    </form>
+    <p class="hint">The payload includes the person, result, minutes and session details.</p>
+    <div class="modal__foot">
+      <span class="spacer"></span>
+      <button class="btn btn--ghost" data-close="sessionResultWebhooks">Cancel</button>
+      <button class="btn btn--primary" id="sessionResultWebhooksSave">Save webhooks</button>
+    </div>
+  </div>
+</div>
+
 <!-- New session -->
 <div class="backdrop" id="newSession" hidden>
   <div class="modal" role="dialog" aria-modal="true" aria-labelledby="newSessionTitle">
