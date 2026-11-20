@@ -273,6 +273,8 @@ Rule of thumb:
 
 - app / nginx code changed → `docker compose up -d --build --force-recreate` then `docker compose restart nginx`
 - only `.env` changed → `docker compose up -d --force-recreate` then `docker compose restart nginx`
+- after-call action changes → rebuild **both** `app-api` and `app-worker`; the action copy lives on the
+  session record as an optional field, so there is no Redis migration
 
 ---
 

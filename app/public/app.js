@@ -422,7 +422,7 @@
       if (c.ghlAuthType === 'oauth') {
         items += '<a class="menu__item" href="/oauth/ghl/start?connectionId=' + encodeURIComponent(c.id) + '">' + icon('link') + '<span>Connect GHL</span></a>';
       }
-      items += menuBtn('attendanceAutomations', 'After-call actions', 'sliders', c.id);
+      items += menuBtn('attendanceAutomations', 'After-call action templates', 'sliders', c.id);
       items += menuBtn('verifyEmailTest', 'Test email verification', 'check', c.id);
       items += menuBtn('delete', 'Delete', 'trash', c.id, true);
 
@@ -665,6 +665,8 @@
 
   /* ---- Automations ---- */
   var automationsId = null;
+  /** Non-null when the after-call editor is editing this call, not the account template. */
+  var automationsSessionId = null;
   var editingRules = [];
   var CATALOG = [];
   var currentScope = 'calendar';
@@ -2050,6 +2052,13 @@
   };
   var RESULT_ORDER = ['attended', 'partial', 'no_show', 'not_invited'];
 
+  function replaceSessionRecord(updated) {
+    if (!updated) return;
+    var index = attendanceSessions.findIndex(function (s) { return s.id === updated.id; });
+    if (index >= 0) attendanceSessions[index] = updated;
+    currentSessionData = updated;
+  }
+
   function resultLabel(status) {
     return RESULT_LABELS[status] || status || '—';
   }
@@ -2115,6 +2124,7 @@
           '<div class="conn__meta">' +
             '<span class="conn__cal">' + icon('video') + esc(providerLabel(s.provider)) + ' ' + esc(s.sessionType || 'meeting') + ' · ' + esc(s.externalId) + '</span>' +
             badge(new Date(s.startTime).toLocaleString()) +
+            badge(sessionActionConnection(s) ? 'Actions: ' + sessionActionConnection(s).name : 'No action account') +
           '</div>' +
           (s.error ? '<div class="muted" style="font-size:0.8rem">' + esc(s.error) + '</div>' : '') +
           ((s.warnings || []).length
@@ -2163,6 +2173,7 @@
   }
 
   var editingSessionId = null;
+  var editSessionActionOriginal = '';
   var editSessionListLoaded = false;
 
   function openEditSession() {
@@ -2182,6 +2193,12 @@
         return '<option value="' + esc(c.id) + '">' + esc(c.name) + '</option>';
       }).join('');
       connSel.value = s.connectionId || '';
+      var actionSel = document.getElementById('editSessionActionConnection');
+      actionSel.innerHTML = '<option value="">Same as Google account</option>' + (state.connections || []).map(function (c) {
+        return '<option value="' + esc(c.id) + '">' + esc(c.name) + '</option>';
+      }).join('');
+      editSessionActionOriginal = s.attendanceActionConnectionId || '';
+      actionSel.value = editSessionActionOriginal;
       api('/api/lists').then(function (d) {
         var listSel = document.getElementById('editSessionList');
         listSel.innerHTML = '<option value="">None</option>' + (d.lists || []).map(function (l) {
@@ -2215,9 +2232,11 @@
   function saveEditSession() {
     if (!editingSessionId) return;
     var id = editingSessionId;
+    var actionId = document.getElementById('editSessionActionConnection').value || null;
     var body = {
       sessionType: document.getElementById('editSessionType').value,
-      externalId: document.getElementById('editSessionId').value.trim()
+      externalId: document.getElementById('editSessionId').value.trim(),
+      attendanceActionConnectionId: actionId
     };
     // Only send the host when the picker actually loaded; otherwise an API hiccup would clear it.
     if (!document.getElementById('editSessionHostWrap').hidden) {
@@ -2228,41 +2247,57 @@
     }
     body.connectionId = document.getElementById('editSessionConnection').value || null;
 
-    withBusy(document.getElementById('editSessionSave'), api('/api/sessions/' + id, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }))
-      .then(function () {
-        closeModal('editSession');
-        toast('Saved — trying again', 'info');
-        // Editing exists to un-stick a call, so re-sync now instead of waiting for the hourly poll.
-        return api('/api/sessions/' + id + '/sync', { method: 'POST' }).catch(function (e) {
-          toast('Saved, but the sync failed: ' + e.message, 'error');
-          return null;
-        });
-      })
-      .then(function (r) {
-        if (r && r.status === 'pending') toast('Zoom still has no report for this call.', 'info');
-        else if (r) toast('Synced — ' + r.report.attendedCount + ' attended', 'success');
-        loadAttendance();
-        setTimeout(function () { openSession(id); }, 200);
-      })
-      .catch(function (e) { toast(e.message, 'error'); });
+    var session = attendanceSessions.filter(function (s) { return s.id === id; })[0];
+    var save = function () {
+      withBusy(document.getElementById('editSessionSave'), api('/api/sessions/' + id, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }))
+        .then(function () {
+          closeModal('editSession');
+          toast('Saved — trying again', 'info');
+          // Editing exists to un-stick a call, so re-sync now instead of waiting for the hourly poll.
+          return api('/api/sessions/' + id + '/sync', { method: 'POST' }).catch(function (e) {
+            toast('Saved, but the sync failed: ' + e.message, 'error');
+            return null;
+          });
+        })
+        .then(function (r) {
+          if (r && r.status === 'pending') toast('Zoom still has no report for this call.', 'info');
+          else if (r) toast('Synced — ' + r.report.attendedCount + ' attended', 'success');
+          loadAttendance();
+          setTimeout(function () { openSession(id); }, 200);
+        })
+        .catch(function (e) { toast(e.message, 'error'); });
+    };
+
+    var actionChanged = (actionId || '') !== (editSessionActionOriginal || '');
+    if (actionChanged && session && session.attendanceActions) {
+      confirmDialog(
+        'Reload after-call actions?',
+        'Changing the action account replaces this call\'s custom tags, workflows and rules with that account\'s current template.',
+        'Reload and save'
+      ).then(function (ok) { if (ok) save(); });
+      return;
+    }
+    save();
   }
 
   function afterCallSummaryLine(session) {
-    var conn = sessionConnection(session);
-    if (!conn) return 'Link this call to a Google account to run after-call actions.';
+    var conn = sessionActionConnection(session);
+    if (!conn) return 'Choose an action account to run after-call actions.';
+    var actions = sessionActionSettings(session) || {};
     var parts = [];
-    var mode = conn.attendanceDeliveryMode || 'both';
+    var mode = actions.deliveryMode || 'both';
+    parts.push('Actions via ' + conn.name);
     parts.push(mode === 'webhook' ? 'Tags off' : 'Tags on');
-    var rules = (conn.attendanceWorkflowRules || []).filter(function (r) { return r.enabled !== false; });
+    var rules = (actions.workflowRules || []).filter(function (r) { return r.enabled !== false; });
     if (rules.length) parts.push(rules.length + ' workflow rule' + (rules.length === 1 ? '' : 's'));
-    else if ((conn.attendanceWorkflows || []).length) parts.push('No workflow rules');
+    else if ((actions.workflows || []).length) parts.push('No workflow rules');
     else parts.push('No workflows');
-    var ai = conn.attendanceAiWorkflow;
-    if (ai && ai.enabled && (conn.attendanceWorkflows || []).length) {
+    var ai = actions.aiWorkflow;
+    if (ai && ai.enabled && (actions.workflows || []).length) {
       parts.push('AI: ' + (ai.mode === 'auto' ? 'automatic' : 'review first'));
     }
-    if (conn.attendanceRoster && conn.attendanceRoster.url) parts.push('Call report webhook on');
-    var hooks = (conn.attendanceRules || []).filter(function (r) { return r.enabled !== false; });
+    if (actions.roster && actions.roster.url) parts.push('Call report webhook on');
+    var hooks = (actions.rules || []).filter(function (r) { return r.enabled !== false; });
     if (mode !== 'api' && hooks.length) parts.push(hooks.length + ' per-person webhook' + (hooks.length === 1 ? '' : 's'));
     return parts.join(' · ');
   }
@@ -2274,10 +2309,10 @@
     var error = session.rosterError
       ? '<div class="session-status__error">Call report failed: ' + esc(session.rosterError) + '</div>'
       : '';
-    var conn = sessionConnection(session);
+    var conn = sessionActionConnection(session);
     var manage = conn
       ? '<button type="button" class="link-btn" data-session-action="manage">Manage actions</button>'
-      : '<button type="button" class="link-btn" data-session-action="edit">Link an account</button>';
+      : '<button type="button" class="link-btn" data-session-action="edit">Choose action account</button>';
 
     return '<div class="session-status">' +
       '<div>' +
@@ -2293,14 +2328,14 @@
   function configureSessionPrimary(session, attendance) {
     var btn = document.getElementById('sessionDispatch');
     if (!btn) return;
-    var conn = sessionConnection(session);
+    var conn = sessionActionConnection(session);
     if (!attendance) {
       btn.textContent = 'Sync';
       btn.dataset.sessionAction = 'sync';
       return;
     }
     if (!conn) {
-      btn.textContent = 'Link an account';
+      btn.textContent = 'Choose action account';
       btn.dataset.sessionAction = 'edit';
       return;
     }
@@ -2557,6 +2592,30 @@
     return (state.connections || []).filter(function (c) { return c.id === session.connectionId; })[0] || null;
   }
 
+  function sessionActionConnection(session) {
+    var id = session.attendanceActionConnectionId || session.connectionId;
+    if (!id) return null;
+    return (state.connections || []).filter(function (c) { return c.id === id; })[0] || null;
+  }
+
+  /** The call's snapshot, or the action account's template for calls created before snapshots. */
+  function sessionActionSettings(session) {
+    if (session.attendanceActions) return session.attendanceActions;
+    var conn = sessionActionConnection(session);
+    if (!conn) return null;
+    return {
+      deliveryMode: conn.attendanceDeliveryMode || 'both',
+      tags: conn.attendanceTags,
+      customFieldId: conn.attendanceCustomFieldId,
+      workflows: conn.attendanceWorkflows || [],
+      workflowRules: conn.attendanceWorkflowRules || [],
+      aiWorkflow: conn.attendanceAiWorkflow || { enabled: false, mode: 'preview', confidenceThreshold: 0.7, maxAttendees: 25 },
+      rules: conn.attendanceRules || [],
+      roster: conn.attendanceRoster,
+      rosterTokenSet: !!conn.attendanceRosterTokenSet
+    };
+  }
+
   function workflowStatusChip(status) {
     if (status === 'applied') return '<span class="chip chip--success">Added</span>';
     if (status === 'failed') return '<span class="chip chip--danger">Failed</span>';
@@ -2578,15 +2637,16 @@
   }
 
   function workflowSectionHTML(session, attendance) {
-    var conn = sessionConnection(session);
-    var workflows = conn && conn.attendanceWorkflows ? conn.attendanceWorkflows : [];
+    var conn = sessionActionConnection(session);
+    var actions = sessionActionSettings(session);
+    var workflows = actions && actions.workflows ? actions.workflows : [];
     var h = '';
 
     if (!conn) {
-      return '<p class="muted">Link this call to a Google account to run workflows.</p>';
+      return '<p class="muted">Choose an after-call action account for this call to run workflows.</p>';
     }
     if (!workflows.length) {
-      return '<p class="muted">No workflows are connected for this account.</p>' +
+      return '<p class="muted">No workflows are connected for this call.</p>' +
         '<button class="btn btn--outline btn--sm" data-workflow-action="openAutomations">Manage actions</button>';
     }
 
@@ -2825,23 +2885,24 @@
   function openSessionWorkflowAutomations(seed, options) {
     var session = attendanceSessions.filter(function (s) { return s.id === currentSessionId; })[0];
     var open = function (s) {
-      if (!s || !s.connectionId) {
-        toast('Link this call to an account before creating a workflow rule', 'error');
+      var actionId = s && (s.attendanceActionConnectionId || s.connectionId);
+      if (!s || !actionId) {
+        toast('Choose an after-call action account before creating a workflow rule', 'error');
         return;
       }
-      var conn = (state.connections || []).filter(function (c) { return c.id === s.connectionId; })[0];
+      var conn = (state.connections || []).filter(function (c) { return c.id === actionId; })[0];
       if (conn) {
-        openAttendanceAutomations(s.connectionId, seed, options);
+        openAttendanceAutomations(actionId, seed, options, s);
         return;
       }
-      api('/api/connections/' + s.connectionId).then(function (d) {
+      api('/api/connections/' + actionId).then(function (d) {
         if (!d.connection) {
-          toast('Connection not found', 'error');
+          toast('Action account not found', 'error');
           return;
         }
         state.connections = state.connections || [];
         state.connections.push(d.connection);
-        openAttendanceAutomations(s.connectionId, seed, options);
+        openAttendanceAutomations(actionId, seed, options, s);
       }).catch(function (e) { toast(e.message, 'error'); });
     };
     if (session) {
@@ -2921,12 +2982,18 @@
 
   function populateSessionSelects() {
     var connSel = document.getElementById('sessionConnection');
+    var actionSel = document.getElementById('sessionActionConnection');
     connSel.innerHTML = '<option value="">None</option>';
+    actionSel.innerHTML = '<option value="">Same as Google account</option>';
     state.connections.forEach(function (c) {
       var o = document.createElement('option');
       o.value = c.id;
       o.textContent = c.name;
       connSel.appendChild(o);
+      var a = document.createElement('option');
+      a.value = c.id;
+      a.textContent = c.name;
+      actionSel.appendChild(a);
     });
     renderSessionZoomHosts();
     api('/api/zoom/accounts').then(function (d) {
@@ -2975,6 +3042,7 @@
       startTime: fd.get('startTime'),
       endTime: fd.get('endTime'),
       connectionId: fd.get('connectionId') || undefined,
+      attendanceActionConnectionId: fd.get('attendanceActionConnectionId') || undefined,
       zoomUserId: fd.get('zoomUserId') || undefined,
       joinUrl: fd.get('joinUrl') || undefined,
       inviteId: fd.get('inviteId') || undefined
@@ -3095,31 +3163,58 @@
     }
   }
 
-  function openAttendanceAutomations(id, seed, options) {
+  function attendanceSettingsFromConnection(c) {
+    return {
+      deliveryMode: c.attendanceDeliveryMode || 'both',
+      tags: c.attendanceTags,
+      customFieldId: c.attendanceCustomFieldId,
+      workflows: c.attendanceWorkflows || [],
+      workflowRules: c.attendanceWorkflowRules || [],
+      aiWorkflow: c.attendanceAiWorkflow || { enabled: false, mode: 'preview', confidenceThreshold: 0.7, maxAttendees: 25 },
+      rules: c.attendanceRules || [],
+      roster: c.attendanceRoster,
+      rosterTokenSet: !!c.attendanceRosterTokenSet
+    };
+  }
+
+  function openAttendanceAutomations(id, seed, options, session) {
     var c = state.connections.filter(function (x) { return x.id === id; })[0];
     if (!c) return;
     automationsId = id;
-    document.getElementById('attendanceAutomationsTitle').textContent = 'After-call actions · ' + c.name;
+    automationsSessionId = session ? session.id : null;
+    var source = session && session.attendanceActions ? session.attendanceActions : attendanceSettingsFromConnection(c);
+    document.getElementById('attendanceAutomationsTitle').textContent = session
+      ? 'After-call actions · ' + session.title
+      : 'After-call action template · ' + c.name;
+    var scope = document.getElementById('attendanceActionsScope');
+    var scopeActions = document.getElementById('attendanceActionsScopeActions');
+    if (scope) {
+      scope.textContent = session
+        ? 'This is a copy for this call only. Tags, workflows and the report webhook run through ' + c.name + '.'
+        : 'These are the defaults for new calls using ' + c.name + '. Existing calls keep their own copies.';
+    }
+    if (scopeActions) scopeActions.hidden = !session;
+    document.getElementById('attendanceAutomationsSave').textContent = session ? 'Save for this call' : 'Save actions';
     pendingWorkflowSeed = seed || null;
-    editingRules = (c.attendanceRules || []).map(function (r) { return JSON.parse(JSON.stringify(r)); });
-    editingWorkflows = (c.attendanceWorkflows || []).map(function (w) { return JSON.parse(JSON.stringify(w)); });
-    editingWorkflowRules = (c.attendanceWorkflowRules || []).map(function (r) { return JSON.parse(JSON.stringify(r)); });
+    editingRules = (source.rules || []).map(function (r) { return JSON.parse(JSON.stringify(r)); });
+    editingWorkflows = (source.workflows || []).map(function (w) { return JSON.parse(JSON.stringify(w)); });
+    editingWorkflowRules = (source.workflowRules || []).map(function (r) { return JSON.parse(JSON.stringify(r)); });
     editingAiWorkflow = Object.assign(
       { enabled: false, mode: 'preview', confidenceThreshold: 0.7, maxAttendees: 25 },
-      c.attendanceAiWorkflow || {}
+      source.aiWorkflow || {}
     );
     currentScope = 'attendance';
     currentRulesEl = document.getElementById('attendanceRulesList');
 
-    var mode = c.attendanceDeliveryMode || 'both';
+    var mode = source.deliveryMode || 'both';
     $$('#attendanceAutomationsBody input[name="attendanceDeliveryMode"]').forEach(function (r) { r.checked = r.value === mode; });
 
-    var tags = c.attendanceTags || {};
+    var tags = source.tags || {};
     document.getElementById('attTagAttended').value = tags.attended || '';
     document.getElementById('attTagPartial').value = tags.partial || '';
     document.getElementById('attTagNoShow').value = tags.noShow || '';
     document.getElementById('attTagNotInvited').value = tags.notInvited || '';
-    document.getElementById('attCustomField').value = c.attendanceCustomFieldId || '';
+    document.getElementById('attCustomField').value = source.customFieldId || '';
 
     document.getElementById('attAiEnabled').checked = !!editingAiWorkflow.enabled;
     document.getElementById('attAiMode').value = editingAiWorkflow.mode === 'auto' ? 'auto' : 'preview';
@@ -3128,12 +3223,12 @@
     refreshAiControls();
     setAttendanceAdvanced(!!(options && options.advanced));
 
-    var roster = c.attendanceRoster || {};
+    var roster = source.roster || {};
     document.getElementById('attRosterUrl').value = roster.url || '';
     document.getElementById('attRosterShape').value = roster.shape === 'session' || roster.shape === 'segments' ? roster.shape : 'flat';
     document.getElementById('attRosterToken').value = '';
     document.getElementById('attRosterClearToken').checked = false;
-    document.getElementById('attRosterTokenState').textContent = c.attendanceRosterTokenSet
+    document.getElementById('attRosterTokenState').textContent = source.rosterTokenSet
       ? 'A bearer token is stored. Leave the field blank to keep it.'
       : 'No bearer token is stored.';
 
@@ -3148,7 +3243,7 @@
       refreshAttendanceActionsSummary();
       pendingWorkflowSeed = null;
       document.getElementById('attendanceSnapshot').textContent = JSON.stringify({
-        event: 'attendance.result', sessionId: 'sess_…', provider: 'zoom', title: c.name,
+        event: 'attendance.result', sessionId: 'sess_…', provider: 'zoom', title: session ? session.title : c.name,
         segment: 'no_show', invited: false, invitedSource: 'campaign',
         email: 'person@example.com', status: 'no_show',
         segmentCounts: { invited: 142, attended: 65, partial: 33, noShow: 44, notInvited: 17, attendanceRate: 69 },
@@ -3158,7 +3253,7 @@
         timestamp: new Date().toISOString()
       }, null, 2);
       document.getElementById('attendanceRosterSnapshot').textContent = JSON.stringify({
-        event: 'attendance.call', version: 1, sessionId: 'sess_…', sessionTitle: c.name,
+        event: 'attendance.call', version: 1, sessionId: 'sess_…', sessionTitle: session ? session.title : c.name,
         provider: 'zoom', invitedSource: 'campaign',
         counts: { invited: 142, attended: 65, partial: 33, noShow: 44, notInvited: 17, attendanceRate: 69 },
         count: 159,
@@ -3315,12 +3410,43 @@
       },
       clearAttendanceRosterToken: document.getElementById('attRosterClearToken').checked
     };
-    api('/api/connections/' + automationsId, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
-      .then(function () {
+    var sessionId = automationsSessionId;
+    var endpoint = sessionId
+      ? '/api/sessions/' + sessionId + '/attendance-actions'
+      : '/api/connections/' + automationsId;
+    var method = sessionId ? 'PUT' : 'PATCH';
+    withBusy(document.getElementById('attendanceAutomationsSave'), api(endpoint, {
+      method: method,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    }))
+      .then(function (r) {
         closeModal('attendanceAutomations');
+        if (sessionId) {
+          replaceSessionRecord(r.session);
+          toast('After-call actions saved for this call', 'success');
+          return loadAttendance().then(function () {
+            if (currentSessionId === sessionId) openSession(sessionId);
+          });
+        }
         toast('After-call actions saved', 'success');
         return load().then(function () {
           if (currentSessionId && !document.getElementById('sessionDetail').hidden) openSession(currentSessionId);
+        });
+      })
+      .catch(function (err) { toast(err.message, 'error'); });
+  });
+
+  document.getElementById('attendanceLoadAccountTemplate').addEventListener('click', function () {
+    if (!automationsSessionId) return;
+    var sessionId = automationsSessionId;
+    withBusy(this, api('/api/sessions/' + sessionId + '/attendance-actions/from-account', { method: 'POST' }))
+      .then(function (r) {
+        replaceSessionRecord(r.session);
+        closeModal('attendanceAutomations');
+        toast('Copied the account template to this call', 'success');
+        return loadAttendance().then(function () {
+          if (currentSessionId === sessionId) openSession(sessionId);
         });
       })
       .catch(function (err) { toast(err.message, 'error'); });

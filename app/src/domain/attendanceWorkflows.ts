@@ -21,7 +21,8 @@ import {
   type SegmentPerson,
 } from './attendanceSegments';
 import type { AttendanceReport } from './attendance';
-import type { StoredConnection, WorkflowTarget } from './connection';
+import type { AttendanceActionSnapshot, StoredConnection, WorkflowTarget } from './connection';
+import { effectiveAttendanceActions } from './attendanceActions';
 import { buildAttendanceContext } from './attendanceContext';
 import {
   buildWorkflowAiPrompt,
@@ -62,30 +63,34 @@ interface WorkflowContext {
   report: AttendanceReport;
   segments: AttendanceSegments;
   conn: StoredConnection;
+  actions: AttendanceActionSnapshot;
 }
 
 async function loadWorkflowContext(sessionId: string): Promise<WorkflowContext> {
   const session = await getSession(sessionId);
   if (!session) throw new WorkflowRoutingError('session not found', 404);
-  if (!session.connectionId) throw new WorkflowRoutingError('this session has no connection', 400);
+  const actionConnectionId = session.attendanceActionConnectionId || session.connectionId;
+  if (!actionConnectionId) throw new WorkflowRoutingError('this session has no action account', 400);
 
-  const [report, conn] = await Promise.all([getAttendance(sessionId), getConnection(session.connectionId)]);
+  const [report, conn] = await Promise.all([getAttendance(sessionId), getConnection(actionConnectionId)]);
   if (!report) throw new WorkflowRoutingError('sync the attendance report before routing workflows', 409);
-  if (!conn) throw new WorkflowRoutingError('connection not found', 404);
+  if (!conn) throw new WorkflowRoutingError('action account not found', 404);
+  const actions = effectiveAttendanceActions(session, conn);
+  if (!actions) throw new WorkflowRoutingError('this session has no after-call actions', 400);
 
-  return { session, report, segments: buildAttendanceSegments(report), conn };
+  return { session, report, segments: buildAttendanceSegments(report), conn, actions };
 }
 
 function normalizeEmail(email: string | undefined): string {
   return (email ?? '').trim().toLowerCase();
 }
 
-function targetsOf(conn: StoredConnection): WorkflowTarget[] {
-  return conn.attendanceWorkflows ?? [];
+function targetsOf(actions: AttendanceActionSnapshot): WorkflowTarget[] {
+  return actions.workflows ?? [];
 }
 
-function targetFor(conn: StoredConnection, workflowId: string): WorkflowTarget | undefined {
-  return targetsOf(conn).find((t) => t.workflowId === workflowId);
+function targetFor(actions: AttendanceActionSnapshot, workflowId: string): WorkflowTarget | undefined {
+  return targetsOf(actions).find((t) => t.workflowId === workflowId);
 }
 
 function sessionStartIso(session: SessionRecord): string {
@@ -202,9 +207,10 @@ export async function applyWorkflowRules(
   report: AttendanceReport,
   segments: AttendanceSegments,
   conn: StoredConnection,
+  actions: AttendanceActionSnapshot,
 ): Promise<WorkflowApplyResult> {
-  const targets = targetsOf(conn);
-  const rules = conn.attendanceWorkflowRules ?? [];
+  const targets = targetsOf(actions);
+  const rules = actions.workflowRules ?? [];
   if (!targets.length || !rules.length) return summarize([]);
 
   const records: WorkflowAssignmentRecord[] = [];
@@ -220,7 +226,7 @@ export async function applyWorkflowRules(
         const rule = firstMatchingWorkflowRule(rules, ctx, person.behavior);
         if (!rule) return;
 
-        const target = targetFor(conn, rule.workflowId);
+        const target = targetFor(actions, rule.workflowId);
         if (!target) {
           records.push({
             email,
@@ -229,7 +235,7 @@ export async function applyWorkflowRules(
             source: 'rule',
             ruleId: rule.id,
             status: 'failed',
-            error: 'workflow is no longer in the connection list',
+            error: 'workflow is no longer in this call\'s action list',
             at: Date.now(),
           });
           return;
@@ -278,8 +284,8 @@ export async function applyWorkflowPreview(
   sessionId: string,
   selected: WorkflowSelection[],
 ): Promise<WorkflowApplyResult> {
-  const { session, segments, conn } = await loadWorkflowContext(sessionId);
-  if (!targetsOf(conn).length) throw new WorkflowRoutingError('no GHL workflows configured for this connection');
+  const { session, segments, conn, actions } = await loadWorkflowContext(sessionId);
+  if (!targetsOf(actions).length) throw new WorkflowRoutingError('no GHL workflows configured for this call');
 
   const people = new Map<string, SegmentPerson>();
   for (const { person } of segmentEntries(segments)) {
@@ -299,14 +305,14 @@ export async function applyWorkflowPreview(
     if (!email || seen.has(email)) continue;
     seen.add(email);
 
-    const target = targetFor(conn, sel.workflowId);
+    const target = targetFor(actions, sel.workflowId);
     if (!target) {
       records.push({
         email,
         workflowId: sel.workflowId,
         source: 'manual',
         status: 'failed',
-        error: 'workflow is not in the connection list',
+        error: 'workflow is not in this call\'s action list',
         at: Date.now(),
       });
       continue;
@@ -344,7 +350,7 @@ export async function applyWorkflowPreview(
     }
 
     const rule = proposal?.ruleId
-      ? (conn.attendanceWorkflowRules ?? []).find((r) => r.id === proposal.ruleId)
+      ? (actions.workflowRules ?? []).find((r) => r.id === proposal.ruleId)
       : undefined;
 
     records.push(
@@ -446,7 +452,7 @@ function previewHash(
   session: SessionRecord,
   report: AttendanceReport,
   segments: AttendanceSegments,
-  conn: StoredConnection,
+  actions: AttendanceActionSnapshot,
 ): string {
   const entries = segmentEntries(segments).map(({ segment, person }) => ({
     segment,
@@ -477,9 +483,9 @@ function previewHash(
           qaCount: (report.qa ?? []).length,
           absenteeCount: (report.absentees ?? []).length,
         },
-        targets: conn.attendanceWorkflows ?? [],
-        rules: conn.attendanceWorkflowRules ?? [],
-        ai: conn.attendanceAiWorkflow ?? null,
+        targets: actions.workflows ?? [],
+        rules: actions.workflowRules ?? [],
+        ai: actions.aiWorkflow ?? null,
         entries,
       }),
     )
@@ -493,10 +499,10 @@ function previewHash(
  * not spend tokens again.
  */
 export async function previewWorkflowAssignments(sessionId: string): Promise<WorkflowPreview> {
-  const { session, report, segments, conn } = await loadWorkflowContext(sessionId);
-  const targets = targetsOf(conn);
+  const { session, report, segments, actions } = await loadWorkflowContext(sessionId);
+  const targets = targetsOf(actions);
   const entries = segmentEntries(segments);
-  const hash = previewHash(session, report, segments, conn);
+  const hash = previewHash(session, report, segments, actions);
 
   const cached = session.workflowPreview;
   if (cached && cached.behaviorHash === hash && !cached.error && Date.now() - cached.generatedAt < PREVIEW_CACHE_MS) {
@@ -509,14 +515,14 @@ export async function previewWorkflowAssignments(sessionId: string): Promise<Wor
   let error: string | undefined;
 
   if (!targets.length) {
-    error = 'No GHL workflows have been added for this connection.';
+    error = 'No GHL workflows have been added for this call.';
   } else {
     for (const { segment, person } of entries) {
       const email = normalizeEmail(person.email);
       if (!email) continue;
       try {
         const ctx = buildAttendanceContext(session, person, report, segment, segments);
-        const rule = firstMatchingWorkflowRule(conn.attendanceWorkflowRules, ctx, person.behavior);
+        const rule = firstMatchingWorkflowRule(actions.workflowRules ?? [], ctx, person.behavior);
         if (!rule) continue;
         const target = targets.find((t) => t.workflowId === rule.workflowId);
         if (!target) continue;
@@ -535,7 +541,7 @@ export async function previewWorkflowAssignments(sessionId: string): Promise<Wor
       }
     }
 
-    const ai = conn.attendanceAiWorkflow;
+    const ai = actions.aiWorkflow;
     if (ai?.enabled) {
       const candidates = entries.filter(({ person }) => {
         const email = normalizeEmail(person.email);
@@ -583,15 +589,16 @@ export async function previewWorkflowAssignments(sessionId: string): Promise<Wor
 export async function autoAssignAiWorkflows(
   sessionId: string,
   conn: StoredConnection,
+  actions: AttendanceActionSnapshot,
 ): Promise<WorkflowApplyResult> {
-  const settings = conn.attendanceAiWorkflow;
-  if (!settings?.enabled || settings.mode !== 'auto' || !targetsOf(conn).length) return summarize([]);
+  const settings = actions.aiWorkflow;
+  if (!settings?.enabled || settings.mode !== 'auto' || !targetsOf(actions).length) return summarize([]);
 
   const current = await getSession(sessionId);
   if (!current) return summarize([]);
   const report = await getAttendance(sessionId);
   if (!report) return summarize([]);
-  const hash = previewHash(current, report, buildAttendanceSegments(report), conn);
+  const hash = previewHash(current, report, buildAttendanceSegments(report), actions);
   if (current.workflowAiHash === hash) return summarize([]);
 
   const preview = await previewWorkflowAssignments(sessionId);
@@ -631,12 +638,12 @@ export async function assignWorkflowToPerson(
   workflowId: string,
   force = false,
 ): Promise<WorkflowAssignmentRecord> {
-  const { session, segments, conn } = await loadWorkflowContext(sessionId);
+  const { session, segments, conn, actions } = await loadWorkflowContext(sessionId);
   const email = normalizeEmail(emailRaw);
   if (!email) throw new WorkflowRoutingError('an email is required to add a contact to a workflow');
 
-  const target = targetFor(conn, workflowId);
-  if (!target) throw new WorkflowRoutingError('workflow is not in the connection list', 404);
+  const target = targetFor(actions, workflowId);
+  if (!target) throw new WorkflowRoutingError('workflow is not in this call\'s action list', 404);
 
   const person = segmentEntries(segments).find((e) => normalizeEmail(e.person.email) === email)?.person;
   if (!person) throw new WorkflowRoutingError('person is not in this session', 404);

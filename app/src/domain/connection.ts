@@ -119,6 +119,27 @@ export interface AttendanceAiWorkflowSettings {
   maxAttendees: number;
 }
 
+/**
+ * The after-call action set copied onto one call.
+ *
+ * This is a snapshot, not a pointer: editing it affects only that call. The selected action
+ * connection still supplies the GHL credentials/location used to execute it.
+ */
+export interface AttendanceActionSnapshot {
+  deliveryMode: DeliveryMode;
+  tags?: AttendanceTags;
+  customFieldId?: string;
+  workflows: WorkflowTarget[];
+  workflowRules: AttendanceWorkflowRule[];
+  aiWorkflow: AttendanceAiWorkflowSettings;
+  rules: AutomationRule[];
+  roster?: AttendanceRosterSettings;
+  /** Encrypted call-report bearer token; never returned by the API. */
+  rosterTokenSealed?: string;
+  copiedFromConnectionId?: string;
+  updatedAt: number;
+}
+
 export interface Connection {
   id: string;
   name: string;

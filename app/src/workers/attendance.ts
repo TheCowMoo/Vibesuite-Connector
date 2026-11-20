@@ -34,7 +34,12 @@ import {
   type RosterDeliveryResult,
   type RosterPayload,
 } from '../domain/attendanceRoster';
-import type { AttendanceRosterSettings, StoredConnection } from '../domain/connection';
+import type {
+  AttendanceActionSnapshot,
+  AttendanceRosterSettings,
+  StoredConnection,
+} from '../domain/connection';
+import { effectiveAttendanceActions, rosterTokenForActions } from '../domain/attendanceActions';
 import axios from 'axios';
 
 function buildPayload(
@@ -313,12 +318,14 @@ export async function dispatchSession(
   if (!report) throw new Error('no attendance report yet — run sync first');
 
   const segments = buildAttendanceSegments(report);
-  const conn = session.connectionId ? await getConnection(session.connectionId) : null;
+  const actionConnectionId = session.attendanceActionConnectionId || session.connectionId;
+  const conn = actionConnectionId ? await getConnection(actionConnectionId) : null;
+  const actions = conn ? effectiveAttendanceActions(session, conn) : null;
   let dispatched = 0;
   let failed = 0;
 
   if (opts.rosterOnly) {
-    const roster = await deliverRoster(session, report, segments, conn, opts.forceRoster === true);
+    const roster = await deliverRoster(session, report, segments, conn, actions, opts.forceRoster === true);
     return {
       dispatched: 0,
       failed: 0,
@@ -328,8 +335,8 @@ export async function dispatchSession(
     };
   }
 
-  if (conn) {
-    const mode = conn.attendanceDeliveryMode ?? 'both';
+  if (conn && actions) {
+    const mode = actions.deliveryMode;
 
     await forEachLimit(
       segmentEntries(segments),
@@ -355,17 +362,17 @@ export async function dispatchSession(
                 if (email) {
                   const contact = await lookupContactByEmail(conn, email);
                   if (contact?.id) {
-                    const tag = segmentTag(segment, conn.attendanceTags, {
+                    const tag = segmentTag(segment, actions.tags, {
                       attended: env.GHL_TAG_ATTENDED,
                       noShow: env.GHL_TAG_NO_SHOW,
                       notInvited: env.GHL_TAG_NOT_INVITED,
                     });
                     await addTags(conn, contact.id, [tag], `${sessionId}:${fingerprint}:tag`);
-                    if (conn.attendanceCustomFieldId) {
+                    if (actions.customFieldId) {
                       await updateCustomField(
                         conn,
                         contact.id,
-                        conn.attendanceCustomFieldId,
+                        actions.customFieldId,
                         segment,
                         `${sessionId}:${fingerprint}:segment`,
                       );
@@ -375,7 +382,7 @@ export async function dispatchSession(
               }
 
               if (mode === 'webhook' || mode === 'both') {
-                const rules = matchingRules(conn.attendanceRules, ctx);
+                const rules = matchingRules(actions.rules, ctx);
                 for (const rule of rules) {
                   try {
                     await postWebhook(rule.webhookUrl, buildPayload(session, person, report, segment, segments));
@@ -399,14 +406,14 @@ export async function dispatchSession(
       },
     );
   } else {
-    logger.info({ sessionId }, 'no connection linked; skipping GHL contact actions');
+    logger.info({ sessionId }, 'no action account linked; skipping GHL contact actions');
   }
 
   let workflows = { applied: 0, skipped: 0, failed: 0 };
   let workflowError: string | undefined;
-  if (conn) {
+  if (conn && actions) {
     try {
-      const ruleResult = await applyWorkflowRules(session, report, segments, conn);
+      const ruleResult = await applyWorkflowRules(session, report, segments, conn, actions);
       workflows.applied += ruleResult.applied;
       workflows.skipped += ruleResult.skipped;
       workflows.failed += ruleResult.failed;
@@ -416,7 +423,7 @@ export async function dispatchSession(
     }
 
     try {
-      const aiResult = await autoAssignAiWorkflows(sessionId, conn);
+      const aiResult = await autoAssignAiWorkflows(sessionId, conn, actions);
       workflows.applied += aiResult.applied;
       workflows.skipped += aiResult.skipped;
       workflows.failed += aiResult.failed;
@@ -426,7 +433,7 @@ export async function dispatchSession(
     }
   }
 
-  const roster = await deliverRoster(session, report, segments, conn, opts.forceRoster === true);
+  const roster = await deliverRoster(session, report, segments, conn, actions, opts.forceRoster === true);
   const latest = await getSession(sessionId);
   if (latest) {
     latest.lastDispatchedAt = Date.now();
@@ -487,10 +494,11 @@ async function deliverRoster(
   report: AttendanceReport,
   segments: AttendanceSegments,
   conn: StoredConnection | null,
+  actions: AttendanceActionSnapshot | null,
   force: boolean,
 ): Promise<RosterDeliveryResult> {
-  const settings = conn?.attendanceRoster;
-  if (!conn) return { sent: 0, skipped: true, reason: 'no_connection' };
+  const settings = actions?.roster;
+  if (!conn || !actions) return { sent: 0, skipped: true, reason: 'no_connection' };
   if (!settings?.url) return { sent: 0, skipped: true, reason: 'not_configured' };
 
   const payloads = buildRosterPayloads(
@@ -514,8 +522,11 @@ async function deliverRoster(
 
   let sent = 0;
   try {
+    // A call snapshot owns its token too: do not silently pick up the account's token if the
+    // snapshot intentionally has none. Older calls without a snapshot keep the account fallback.
+    const token = rosterTokenForActions(actions, session.attendanceActions ? null : conn);
     for (const payload of payloads) {
-      await postRosterPayload(settings, conn.attendanceRosterToken, payload);
+      await postRosterPayload(settings, token, payload);
       sent += 1;
     }
     session.rosterRevision = revision;

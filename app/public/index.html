@@ -231,7 +231,7 @@
       </div>
       <div class="page-head__actions">
         <div class="menu-wrap">
-          <button class="btn btn--outline" id="attendanceActionsBtn">After-call actions &#9662;</button>
+          <button class="btn btn--outline" id="attendanceActionsBtn">Action templates &#9662;</button>
           <div class="menu" id="attendanceActionsMenu"></div>
         </div>
         <button class="btn btn--primary" id="newSessionBtn">+ Add call</button>
@@ -699,7 +699,11 @@
     </label>
     <label class="field"><span class="field__label">Google account</span>
       <select id="editSessionConnection"><option value="">None</option></select>
-      <span class="field__hint">Attendance delivery uses this account's GHL connection and webhook settings.</span>
+      <span class="field__hint">Owns the call and syncs Zoom attendance.</span>
+    </label>
+    <label class="field"><span class="field__label">After-call action account</span>
+      <select id="editSessionActionConnection"><option value="">Same as Google account</option></select>
+      <span class="field__hint">All attendees are tagged and added to workflows in this account's GHL location. Changing it reloads this account's action template.</span>
     </label>
     <label class="field" id="editSessionHostWrap" hidden><span class="field__label">Zoom host</span>
       <select id="editSessionHost"><option value="">Automatic</option></select>
@@ -742,6 +746,10 @@
         <label class="field"><span class="field__label">End</span><input type="datetime-local" name="endTime" id="sessionEnd" /><span class="field__hint" data-hint-for="sessionEnd"></span></label>
       </div>
       <label class="field"><span class="field__label">Google account</span><select name="connectionId" id="sessionConnection"></select></label>
+      <label class="field"><span class="field__label">After-call action account</span>
+        <select name="attendanceActionConnectionId" id="sessionActionConnection"></select>
+        <span class="field__hint">Supplies the GHL location for every attendee on this call. Defaults to the Google account.</span>
+      </label>
       <label class="field" id="sessionZoomHostWrap" hidden><span class="field__label">Zoom host</span><select name="zoomUserId" id="sessionZoomHost"><option value="">Automatic</option></select></label>
       <label class="field"><span class="field__label">Link to an invitation (optional)</span><select name="inviteId" id="sessionInvite"><option value="">None</option></select></label>
     </form>
@@ -761,6 +769,10 @@
       <button class="icon-btn" data-close="attendanceAutomations" aria-label="Close">&times;</button>
     </div>
     <div id="attendanceAutomationsBody">
+      <p class="hint" id="attendanceActionsScope"></p>
+      <div class="conn__actions" id="attendanceActionsScopeActions" hidden>
+        <button type="button" class="btn btn--outline btn--sm" id="attendanceLoadAccountTemplate">Copy current account template</button>
+      </div>
       <p class="hint" id="attendanceActionsSummary">Tags on · no workflows · no call report webhook.</p>
 
       <h3 class="detail__sub">1. Label results in GHL</h3>
@@ -774,7 +786,7 @@
       <label class="field"><span class="field__label">Copy the result to a GHL field (optional)</span><input id="attCustomField" placeholder="GHL custom field id" /></label>
 
       <h3 class="detail__sub">2. Add people to workflows</h3>
-      <p class="hint">Add the workflows this account may use, then write rules that choose one. First enabled match wins.</p>
+      <p class="hint">Add the workflows this action set may use, then write rules that choose one. First enabled match wins.</p>
       <div id="attendanceWorkflowsList"></div>
       <button class="btn btn--ghost btn--sm" id="attendanceAddWorkflowBtn">+ Connect workflow</button>
 

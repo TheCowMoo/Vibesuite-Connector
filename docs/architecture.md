@@ -77,7 +77,7 @@ calendar id, location id, and optional webhook URLs. All runtime keys are namesp
 | `conn:{id}:calendarEmail` | real address behind a `primary`/resource calendar (24-hour TTL; `-` means Google had none) |
 | `advisor:analysis` | latest Advisor analysis (snapshot + label→id targets + recommendations) |
 | `advisor:applyLog` | append-only audit of every Apply, newest first (200 max) |
-| `session:{id}` | session record, including workflow assignments and the last preview |
+| `session:{id}` | session record, including its after-call action snapshot, workflow assignments and the last preview |
 | `session:{id}:attendance` | normalized report: per-person behavior, poll summary, raw Q&A/registration rows |
 | `session:{id}:dispatch:seen:{fp}` | per-person attendance delivery guard (5-min TTL) |
 | `session:{id}:workflow:{email}` | the GHL workflow already applied to this person in this call (30-day TTL) |
@@ -509,30 +509,36 @@ The invited list is resolved by `resolveInvitedEmails()` in this order:
 3. a list attached to the session (`session.listId`, set through `PATCH /api/sessions/:id`);
 4. none — then every joiner is `not_invited`, and no no-shows are invented.
 
-`dispatchSession()` delivers two ways:
+`dispatchSession()` resolves the **action account** as
+`session.attendanceActionConnectionId ?? session.connectionId`. The call account still owns Zoom/Google
+sync; the action account supplies the GHL location and credentials. The live action set is
+`session.attendanceActions` when present. Older calls without a snapshot fall back to the action account's
+current template, preserving pre-upgrade behaviour.
 
-- **Per person** — a GHL tag from the per-connection `attendanceTags` (a blank partial falls back to the
-  attended tag, so existing workflows do not change; env `GHL_TAG_ATTENDED` / `GHL_TAG_NO_SHOW` /
-  `GHL_TAG_NOT_INVITED` are the defaults), an optional `attendanceCustomFieldId`, and `attendanceRules`
-  webhooks whose context now exposes `segment`, `invited`, `invitedSource`, `attendedFullCount`,
+`dispatchSession()` then delivers two ways:
+
+- **Per person** — a GHL tag from the call snapshot's `tags` (a blank partial falls back to the attended
+  tag, so existing workflows do not change; env `GHL_TAG_ATTENDED` / `GHL_TAG_NO_SHOW` /
+  `GHL_TAG_NOT_INVITED` are the defaults), the snapshot's optional `customFieldId`, and its `rules`
+  webhooks whose context exposes `segment`, `invited`, `invitedSource`, `attendedFullCount`,
   `partialCount` and `notInvitedCount`. The payload gains `event`, `segment`, `invited`, `invitedSource`,
   `minutes` and `segmentCounts`. Contacts are updated with a bounded fan-out
   (`ATTENDANCE_DISPATCH_CONCURRENCY`, default 5) and three attempts with linear backoff. The payload also
   carries `pollAnswers`, `qa`, `registrationAnswers`, `behavior`, `pollQuestionCount`,
-  `pollRespondentCount` and `pollAnswerCount`; `pollCount` now means distinct poll questions, not the
-  number of respondent rows (which was the old accidental meaning).
+  `pollRespondentCount` and `pollAnswerCount`; `pollCount` means distinct poll questions, not the number
+  of respondent rows.
 - **Call report** — `buildRosterPayloads()` (`domain/attendanceRoster.ts`) supports three shapes. `flat`
-  (the default for new connections) emits one POST per call (`attendance.call`) with `count` and a
-  `people` array in stable order (attended → brief → no-show → walk-in), each entry carrying `result`;
-  `segments` emits one POST per non-empty segment (`attendance.segment`); `session` emits one grouped
-  snapshot (`attendance.session`). All shapes carry `counts`, `generatedAt` and a `revision` that hashes
-  the content without the timestamp; an empty report sends nothing and is reported as
-  `reason: 'empty'`. `deliverRoster()` skips an unchanged revision, retries transient failures, stores
-  `rosterRevision` / `rosterSentAt` / `rosterError` on the session, and supports a bearer token plus
-  `X-Vibesuite-Event` / `X-Vibesuite-Revision` headers. A stored shape is never changed behind the
-  operator's back: a PATCH that omits `shape` keeps the stored one (`normalizeRosterShape()`). The token
-  is stored with the encrypted connection secrets and never returned by the API;
-  `attendanceRosterTokenSet` tells the UI whether one exists.
+  (the default for new calls) emits one POST per call (`attendance.call`) with `count` and a `people`
+  array in stable order (attended → brief → no-show → walk-in), each entry carrying `result`; `segments`
+  emits one POST per non-empty segment (`attendance.segment`); `session` emits one grouped snapshot
+  (`attendance.session`). All shapes carry `counts`, `generatedAt` and a `revision` that hashes the
+  content without the timestamp; an empty report sends nothing and is reported as `reason: 'empty'`.
+  `deliverRoster()` skips an unchanged revision, retries transient failures, stores `rosterRevision` /
+  `rosterSentAt` / `rosterError` on the session, and supports a bearer token plus `X-Vibesuite-Event` /
+  `X-Vibesuite-Revision` headers. The call's URL/format/token live in its snapshot; older calls use the
+  action account's token. A stored shape is never changed behind the operator's back: a PATCH that omits
+  `shape` keeps the stored one (`normalizeRosterShape()`). The sealed token is never returned by the API;
+  `rosterTokenSet` tells the UI whether one exists.
 - **Dedupe** — matched outcomes keep the pre-segment dispatch key, so deploying this does not replay every
   past attendee; walk-ins get their own key. Per-person failures release their claim and are counted, not
   fatal.
@@ -542,9 +548,15 @@ The invited list is resolved by `resolveInvitedEmails()` in this order:
 
 ### Routing attendance into GHL workflows
 
-A second, independent channel can put the contact into a GoHighLevel workflow. It is configured per
-connection in **After-call actions**, alongside (not instead of) tags, per-person webhooks and the call
-report.
+A second, independent channel can put the contact into a GoHighLevel workflow. It is configured in the
+same per-call action snapshot, alongside (not instead of) tags, per-person webhooks and the call report.
+Account-level After-call actions are templates used to seed a new call; once copied, the call owns its
+workflow targets, rules and AI settings.
+
+Workflow preview, manual assignment and “Make this a rule” all load the action account and the call
+snapshot, so what the operator reviews is exactly what `Send results` executes. Every attendee in the call
+is evaluated, irrespective of which Google sender invited them; all GHL contact lookups, tags, custom
+fields and workflow additions use the action account's location.
 
 **Normalisation.** `zoom.ts` already fetched the poll and Q&A report rows; `buildZoomBehavior()`
 (`domain/zoomBehavior.ts`, pure) joins them to the attendee list and produces one `ZoomBehavior` per
@@ -564,9 +576,9 @@ matching answer, and false when the question never ran (so a skipped poll cannot
 generic conditions (`domain/condition.ts`) **and** poll conditions all match wins. An empty rule is a
 catch-all. Poll operators are `answered`, `not_answered`, `equals`, `not_equals`, `contains` and
 `not_contains`, and are evaluated by `domain/workflowRules.ts` with no I/O. A rule points at a
-`WorkflowTarget` (local `id`, GHL `workflowId`, display name, optional AI criteria) on the same
-connection, so a typo cannot send contacts to an arbitrary workflow. `eventStartTime` is either `now` or
-the call's start.
+`WorkflowTarget` (local `id`, GHL `workflowId`, display name, optional AI criteria) in the call's action
+snapshot, so a typo cannot send contacts to an arbitrary workflow. `eventStartTime` is either `now` or the
+call's start.
 
 **GHL call.** `addContactToWorkflow()` (`ghl/contacts.ts`) uses
 `POST /contacts/{contactId}/workflow/{workflowId}` with `Version: v3` (confirmed in the HighLevel

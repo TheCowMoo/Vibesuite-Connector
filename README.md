@@ -189,7 +189,7 @@ Key counters: `webhook_received_total`, `webhook_rejected_total`, `jobs_enqueued
 | POST | `/api/connections` | create connection (`pending_google`) |
 | GET | `/api/connections/:id` | get one connection |
 | POST | `/api/connections/:id/bootstrap` | full sync + create watch channel |
-| PATCH | `/api/connections/:id` | update delivery, attendance, workflow and roster settings |
+| PATCH | `/api/connections/:id` | update delivery, attendance, workflow and roster **templates** |
 | DELETE | `/api/connections/:id` | delete connection |
 | GET | `/oauth/google/start?connectionId=` | redirect to Google OAuth |
 | GET | `/oauth/google/callback` | complete Google OAuth |
@@ -206,12 +206,19 @@ Key counters: `webhook_received_total`, `webhook_rejected_total`, `jobs_enqueued
 | GET | `/api/campaigns/:id/crm` | per-person campaign CRM (filters + pagination) |
 | GET | `/api/campaigns/:id/crm/export` | all filtered campaign people as CSV |
 | PATCH | `/api/campaigns/:id/crm/notes` | save a campaign-scoped note/follow-up |
-| POST | `/api/sessions/:id/workflows/preview` | workflow matches (no GHL writes) |
+| PUT | `/api/sessions/:id/attendance-actions` | save this call's own after-call action copy |
+| POST | `/api/sessions/:id/attendance-actions/from-account` | reset the call copy to its action account template |
+| POST | `/api/sessions/:id/workflows/preview` | workflow matches from the call copy (no GHL writes) |
 | POST | `/api/sessions/:id/workflows/apply` | add selected matches to workflows |
 | POST | `/api/sessions/:id/workflows/assign` | manually add one contact to a workflow |
 
 ## Notes & caveats
 
+- **After-call actions are per call.** Creating a call copies its selected action account's template;
+  editing the call changes only that call. Every attendee is evaluated against the call copy, regardless
+  of which Google account invited them, and all GHL contact/workflow actions run in the action account's
+  location. Account settings are templates for new calls; existing calls keep their copies. Calls created
+  before this feature use the account settings until their actions are saved once.
 - **Copy Coach is human-in-the-loop.** AI suggestions are previews only; the operator must edit and press
   **Save copy**. It sends the current campaign copy, aggregate variant stats, list criteria and retrieved
   knowledge notes to the configured AI provider — never recipient emails, names or individual replies.

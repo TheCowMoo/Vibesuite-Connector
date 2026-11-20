@@ -128,11 +128,11 @@ Deleting a list leaves campaigns that reference it unable to start — they lose
 ### Calls
 
 **Calls → + Add call** creates the event record: title, optional join link (Zoom is looked up if you leave
-it blank), start/end, the Google account it belongs to, an optional Zoom host, and an optional link back to
-an invitation.
+it blank), start/end, the Google account it belongs to, the after-call action account, an optional Zoom
+host, and an optional link back to an invitation.
 
 Attendance syncs on its own after the call, and **Sync** forces a refresh. **View results** shows who
-joined and who did not. **Send results** runs the account's after-call actions and sends the results to
+joined and who did not. **Send results** runs the call's own after-call actions and sends the results to
 GHL. The call opens in four tabs: **People**, **Polls & Q&A**, **Registration** and **Workflows**.
 
 A call linked to a campaign inherits that campaign's **frozen recipients** as its invited list, so
@@ -151,8 +151,28 @@ first answer is a 404.
 
 ### After-call actions
 
-Open **Calls → After-call actions** or **Google accounts → ⋯ → After-call actions**. The settings apply to
-every call on that account.
+Open **Calls → Action templates** or **Google accounts → ⋯ → After-call action templates**. Those
+settings are a **template**: they are copied into a new call, but they are not the live action set for
+calls that already exist.
+
+Every call has its own editable copy. When you add a call, choose:
+
+- **Google account** — owns the call and syncs Zoom attendance.
+- **After-call action account** — supplies the GHL location and credentials for everything below.
+  Defaults to the Google account.
+
+Every attendee in the call is evaluated against the call's copy, regardless of which Google account
+invited them. That includes people invited by another sender in a multi-account campaign, no-shows and
+walk-ins. The action account must contain those people as GHL contacts; otherwise there is no contact to
+tag or add to a workflow.
+
+Open **View results → After-call actions → Manage actions** to edit the copy for that call. Changes
+there do **not** affect the account template or any other call. A call created before this feature keeps
+using its account settings until you open and save its actions; saving creates the copy.
+
+Changing a call's action account reloads that account's current template into the call after a
+confirmation, because workflow IDs, tags and custom fields belong to that GHL location. **Copy current
+account template** resets a call copy to the account template without touching the template itself.
 
 Each person gets one result:
 
@@ -168,23 +188,23 @@ The dialog has three parts:
 1. **Label results in GHL** — one tag per result, plus an optional GHL custom field that receives
    `Attended`, `Brief visit`, `No-show` or `Walk-in`. A blank Brief visit tag falls back to the Attended
    tag, so existing workflows do not change.
-2. **Add people to workflows** — the workflows this account may use, and the rules that choose one.
+2. **Add people to workflows** — the workflows this action set may use, and the rules that choose one.
    AI matching is optional and lives here too.
 3. **Send the call report to a webhook** — one POST per call with everyone in the report in one flat
    list. Each person carries `result` (`attended`, `partial`, `no_show` or `not_invited`). Leave the
-   URL blank to turn it off.
+   URL blank to turn it off. The URL, format and bearer token belong to the call copy.
 
 **Advanced** holds how tags are sent (API, webhooks or both), per-person webhooks, and developer
 examples. These are still fully editable; they are collapsed because most accounts do not use them.
 
-**Send results** runs everything configured: tags, per-person webhooks, workflow rules, AI matching and
-the call report. It runs automatically after a successful sync too. **More → Send call report** sends
-only the call report, even when its content is unchanged.
+**Send results** runs that call's copy: tags, per-person webhooks, workflow rules, AI matching and the
+call report. It runs automatically after a successful sync too. **More → Send call report** sends only
+the call report, even when its content is unchanged.
 
 The call report defaults to **One flat list of everyone**. Two older formats remain available for
 consumers that already expect them: **One request per result group** (`attendance.segment`) and **One
-request, grouped by result** (`attendance.session`). A connection keeps whichever format it already has
-until you change it.
+request, grouped by result** (`attendance.session`). A call copy keeps whichever format it already has
+until you change it; a new call starts from its action account's template.
 
 The invited list is cross-referenced automatically: a campaign-linked call uses the campaign's sent
 recipients, a one-off invitation uses the attendee list of the calendar event it created, and a standalone
@@ -193,8 +213,9 @@ no-shows are invented.
 
 ### Routing attendees into workflows
 
-In **After-call actions → Add people to workflows**, connect each GHL workflow this account may use: give
-it a name for this panel and paste the workflow ID (the part after `/workflow/` in the GHL workflow URL).
+In **After-call actions → Add people to workflows**, connect each GHL workflow this action set may use:
+give it a name for this panel and paste the workflow ID (the part after `/workflow/` in the GHL workflow
+URL).
 The name is only for you; the ID is what GHL receives.
 
 Then add **workflow rules**. Rules are checked from top to bottom and the first enabled match wins, so put

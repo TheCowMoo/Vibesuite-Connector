@@ -2,6 +2,11 @@ import { randomUUID } from 'node:crypto';
 import { redis } from '../queue/connection';
 import { REDIS_KEYS } from '../config/constants';
 import type { SessionType, SyncDiagnostics, VideoProvider } from '../video/types';
+import type { AttendanceActionSnapshot } from './connection';
+import {
+  publicAttendanceActions,
+  type PublicAttendanceActionSnapshot,
+} from './attendanceActions';
 
 export type SessionStatus = 'pending' | 'synced' | 'failed';
 
@@ -44,6 +49,10 @@ export interface WorkflowPreview {
   error?: string;
 }
 
+export type PublicSessionRecord = Omit<SessionRecord, 'attendanceActions'> & {
+  attendanceActions?: PublicAttendanceActionSnapshot;
+};
+
 export interface SessionRecord {
   id: string;
   provider: VideoProvider;
@@ -52,6 +61,10 @@ export interface SessionRecord {
   joinUrl?: string;
   title: string;
   connectionId?: string;
+  /** GHL connection whose location/credentials run this call's after-call actions. */
+  attendanceActionConnectionId?: string;
+  /** The call's own editable copy of the after-call actions. */
+  attendanceActions?: AttendanceActionSnapshot;
   /** Which authorised Zoom host owns this session (user-managed Zoom auth). */
   zoomUserId?: string;
   inviteId?: string;
@@ -105,6 +118,15 @@ export async function getSession(id: string): Promise<SessionRecord | null> {
 
 export async function saveSession(rec: SessionRecord): Promise<void> {
   await redis.set(REDIS_KEYS.session(rec.id), JSON.stringify(rec));
+}
+
+/** Browser-safe session: the encrypted call-report token never leaves the server. */
+export function publicSession(session: SessionRecord): PublicSessionRecord {
+  const { attendanceActions, ...rest } = session;
+  return {
+    ...rest,
+    ...(attendanceActions ? { attendanceActions: publicAttendanceActions(attendanceActions) } : {}),
+  };
 }
 
 export async function listSessions(): Promise<SessionRecord[]> {
